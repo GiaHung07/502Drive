@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     path::{Path, PathBuf},
+    time::{Duration, SystemTime},
 };
 
 use rusqlite::params;
@@ -114,6 +115,32 @@ pub fn write_csv(path: &Path, items: &[ReportItem]) -> anyhow::Result<()> {
     }
     writer.flush()?;
     Ok(())
+}
+
+pub fn cleanup_old_reports(report_dir: &Path, retention_days: u64) -> anyhow::Result<usize> {
+    if retention_days == 0 || !report_dir.exists() {
+        return Ok(0);
+    }
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(retention_days.saturating_mul(86_400)))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let mut removed = 0;
+    for entry in std::fs::read_dir(report_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !matches!(ext, "json" | "csv") {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        if metadata.modified().unwrap_or(SystemTime::now()) < cutoff {
+            std::fs::remove_file(path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 fn join_error(code: Option<String>, message: Option<String>) -> Option<String> {

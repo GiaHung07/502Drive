@@ -126,3 +126,19 @@ async fn job_report_contains_items_and_folder_mappings() {
             .contains("bad.bin")
     );
 }
+
+#[test]
+fn cleanup_old_reports_retention_zero_deletes_nothing() {
+    let dir = std::env::temp_dir().join(format!("gdclone-cleanup-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let json = dir.join("report.json");
+    let csv = dir.join("report.csv");
+    std::fs::write(&json, "{}").unwrap();
+    std::fs::write(&csv, "a,b\n").unwrap();
+
+    assert_eq!(report::cleanup_old_reports(&dir, 0).unwrap(), 0);
+    assert!(json.exists());
+    assert!(csv.exists());
+
+    let _ = std::fs::remove_dir_all(dir);
+}

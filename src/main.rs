@@ -6,7 +6,7 @@ use gdclone_bot::{
     cli,
     config::AppConfig,
     engine::recovery,
-    platform,
+    platform, report,
     state::db::Database,
     telegram,
     watch::{NotifyReceiver, spawn_all_pollers},
@@ -77,6 +77,14 @@ async fn run_bot(config: AppConfig) -> anyhow::Result<()> {
     config.validate_for_run()?;
     let db = open_db(&config).await?;
     db.ensure_owner(config.telegram.owner_telegram_id).await?;
+    match report::cleanup_old_reports(
+        &config.storage.report_dir,
+        config.security.report_retention_days,
+    ) {
+        Ok(removed) if removed > 0 => tracing::info!(removed, "old reports cleaned up"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err, "report cleanup failed"),
+    }
     recovery::recover_on_startup(&db).await?;
     let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
     // Recover any watches that were stuck in 'initializing' at the time of the last crash.
