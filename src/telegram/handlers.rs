@@ -14,8 +14,11 @@ use tracing::warn;
 use crate::{
     config::AppConfig,
     drive::{
-        auth as oauth, client::DriveClient, links::parse_drive_reference,
-        token_manager::TokenManager, types::FOLDER_MIME_TYPE,
+        auth as oauth,
+        client::{DriveApiError, DriveClient},
+        links::parse_drive_reference,
+        token_manager::TokenManager,
+        types::FOLDER_MIME_TYPE,
     },
     engine::{
         copy::{CloneOutcome, CloneRequest, CloneService},
@@ -289,8 +292,11 @@ async fn handle_command(
         }
         Command::SetDestination(input) => {
             let text = set_destination(&config, &db, &input).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                text.unwrap_or_else(|err| format_error_for_user(&err)),
+            )
+            .await?;
         }
         Command::Jobs => {
             let text = list_jobs(&db, user_id).await;
@@ -688,7 +694,7 @@ async fn spawn_clone_now(
                     &bot,
                     chat_id,
                     Some(progress_message_id),
-                    format!("Lỗi: {err}"),
+                    format!("Lỗi clone:\n{}", format_error_for_user(&err)),
                 )
                 .await
                 {
@@ -755,8 +761,12 @@ async fn handle_clone_request(
             }
         }
         Err(err) => {
-            bot.edit_message_text(chat_id, loading.id, format!("Lỗi kiểm tra nguồn: {err}"))
-                .await?;
+            bot.edit_message_text(
+                chat_id,
+                loading.id,
+                format!("Lỗi kiểm tra nguồn:\n{}", format_error_for_user(&err)),
+            )
+            .await?;
         }
     }
     Ok(())
@@ -1342,6 +1352,54 @@ fn capability_text(value: Option<bool>) -> &'static str {
     }
 }
 
+fn format_error_for_user(err: &anyhow::Error) -> String {
+    if let Some(drive) = err.downcast_ref::<DriveApiError>() {
+        return format_drive_error(drive);
+    }
+    err.to_string()
+}
+
+fn format_drive_error(err: &DriveApiError) -> String {
+    match err {
+        DriveApiError::Api {
+            status,
+            reason,
+            message,
+        } => {
+            let friendly = match (status.as_u16(), reason.as_deref()) {
+                (401, _) => "Phiên Google hết hạn. Chạy `gdclone-bot auth login` trên máy bot.",
+                (403, Some("insufficientPermissions")) => {
+                    "Tài khoản Google hiện tại không đủ quyền với file/folder này."
+                }
+                (403, Some("copyRequiresWriterPermission")) => {
+                    "Nguồn yêu cầu quyền ghi mới được copy."
+                }
+                (403, Some("storageQuotaExceeded" | "teamDriveFileLimitExceeded")) => {
+                    "Google Drive báo hết quota hoặc chạm giới hạn lưu trữ."
+                }
+                (403, Some("userRateLimitExceeded" | "rateLimitExceeded")) | (429, _) => {
+                    "Google đang giới hạn tốc độ. Bot sẽ retry nếu lỗi xảy ra trong job."
+                }
+                (404, _) => {
+                    "Không tìm thấy file/folder, không có quyền truy cập, hoặc link thiếu resource key."
+                }
+                (400, _) => "Request Drive không hợp lệ. Kiểm tra lại link nguồn/đích.",
+                (500..=599, _) => "Google Drive đang lỗi tạm thời. Thử lại sau ít phút.",
+                _ => "Google Drive trả về lỗi.",
+            };
+            format!(
+                "{friendly}\n• HTTP: {}\n• Reason: {}\n• Chi tiết: {}",
+                status.as_u16(),
+                reason.as_deref().unwrap_or("không rõ"),
+                message
+            )
+        }
+        DriveApiError::Transport(err) => {
+            format!("Không gọi được Google Drive API.\n• Chi tiết: {err}")
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct ClonePlan {
     folders: u64,
@@ -1473,6 +1531,7 @@ fn human_bytes(bytes: i64) -> String {
 mod tests {
     use super::*;
     use crate::drive::types::DriveFile;
+    use reqwest::StatusCode;
 
     fn file(id: &str, mime_type: &str, size: Option<&str>) -> DriveFile {
         DriveFile {
@@ -1511,6 +1570,26 @@ mod tests {
         assert_eq!(plan.google_native, 1);
         assert_eq!(plan.shortcuts, 1);
         assert_eq!(plan.known_bytes, 2048);
+    }
+
+    #[test]
+    fn drive_errors_are_translated_for_telegram() {
+        let permission = DriveApiError::Api {
+            status: StatusCode::FORBIDDEN,
+            reason: Some("insufficientPermissions".to_string()),
+            message: "The user does not have sufficient permissions".to_string(),
+        };
+        let text = format_drive_error(&permission);
+        assert!(text.contains("không đủ quyền"));
+        assert!(text.contains("HTTP: 403"));
+
+        let not_found = DriveApiError::Api {
+            status: StatusCode::NOT_FOUND,
+            reason: Some("notFound".to_string()),
+            message: "File not found".to_string(),
+        };
+        let text = format_drive_error(&not_found);
+        assert!(text.contains("resource key"));
     }
 }
 
