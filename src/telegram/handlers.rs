@@ -1,0 +1,1174 @@
+use std::time::Duration;
+
+use teloxide::{
+    prelude::*,
+    types::{InputFile, MessageId},
+    utils::command::BotCommands,
+};
+use tokio::sync::oneshot;
+use tracing::warn;
+
+use crate::{
+    config::AppConfig,
+    drive::{
+        auth as oauth, client::DriveClient, links::parse_drive_reference,
+        token_manager::TokenManager, types::FOLDER_MIME_TYPE,
+    },
+    engine::{
+        copy::{CloneOutcome, CloneRequest, CloneService},
+        recovery,
+    },
+    secrets::FileSecretStore,
+    state::{db::Database, repo},
+    telegram::{commands::Command, keyboards, progress::render_progress},
+    watch::run_initial_clone,
+};
+
+const CALLBACK_STATE_TTL_MS: i64 = 15 * 60 * 1000;
+
+pub async fn handle_message(
+    bot: Bot,
+    msg: Message,
+    config: AppConfig,
+    db: Database,
+) -> ResponseResult<()> {
+    let user_id = match msg.from.as_ref() {
+        Some(user) => user.id.0 as i64,
+        None => return Ok(()),
+    };
+
+    if !repo::is_authorized(&db, user_id).await.unwrap_or(false) {
+        bot.send_message(
+            msg.chat.id,
+            "Unauthorized. Ask the owner to /grant your Telegram user id.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let Some(text) = msg.text() else {
+        return Ok(());
+    };
+
+    if let Ok(command) = Command::parse(text, "gdclone_bot") {
+        return handle_command(bot, msg, config, db, user_id, command).await;
+    }
+
+    match parse_drive_reference(text) {
+        Ok(_) => {
+            handle_clone_request(bot, msg.chat.id, config, db, user_id, text.to_string()).await?;
+        }
+        Err(err) => {
+            bot.send_message(msg.chat.id, format!("Invalid Drive link: {err}"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn handle_callback_query(
+    bot: Bot,
+    query: CallbackQuery,
+    config: AppConfig,
+    db: Database,
+) -> ResponseResult<()> {
+    bot.answer_callback_query(query.id.clone()).await?;
+
+    let user_id = query.from.id.0 as i64;
+    let chat_id = query.message.as_ref().map(|message| message.chat().id);
+    if !repo::is_authorized(&db, user_id).await.unwrap_or(false) {
+        if let Some(chat_id) = chat_id {
+            bot.send_message(chat_id, "Unauthorized.").await?;
+        }
+        return Ok(());
+    }
+
+    let Some(data) = query.data.as_deref() else {
+        return Ok(());
+    };
+    let Some(chat_id) = chat_id else {
+        return Ok(());
+    };
+
+    let text = match parse_callback_action(data) {
+        Some(("clone", "confirm", source)) => {
+            let Some(source) =
+                repo::consume_callback_state(&db, source, user_id, chat_id.0, "clone_confirm")
+                    .await
+                    .unwrap_or(None)
+            else {
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(
+                        chat_id,
+                        message.id(),
+                        "Yêu cầu clone đã hết hạn hoặc không thuộc về bạn.",
+                    )
+                    .await?;
+                } else {
+                    bot.send_message(chat_id, "Yêu cầu clone đã hết hạn hoặc không thuộc về bạn.")
+                        .await?;
+                }
+                return Ok(());
+            };
+            if let Some(message) = query.message.as_ref() {
+                let _ = bot
+                    .edit_message_text(chat_id, message.id(), "Đã bắt đầu clone.")
+                    .await;
+            }
+            spawn_clone_now(bot.clone(), chat_id, config, db, user_id, source).await?;
+            return Ok(());
+        }
+        Some(("clone", "cancel", state_id)) => {
+            let _ =
+                repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "clone_confirm")
+                    .await;
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), "Đã huỷ yêu cầu clone.")
+                    .await?;
+                return Ok(());
+            }
+            "Đã huỷ yêu cầu clone.".to_string()
+        }
+        Some(("job", "pause", job_id)) => pause_job(&db, user_id, job_id)
+            .await
+            .unwrap_or_else(|err| err.to_string()),
+        Some(("job", "resume", job_id)) => resume_job(&config, &db, user_id, job_id)
+            .await
+            .unwrap_or_else(|err| err.to_string()),
+        Some(("job", "cancel", job_id)) => cancel_job(&db, user_id, job_id)
+            .await
+            .unwrap_or_else(|err| err.to_string()),
+        Some(("browse", _, _)) => "Destination browser is not implemented yet.".to_string(),
+        _ => "Unknown action.".to_string(),
+    };
+
+    bot.send_message(chat_id, text).await?;
+    Ok(())
+}
+
+fn parse_callback_action(data: &str) -> Option<(&str, &str, &str)> {
+    let mut parts = data.splitn(3, ':');
+    Some((parts.next()?, parts.next()?, parts.next()?))
+}
+
+async fn handle_command(
+    bot: Bot,
+    msg: Message,
+    config: AppConfig,
+    db: Database,
+    user_id: i64,
+    command: Command,
+) -> ResponseResult<()> {
+    match command {
+        Command::Start => {
+            bot.send_message(msg.chat.id, "gdclone-bot đang chạy. Dùng /account để kiểm tra Google auth, rồi dùng /clone <Drive URL>.")
+                .await?;
+        }
+        Command::Help => {
+            bot.send_message(
+                msg.chat.id,
+                "Lệnh chính: /preview /account /destination /set_destination <url> /clone <url> /clone_here <url> /jobs /status <job_id> /pause <job_id> /resume <job_id> /cancel <job_id> /retry <job_id>",
+            )
+            .await?;
+        }
+        Command::Preview => {
+            spawn_preview_dashboard(bot, msg.chat.id, db, user_id).await?;
+        }
+        Command::Connect => {
+            bot.send_message(
+                msg.chat.id,
+                "Google auth chạy local-first. Hãy chạy `gdclone-bot --config ~/.config/gdclone-bot/config.toml auth login` trên chính máy đang chạy bot, rồi dùng /account lại.",
+            )
+            .await?;
+        }
+        Command::Account => {
+            let text = match repo::account_status(&db).await {
+                Ok(Some(status)) => format!("Trạng thái tài khoản Google: {status}"),
+                Ok(None) => "Chưa kết nối Google. Chạy `gdclone-bot auth login` trên máy chạy bot."
+                    .to_string(),
+                Err(err) => format!("Không đọc được trạng thái account: {err}"),
+            };
+            bot.send_message(msg.chat.id, text).await?;
+        }
+        Command::Disconnect => {
+            let text = disconnect_google(&config, &db, user_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Clone(input) => {
+            handle_clone_request(bot, msg.chat.id, config, db, user_id, input).await?;
+        }
+        Command::CloneHere(input) => {
+            spawn_clone_now(bot, msg.chat.id, config, db, user_id, input).await?;
+        }
+        Command::Whoami => {
+            let role = repo::authorized_user(&db, user_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|user| user.role)
+                .unwrap_or_else(|| "không rõ".to_string());
+            bot.send_message(
+                msg.chat.id,
+                format!("Telegram user id: {user_id}\nQuyền: {role}"),
+            )
+            .await?;
+        }
+        Command::Destination => {
+            let text = match repo::default_destination_profile(&db, "default").await {
+                Ok(Some(profile)) => format!(
+                    "Thư mục đích mặc định: {}\nDrive item ID: {}",
+                    profile.label, profile.destination_parent_id
+                ),
+                Ok(None) => "Chưa đặt thư mục đích. Dùng /set_destination <folder_url> sau khi Google auth đã connected.".to_string(),
+                Err(err) => format!("Không đọc được thư mục đích: {err}"),
+            };
+            bot.send_message(msg.chat.id, text).await?;
+        }
+        Command::ClearDestination => {
+            let text = match repo::clear_default_destination(&db, "default").await {
+                Ok(0) => "Chưa có thư mục đích mặc định để xoá.".to_string(),
+                Ok(_) => "Đã xoá thư mục đích mặc định.".to_string(),
+                Err(err) => format!("Không xoá được thư mục đích: {err}"),
+            };
+            bot.send_message(msg.chat.id, text).await?;
+        }
+        Command::SetDestination(input) => {
+            let text = set_destination(&config, &db, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Jobs => {
+            let text = list_jobs(&db, user_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Status(job_id) => {
+            let text = show_job_status(&db, user_id, &job_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Pause(job_id) => {
+            let text = pause_job(&db, user_id, &job_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Resume(job_id) => {
+            let text = resume_job(&config, &db, user_id, &job_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Cancel(job_id) => {
+            let text = cancel_job(&db, user_id, &job_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Retry(job_id) => {
+            let text = retry_job(&config, &db, user_id, &job_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Grant(input) => {
+            let text = grant_user(&db, user_id, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Revoke(input) => {
+            let text = revoke_user(&db, user_id, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        // ── Watch commands ────────────────────────────────────────────────────
+        Command::Watch(input) => {
+            let text = start_watch(&bot, &config, &db, msg.chat.id.0, user_id, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Watches => {
+            let text = list_watches(&db, user_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::WatchStatus(watch_id) => {
+            let text = watch_status(&db, user_id, &watch_id).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::WatchPause(watch_id) => {
+            let text = match repo::pause_watch_for_user(&db, user_id, &watch_id).await {
+                Ok(true) => format!("Watch {watch_id} paused."),
+                Ok(false) => "Watch not found or cannot be paused.".to_string(),
+                Err(err) => err.to_string(),
+            };
+            bot.send_message(msg.chat.id, text).await?;
+        }
+        Command::WatchResume(watch_id) => {
+            let text = match repo::resume_watch_for_user(&db, user_id, &watch_id).await {
+                Ok(true) => format!("Watch {watch_id} resumed (catching up)."),
+                Ok(false) => "Watch not found or is not paused.".to_string(),
+                Err(err) => err.to_string(),
+            };
+            bot.send_message(msg.chat.id, text).await?;
+        }
+        Command::WatchPolicy(input) => {
+            let text = set_watch_policy(&db, user_id, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        Command::Unwatch(watch_id) => {
+            let text = match repo::stop_watch_for_user(&db, user_id, &watch_id).await {
+                Ok(true) => format!("Watch {watch_id} stopped."),
+                Ok(false) => "Watch not found or already stopped.".to_string(),
+                Err(err) => err.to_string(),
+            };
+            bot.send_message(msg.chat.id, text).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn list_jobs(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
+    let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 10).await?;
+    if jobs.is_empty() {
+        return Ok("Không có job đang chạy hoặc tạm dừng.".to_string());
+    }
+
+    let mut lines = vec!["Job đang hoạt động:".to_string()];
+    for job in jobs {
+        lines.push(format!(
+            "{}  {}  đã quét={} xong={} lỗi={} bỏ qua={}",
+            short_job_id(&job.id),
+            vi_job_status(&job.status),
+            job.total_discovered,
+            job.completed_items,
+            job.failed_items,
+            job.skipped_items
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+async fn spawn_preview_dashboard(
+    bot: Bot,
+    chat_id: ChatId,
+    db: Database,
+    telegram_user_id: i64,
+) -> ResponseResult<()> {
+    let text = render_preview_dashboard(&db, telegram_user_id)
+        .await
+        .unwrap_or_else(|err| format!("Không tạo được preview: {err}"));
+    let message = bot.send_message(chat_id, text).await?;
+    tokio::spawn(async move {
+        let mut last_text = String::new();
+        for _ in 0..15 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let text = match render_preview_dashboard(&db, telegram_user_id).await {
+                Ok(text) => text,
+                Err(err) => format!("Không cập nhật được preview: {err}"),
+            };
+            if text == last_text {
+                continue;
+            }
+            last_text = text.clone();
+            if let Err(err) = bot.edit_message_text(chat_id, message.id, text).await {
+                warn!(error = %err, "edit preview dashboard failed");
+                break;
+            }
+        }
+    });
+    Ok(())
+}
+
+async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
+    let account = repo::account_status(db)
+        .await?
+        .unwrap_or_else(|| "chưa kết nối".to_string());
+    let destination = repo::default_destination_profile(db, "default").await?;
+    let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 5).await?;
+    let counts = repo::job_status_counts(db).await?;
+
+    let mut lines = vec![
+        "Bảng trạng thái gdclone-bot".to_string(),
+        format!("Google: {}", vi_account_status(&account)),
+        match destination {
+            Some(profile) => format!(
+                "Đích: {} ({})",
+                profile.label, profile.destination_parent_id
+            ),
+            None => {
+                "Cảnh báo: chưa đặt thư mục đích. Dùng /set_destination <folder_url>.".to_string()
+            }
+        },
+    ];
+
+    if counts.is_empty() {
+        lines.push("Tổng job: chưa có".to_string());
+    } else {
+        let summary = counts
+            .into_iter()
+            .map(|item| format!("{}={}", vi_job_status(&item.status), item.count))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("Tổng job: {summary}"));
+    }
+
+    if jobs.is_empty() {
+        lines.push("Đang chạy: không có".to_string());
+    } else {
+        lines.push("Đang chạy:".to_string());
+        for job in jobs {
+            lines.push(format!(
+                "- {} {} | quét={} xong={} lỗi={} bỏ_qua={}",
+                short_job_id(&job.id),
+                vi_job_status(&job.status),
+                job.total_discovered,
+                job.completed_items,
+                job.failed_items,
+                job.skipped_items
+            ));
+        }
+    }
+
+    lines.push("Tự cập nhật trong 30 giây. Dùng /preview để mở lại.".to_string());
+    Ok(lines.join("\n"))
+}
+
+async fn send_clone_outcome(
+    bot: &Bot,
+    chat_id: ChatId,
+    outcome: CloneOutcome,
+    progress_message_id: Option<MessageId>,
+) -> ResponseResult<()> {
+    send_or_edit_clone_message(bot, chat_id, progress_message_id, outcome.message).await?;
+    if let Some(paths) = outcome.report_paths {
+        bot.send_document(chat_id, InputFile::file(paths.json))
+            .await?;
+        bot.send_document(chat_id, InputFile::file(paths.csv))
+            .await?;
+    }
+    Ok(())
+}
+
+async fn send_or_edit_clone_message(
+    bot: &Bot,
+    chat_id: ChatId,
+    message_id: Option<MessageId>,
+    text: String,
+) -> ResponseResult<()> {
+    if let Some(message_id) = message_id
+        && bot
+            .edit_message_text(chat_id, message_id, text.clone())
+            .await
+            .is_ok()
+    {
+        return Ok(());
+    }
+    bot.send_message(chat_id, text).await?;
+    Ok(())
+}
+
+async fn spawn_clone_now(
+    bot: Bot,
+    chat_id: ChatId,
+    config: AppConfig,
+    db: Database,
+    telegram_user_id: i64,
+    input: String,
+) -> ResponseResult<()> {
+    let source = match parse_drive_reference(&input) {
+        Ok(source) => source,
+        Err(err) => {
+            bot.send_message(chat_id, err.to_string()).await?;
+            return Ok(());
+        }
+    };
+
+    let progress_message = bot
+        .send_message(
+            chat_id,
+            format!("State: Queued\n{}", render_progress(None, 0, 0)),
+        )
+        .await?;
+    let progress_message_id = progress_message.id;
+    let (progress_done_tx, progress_done_rx) = oneshot::channel();
+    spawn_progress_updater(
+        bot.clone(),
+        chat_id,
+        progress_message_id,
+        db.clone(),
+        telegram_user_id,
+        Duration::from_millis(config.telegram.progress_edit_min_interval_ms),
+        progress_done_rx,
+    );
+
+    bot.send_message(
+        chat_id,
+        "Đã nhận job clone. Dùng /preview, /jobs hoặc /status <job_id> để theo dõi.",
+    )
+    .await?;
+
+    tokio::spawn(async move {
+        let outcome = start_clone_reference(
+            &config,
+            &db,
+            chat_id.0,
+            telegram_user_id,
+            source,
+            Some(progress_message_id.0),
+        )
+        .await;
+        match outcome {
+            Ok(outcome) => {
+                let _ = progress_done_tx.send(());
+                if let Err(err) =
+                    send_clone_outcome(&bot, chat_id, outcome, Some(progress_message_id)).await
+                {
+                    warn!(error = %err, "send clone outcome failed");
+                }
+            }
+            Err(err) => {
+                let _ = progress_done_tx.send(());
+                if let Err(send_err) = send_or_edit_clone_message(
+                    &bot,
+                    chat_id,
+                    Some(progress_message_id),
+                    err.to_string(),
+                )
+                .await
+                {
+                    warn!(error = %send_err, "send clone error failed");
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
+async fn handle_clone_request(
+    bot: Bot,
+    chat_id: ChatId,
+    config: AppConfig,
+    db: Database,
+    telegram_user_id: i64,
+    input: String,
+) -> ResponseResult<()> {
+    if config.destination.auto_confirm_clone {
+        return spawn_clone_now(bot, chat_id, config, db, telegram_user_id, input).await;
+    }
+
+    match inspect_clone_source(&config, &db, &input).await {
+        Ok(text) => {
+            if repo::default_destination_profile(&db, "default")
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                let _ = repo::delete_expired_callback_states(&db).await;
+                match repo::create_callback_state(
+                    &db,
+                    repo::NewCallbackState {
+                        telegram_user_id,
+                        chat_id: chat_id.0,
+                        action: "clone_confirm".to_string(),
+                        payload: input,
+                        ttl_ms: CALLBACK_STATE_TTL_MS,
+                    },
+                )
+                .await
+                {
+                    Ok(state_id) => {
+                        bot.send_message(chat_id, text)
+                            .reply_markup(keyboards::confirm_clone_keyboard(&state_id))
+                            .await?;
+                    }
+                    Err(err) => {
+                        bot.send_message(chat_id, err.to_string()).await?;
+                    }
+                }
+            } else {
+                bot.send_message(chat_id, text).await?;
+            }
+        }
+        Err(err) => {
+            bot.send_message(chat_id, err.to_string()).await?;
+        }
+    }
+    Ok(())
+}
+
+fn spawn_progress_updater(
+    bot: Bot,
+    chat_id: ChatId,
+    message_id: MessageId,
+    db: Database,
+    telegram_user_id: i64,
+    interval: Duration,
+    mut done_rx: oneshot::Receiver<()>,
+) {
+    let interval = if interval.is_zero() {
+        Duration::from_secs(2)
+    } else {
+        interval
+    };
+    tokio::spawn(async move {
+        let mut last_text = String::new();
+        loop {
+            if !last_text.is_empty() {
+                tokio::select! {
+                    _ = &mut done_rx => break,
+                    _ = tokio::time::sleep(interval) => {}
+                }
+            }
+
+            let detail =
+                match repo::job_detail_for_progress_message(&db, telegram_user_id, message_id.0)
+                    .await
+                {
+                    Ok(Some(detail)) => detail,
+                    Ok(None) => {
+                        let text = "Trạng thái: đang chuẩn bị job\nĐang quét... xong: 0 lỗi: 0"
+                            .to_string();
+                        if text != last_text {
+                            last_text = text.clone();
+                            if let Err(err) = bot.edit_message_text(chat_id, message_id, text).await
+                            {
+                                warn!(error = %err, "edit progress message failed");
+                            }
+                        }
+                        continue;
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "read job progress failed");
+                        continue;
+                    }
+                };
+
+            let text = render_job_progress(&detail);
+            if text == last_text {
+                continue;
+            }
+            last_text = text.clone();
+
+            if is_terminal_status(&detail.status) {
+                if let Err(err) = bot.edit_message_text(chat_id, message_id, text).await {
+                    warn!(error = %err, "edit progress message failed");
+                }
+                break;
+            }
+
+            let paused = detail.status == "paused";
+            if let Err(err) = bot
+                .edit_message_text(chat_id, message_id, text)
+                .reply_markup(keyboards::job_control_keyboard(&detail.id, paused))
+                .await
+            {
+                warn!(error = %err, "edit progress message failed");
+            }
+        }
+    });
+}
+
+fn render_job_progress(job: &repo::JobDetail) -> String {
+    let total = if matches!(
+        job.status.as_str(),
+        "running" | "completed" | "partially_completed" | "failed"
+    ) && job.total_discovered > 0
+    {
+        Some(job.total_discovered as u64)
+    } else {
+        None
+    };
+    let percent = total
+        .filter(|total| *total > 0)
+        .map(|total| {
+            format!(
+                "Tiến độ: {}%",
+                (job.completed_items * 100 / total as i64).min(100)
+            )
+        })
+        .unwrap_or_else(|| "Tiến độ: đang xác định tổng số item".to_string());
+    format!(
+        "Trạng thái: {}\nJob: {}\nĐã quét: {}\n{}\n{}\nBỏ qua: {}",
+        vi_job_status(&job.status),
+        short_job_id(&job.id),
+        job.total_discovered,
+        percent,
+        render_progress(total, job.completed_items as u64, job.failed_items as u64),
+        job.skipped_items
+    )
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "partially_completed" | "failed" | "cancelled"
+    )
+}
+
+async fn show_job_status(
+    db: &Database,
+    telegram_user_id: i64,
+    job_id: &str,
+) -> anyhow::Result<String> {
+    let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? else {
+        return Ok("Không tìm thấy job thuộc Telegram user của bạn.".to_string());
+    };
+
+    let mut lines = vec![
+        format!("Job: {}", job.id),
+        format!("Loại: {}", job.kind),
+        format!("Trạng thái: {}", vi_job_status(&job.status)),
+        format!("Nguồn ID: {}", job.source_root_id),
+        format!("Thư mục đích ID: {}", job.destination_parent_id),
+        format!("Đã quét: {}", job.total_discovered),
+        format!("Hoàn tất: {}", job.completed_items),
+        format!("Lỗi: {}", job.failed_items),
+        format!("Bỏ qua: {}", job.skipped_items),
+    ];
+    if let Some(error) = job.error_summary {
+        lines.push(format!("Lỗi gần nhất: {error}"));
+    }
+    Ok(lines.join("\n"))
+}
+
+async fn pause_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
+    if repo::pause_job_for_user(db, telegram_user_id, job_id).await? {
+        Ok(format!("Đã yêu cầu tạm dừng job {job_id}."))
+    } else {
+        Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho tạm dừng.".to_string())
+    }
+}
+
+async fn resume_job(
+    config: &AppConfig,
+    db: &Database,
+    telegram_user_id: i64,
+    job_id: &str,
+) -> anyhow::Result<String> {
+    if repo::resume_job_for_user(db, telegram_user_id, job_id).await? {
+        let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
+        Ok(format!("Đã yêu cầu tiếp tục job {job_id}."))
+    } else {
+        Ok("Không tìm thấy job hoặc job chưa ở trạng thái tạm dừng.".to_string())
+    }
+}
+
+async fn cancel_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
+    if repo::cancel_job_for_user(db, telegram_user_id, job_id).await? {
+        Ok(format!("Đã yêu cầu huỷ job {job_id}."))
+    } else {
+        Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho huỷ.".to_string())
+    }
+}
+
+async fn retry_job(
+    config: &AppConfig,
+    db: &Database,
+    telegram_user_id: i64,
+    job_id: &str,
+) -> anyhow::Result<String> {
+    if let Some(summary) = repo::retry_failed_job_for_user(db, telegram_user_id, job_id).await? {
+        let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
+        Ok(format!(
+            "Đã yêu cầu làm lại job {job_id}. folder={} item={} operation={}",
+            summary.traversal_folders_requeued,
+            summary.job_items_requeued,
+            summary.operation_intents_replanned
+        ))
+    } else {
+        Ok(
+            "Không tìm thấy job, job không thể retry, hoặc không có phần lỗi để làm lại."
+                .to_string(),
+        )
+    }
+}
+
+async fn grant_user(db: &Database, actor_user_id: i64, input: &str) -> anyhow::Result<String> {
+    ensure_owner(db, actor_user_id).await?;
+    let target = parse_telegram_user_id(input)?;
+    repo::grant_operator(db, target).await?;
+    Ok(format!("Granted operator access to {target}."))
+}
+
+async fn disconnect_google(
+    config: &AppConfig,
+    db: &Database,
+    actor_user_id: i64,
+) -> anyhow::Result<String> {
+    ensure_owner(db, actor_user_id).await?;
+    let Some(account) = repo::google_account_secret(db, "default").await? else {
+        return Ok("No Google account connected.".to_string());
+    };
+    if account.status != "connected" && account.status != "reconnect_required" {
+        return Ok(format!("Google account is already {}.", account.status));
+    }
+
+    let secret_store = FileSecretStore::new(&config.storage.config_dir);
+    let master_key = secret_store.load_or_create_key().await?;
+    let refresh_token = oauth::decrypt_token(&account.refresh_token_ciphertext, &master_key)?;
+    oauth::revoke_refresh_token(
+        &refresh_token,
+        Duration::from_secs(config.engine.request_timeout_seconds),
+    )
+    .await?;
+    repo::mark_account_revoked(db, "default").await?;
+    Ok("Google refresh token revoked and local account marked revoked.".to_string())
+}
+
+async fn revoke_user(db: &Database, actor_user_id: i64, input: &str) -> anyhow::Result<String> {
+    ensure_owner(db, actor_user_id).await?;
+    let target = parse_telegram_user_id(input)?;
+    if target == actor_user_id {
+        anyhow::bail!("Owner cannot revoke self");
+    }
+    if repo::revoke_operator(db, target).await? {
+        Ok(format!("Revoked operator access for {target}."))
+    } else {
+        Ok("User not found, already disabled, or is owner.".to_string())
+    }
+}
+
+async fn ensure_owner(db: &Database, actor_user_id: i64) -> anyhow::Result<()> {
+    if repo::is_owner(db, actor_user_id).await? {
+        Ok(())
+    } else {
+        anyhow::bail!("Only owner can manage authorized users")
+    }
+}
+
+fn parse_telegram_user_id(input: &str) -> anyhow::Result<i64> {
+    let value = input.trim().parse::<i64>()?;
+    if value <= 0 {
+        anyhow::bail!("Telegram user id must be positive");
+    }
+    Ok(value)
+}
+
+fn short_job_id(job_id: &str) -> &str {
+    job_id.get(..8).unwrap_or(job_id)
+}
+
+fn vi_account_status(status: &str) -> &str {
+    match status {
+        "connected" => "đã kết nối",
+        "reconnect_required" => "cần đăng nhập lại",
+        "revoked" => "đã thu hồi",
+        "disabled" => "đã tắt",
+        "chưa kết nối" => "chưa kết nối",
+        other => other,
+    }
+}
+
+fn vi_job_status(status: &str) -> &str {
+    match status {
+        "queued" => "đang chờ",
+        "discovering" => "đang quét",
+        "running" => "đang chạy",
+        "pausing" => "đang tạm dừng",
+        "paused" => "đã tạm dừng",
+        "cancelling" => "đang huỷ",
+        "cancelled" => "đã huỷ",
+        "recovering" => "đang khôi phục",
+        "completed" => "hoàn tất",
+        "partially_completed" => "hoàn tất một phần",
+        "failed" => "thất bại",
+        other => other,
+    }
+}
+
+async fn start_clone_reference(
+    config: &AppConfig,
+    db: &Database,
+    chat_id: i64,
+    telegram_user_id: i64,
+    source: crate::drive::links::DriveReference,
+    progress_message_id: Option<i32>,
+) -> anyhow::Result<CloneOutcome> {
+    let service = CloneService::new(config.clone(), db.clone());
+    service
+        .start_one_shot(CloneRequest {
+            chat_id,
+            telegram_user_id,
+            source,
+            progress_message_id,
+        })
+        .await
+}
+
+async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyhow::Result<String> {
+    let reference = parse_drive_reference(input)?;
+    let token_manager = TokenManager::new(config.clone(), db.clone());
+    let access_token = token_manager.access_token("default").await?;
+    let drive =
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+    let file = drive
+        .get_reference(access_token.as_str(), &reference)
+        .await?;
+
+    if file.mime_type != FOLDER_MIME_TYPE {
+        anyhow::bail!("Destination must be a Google Drive folder");
+    }
+    if file
+        .capabilities
+        .as_ref()
+        .and_then(|capabilities| capabilities.can_add_children)
+        != Some(true)
+    {
+        anyhow::bail!("Authenticated account cannot add children to this destination folder");
+    }
+
+    repo::upsert_destination_profile(
+        db,
+        repo::NewDestinationProfile {
+            google_account_id: "default".to_string(),
+            label: file.name.clone(),
+            destination_parent_id: file.id.clone(),
+            destination_drive_id: file.drive_id.clone(),
+            destination_resource_key: reference.resource_key.clone().or(file.resource_key.clone()),
+            is_default: true,
+        },
+    )
+    .await?;
+
+    Ok(format!(
+        "Default destination set: {}\nDrive item ID: {}",
+        file.name, file.id
+    ))
+}
+
+async fn inspect_clone_source(
+    config: &AppConfig,
+    db: &Database,
+    input: &str,
+) -> anyhow::Result<String> {
+    let reference = parse_drive_reference(input)?;
+    let token_manager = TokenManager::new(config.clone(), db.clone());
+    let access_token = token_manager.access_token("default").await?;
+    let drive =
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+    let source = drive
+        .get_reference(access_token.as_str(), &reference)
+        .await?;
+
+    let item_type = if source.is_folder() { "folder" } else { "file" };
+    let mut lines = vec![
+        format!("Source: {}", source.name),
+        format!("Type: {item_type}"),
+        format!("MIME: {}", source.mime_type),
+    ];
+
+    if let Some(size) = &source.size {
+        lines.push(format!("Size: {size} bytes"));
+    }
+    if source.drive_id.is_some() {
+        lines.push("Location: Shared Drive".to_string());
+    } else {
+        lines.push("Location: My Drive or shared-with-me".to_string());
+    }
+    if reference.resource_key.is_some() {
+        lines.push("Warning: source link uses a resource key".to_string());
+    }
+
+    if let Some(default_dest) = repo::default_destination_profile(db, "default").await? {
+        let destination_preview = if source.is_folder() {
+            format!("{}/{}", default_dest.label, source.name)
+        } else {
+            default_dest.label
+        };
+        lines.push(format!("Destination: {destination_preview}"));
+        lines.push("[Clone now] [Change destination] [Cancel]".to_string());
+    } else {
+        lines.push(
+            "No default destination configured. Use /set_destination <folder_url_or_id>."
+                .to_string(),
+        );
+    }
+
+    Ok(lines.join("\n"))
+}
+
+// ── Watch handlers ───────────────────────────────────────────────────────────
+
+/// `/watch <source_url_or_id> <dest_url_or_id>`
+async fn start_watch(
+    bot: &Bot,
+    config: &AppConfig,
+    db: &Database,
+    chat_id: i64,
+    telegram_user_id: i64,
+    input: &str,
+) -> anyhow::Result<String> {
+    let parts: Vec<&str> = input.splitn(2, char::is_whitespace).collect();
+    if parts.len() < 2 {
+        anyhow::bail!("Usage: /watch <source_url_or_id> <dest_url_or_id>");
+    }
+    let source_ref = parse_drive_reference(parts[0])?;
+    let dest_ref = parse_drive_reference(parts[1])?;
+
+    let token_manager = TokenManager::new(config.clone(), db.clone());
+    let access_token = token_manager.access_token("default").await?;
+    let drive =
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+
+    let source = drive
+        .get_reference(access_token.as_str(), &source_ref)
+        .await?;
+    if !source.is_folder() {
+        anyhow::bail!("Source must be a Google Drive folder.");
+    }
+    let dest = drive
+        .get_reference(access_token.as_str(), &dest_ref)
+        .await?;
+    if !dest.is_folder() {
+        anyhow::bail!("Destination must be a Google Drive folder.");
+    }
+    if dest.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
+        anyhow::bail!("Cannot add children to destination folder.");
+    }
+
+    let corpus_kind = if source.drive_id.is_some() {
+        "shared_drive"
+    } else {
+        "user"
+    };
+    let start_token = drive
+        .get_start_page_token(access_token.as_str(), source.drive_id.as_deref())
+        .await?;
+    let cursor = repo::upsert_change_cursor(
+        db,
+        "default",
+        corpus_kind,
+        source.drive_id.as_deref(),
+        &start_token.start_page_token,
+    )
+    .await?;
+
+    let watch_id = repo::create_watch_subscription(
+        db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".to_string(),
+            cursor_id: cursor.id.clone(),
+            telegram_user_id,
+            chat_id,
+            source_root_id: source.id.clone(),
+            source_resource_key: source_ref
+                .resource_key
+                .clone()
+                .or(source.resource_key.clone()),
+            source_drive_id: source.drive_id.clone(),
+            destination_root_id: dest.id.clone(),
+            destination_drive_id: dest.drive_id.clone(),
+            content_update_policy: config.watch.default_content_update_policy.clone(),
+            deletion_policy: config.watch.default_deletion_policy.clone(),
+            move_out_policy: config.watch.default_move_out_policy.clone(),
+            baseline_sequence: cursor.last_event_sequence,
+        },
+    )
+    .await?;
+
+    // Spawn the initializer as a background task — it may take minutes for
+    // large trees. We notify the user via Telegram as it progresses.
+    {
+        let config2 = config.clone();
+        let db2 = db.clone();
+        let bot2 = bot.clone();
+        let chat_id2 = chat_id;
+        let watch_id2 = watch_id.clone();
+        tokio::spawn(async move {
+            let notify = move |msg_text: String| {
+                let bot = bot2.clone();
+                let cid = chat_id2;
+                tokio::spawn(async move {
+                    let _ = bot
+                        .send_message(teloxide::types::ChatId(cid), msg_text)
+                        .await;
+                });
+            };
+            if let Err(err) = run_initial_clone(config2, db2, watch_id2.clone(), notify).await {
+                tracing::error!(watch_id = watch_id2, error = %err, "watch initializer failed");
+            }
+        });
+    }
+
+    Ok(format!(
+        "Watch created.\nWatch ID: {short}\nSource: {src_name} ({src_id})\nDestination: {dst_name}\n⏳ Initial clone starting in background — use /watch_status {short} to monitor.",
+        short = &watch_id[..8.min(watch_id.len())],
+        src_name = source.name,
+        src_id = source.id,
+        dst_name = dest.name,
+    ))
+}
+
+async fn list_watches(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
+    let watches = repo::list_watches_for_user(db, telegram_user_id).await?;
+    if watches.is_empty() {
+        return Ok("No watch subscriptions.".to_string());
+    }
+    let mut lines = vec!["Watch subscriptions:".to_string()];
+    for w in &watches {
+        lines.push(format!(
+            "{}  {}  src={}  dst={}",
+            &w.id[..8.min(w.id.len())],
+            w.status,
+            w.source_root_id,
+            w.destination_root_id,
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+async fn watch_status(
+    db: &Database,
+    telegram_user_id: i64,
+    watch_id: &str,
+) -> anyhow::Result<String> {
+    let Some(w) = repo::watch_for_user(db, telegram_user_id, watch_id).await? else {
+        return Ok("Watch not found.".to_string());
+    };
+    Ok(format!(
+        "Watch: {}\nStatus: {}\nSource: {}\nDestination: {}\nContent update: {}\nDeletion: {}\nMove-out: {}\nBaseline seq: {}\nConsumed seq: {}",
+        w.id,
+        w.status,
+        w.source_root_id,
+        w.destination_root_id,
+        w.content_update_policy,
+        w.deletion_policy,
+        w.move_out_policy,
+        w.baseline_sequence,
+        w.last_consumed_sequence,
+    ))
+}
+
+/// `/watch_policy <watch_id> <policy>`
+/// e.g. `/watch_policy abc123 versioned_copy`
+async fn set_watch_policy(
+    db: &Database,
+    telegram_user_id: i64,
+    input: &str,
+) -> anyhow::Result<String> {
+    let parts: Vec<&str> = input.splitn(2, char::is_whitespace).collect();
+    if parts.len() < 2 {
+        anyhow::bail!(
+            "Usage: /watch_policy <watch_id> <versioned_copy|replace_copy|manual_confirmation>"
+        );
+    }
+    let watch_id = parts[0];
+    let policy = parts[1].trim();
+    if !matches!(
+        policy,
+        "versioned_copy" | "replace_copy" | "manual_confirmation"
+    ) {
+        anyhow::bail!(
+            "Unknown policy '{}'. Choose: versioned_copy | replace_copy | manual_confirmation",
+            policy
+        );
+    }
+    if repo::set_watch_content_update_policy(db, telegram_user_id, watch_id, policy).await? {
+        Ok(format!(
+            "Watch {watch_id} content_update_policy set to {policy}."
+        ))
+    } else {
+        Ok("Watch not found.".to_string())
+    }
+}

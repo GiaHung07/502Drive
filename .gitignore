@@ -1,0 +1,18 @@
+/target/
+/references/
+/.env
+/config.toml
+data/
+reports/
+logs/
+master.key
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+
+
+# Added by cargo
+
+/target

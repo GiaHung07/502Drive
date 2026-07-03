@@ -1,0 +1,20 @@
+[Unit]
+Description=gdclone-bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/gdclone-bot --config %h/.config/gdclone-bot/config.toml run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/gdclone-bot
+ReadWritePaths=%h/.config/gdclone-bot
+
+[Install]
+WantedBy=default.target

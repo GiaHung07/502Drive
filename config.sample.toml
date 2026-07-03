@@ -1,0 +1,59 @@
+[telegram]
+bot_token = "REPLACE_ME"
+owner_telegram_id = 0
+progress_edit_min_interval_ms = 3000
+
+[destination]
+auto_use_default = true
+auto_confirm_clone = false
+wrap_single_file_in_folder = false
+root_name_policy = "preserve"
+same_name_policy = "keep_both"
+
+[google_oauth]
+client_id = "REPLACE_ME.apps.googleusercontent.com"
+client_secret = "REPLACE_ME"
+redirect_port_start = 51000
+redirect_port_end = 51100
+scope = "https://www.googleapis.com/auth/drive"
+
+[engine]
+max_active_jobs = 2
+max_active_jobs_per_user = 1
+initial_write_concurrency = 5
+min_write_concurrency = 1
+max_write_concurrency = 8
+list_concurrency = 2
+max_retry_attempts = 6
+retry_base_delay_ms = 1000
+retry_max_delay_ms = 64000
+request_timeout_seconds = 60
+default_duplicate_policy = "skip_same_source"
+default_shortcut_policy = "preserve"
+
+[watch]
+enabled = false
+active_poll_seconds = 20
+warm_idle_poll_seconds = 60
+cold_idle_poll_seconds = 300
+warm_idle_after_seconds = 600
+cold_idle_after_seconds = 3600
+max_backlog_events_per_watch = 100000
+raw_event_retention_days = 30
+default_content_update_policy = "versioned_copy"
+default_deletion_policy = "preserve_destination"
+default_move_out_policy = "detach"
+
+[storage]
+db_path = ""
+log_dir = ""
+report_dir = ""
+secret_backend = "auto"
+
+[security]
+redact_file_names_in_info_logs = true
+report_retention_days = 30
+allow_operators = false
+
+[platform]
+startup_mode = "manual"
