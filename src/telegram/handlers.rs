@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 
 use teloxide::{
     prelude::*,
@@ -29,6 +32,7 @@ use crate::{
 };
 
 const CALLBACK_STATE_TTL_MS: i64 = 15 * 60 * 1000;
+const CLONE_PLAN_ITEM_LIMIT: usize = 2_000;
 
 pub async fn handle_message(
     bot: Bot,
@@ -1114,13 +1118,13 @@ async fn inspect_clone_source(
 
     if let Some(size) = &source.size {
         let bytes: i64 = size.parse().unwrap_or(0);
-        lines.push(format!("Kich thuoc  : {}", human_bytes(bytes)));
+        lines.push(format!("Kích thước  : {}", human_bytes(bytes)));
     }
 
     if let Some(drive_id) = &source.drive_id {
-        lines.push(format!("Vi tri      : Shared Drive ({drive_id})"));
+        lines.push(format!("Vị trí      : Shared Drive ({drive_id})"));
     } else {
-        lines.push("Vi tri      : My Drive / duoc chia se".to_string());
+        lines.push("Vị trí      : My Drive / được chia sẻ".to_string());
     }
 
     // Capability warnings
@@ -1147,6 +1151,18 @@ async fn inspect_clone_source(
         lines.push("Lưu ý: Link dùng resource key (link hạn chế truy cập).".to_string());
     }
 
+    if let Ok(plan) = build_clone_plan(
+        &drive,
+        access_token.as_str(),
+        &source,
+        reference.resource_key.as_deref(),
+    )
+    .await
+    {
+        lines.push(String::new());
+        lines.extend(plan.render_lines());
+    }
+
     if let Some(default_dest) = repo::default_destination_profile(db, "default").await? {
         let destination_preview = if source.is_folder() {
             format!("{}/{}", default_dest.label, source.name)
@@ -1164,6 +1180,116 @@ async fn inspect_clone_source(
     Ok(lines.join("\n"))
 }
 
+#[derive(Debug, Default)]
+struct ClonePlan {
+    folders: u64,
+    files: u64,
+    shortcuts: u64,
+    google_native: u64,
+    known_bytes: u64,
+    warning_count: u64,
+    scanned_items: usize,
+    truncated: bool,
+}
+
+impl ClonePlan {
+    fn add(&mut self, file: &crate::drive::types::DriveFile) {
+        self.scanned_items += 1;
+        let caps = file.capabilities.as_ref();
+        if file.is_folder() {
+            self.folders += 1;
+            if caps.and_then(|c| c.can_list_children) == Some(false) {
+                self.warning_count += 1;
+            }
+        } else {
+            self.files += 1;
+            if file.is_shortcut() {
+                self.shortcuts += 1;
+            } else if file.mime_type.starts_with("application/vnd.google-apps.") {
+                self.google_native += 1;
+            }
+            if caps.and_then(|c| c.can_copy) == Some(false) {
+                self.warning_count += 1;
+            }
+        }
+        if file.copy_requires_writer_permission == Some(true) {
+            self.warning_count += 1;
+        }
+        if let Some(size) = &file.size
+            && let Ok(bytes) = size.parse::<u64>()
+        {
+            self.known_bytes = self.known_bytes.saturating_add(bytes);
+        }
+    }
+
+    fn render_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            "Dự kiến clone:".to_string(),
+            format!("  Thư mục       : {}", self.folders),
+            format!("  File          : {}", self.files),
+            format!("  Google-native : {}", self.google_native),
+            format!("  Shortcut      : {}", self.shortcuts),
+            format!("  Dung lượng rõ : {}", human_bytes(self.known_bytes as i64)),
+        ];
+        if self.warning_count > 0 {
+            lines.push(format!(
+                "  Cảnh báo      : {} item cần chú ý",
+                self.warning_count
+            ));
+        }
+        if self.truncated {
+            lines.push(format!(
+                "  Lưu ý         : chỉ quét trước {} item đầu",
+                self.scanned_items
+            ));
+        }
+        lines
+    }
+}
+
+async fn build_clone_plan(
+    drive: &DriveClient,
+    access_token: &str,
+    source: &crate::drive::types::DriveFile,
+    source_resource_key: Option<&str>,
+) -> anyhow::Result<ClonePlan> {
+    let mut plan = ClonePlan::default();
+    plan.add(source);
+    if !source.is_folder() {
+        return Ok(plan);
+    }
+
+    let mut queue = VecDeque::from([(source.id.clone(), source_resource_key.map(str::to_string))]);
+    while let Some((folder_id, folder_resource_key)) = queue.pop_front() {
+        let mut page_token = None;
+        loop {
+            let page = drive
+                .list_children(
+                    access_token,
+                    &folder_id,
+                    folder_resource_key.as_deref(),
+                    page_token.as_deref(),
+                )
+                .await?;
+            for child in page.files {
+                if plan.scanned_items >= CLONE_PLAN_ITEM_LIMIT {
+                    plan.truncated = true;
+                    return Ok(plan);
+                }
+                if child.is_folder() {
+                    queue.push_back((child.id.clone(), child.resource_key.clone()));
+                }
+                plan.add(&child);
+            }
+            let Some(next) = page.next_page_token else {
+                break;
+            };
+            page_token = Some(next);
+        }
+    }
+    Ok(plan)
+}
+
 /// Human-readable byte count.
 fn human_bytes(bytes: i64) -> String {
     let bytes = bytes.max(0) as u64;
@@ -1178,6 +1304,51 @@ fn human_bytes(bytes: i64) -> String {
         format!("{:.1} KB", bytes as f64 / KB as f64)
     } else {
         format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::drive::types::DriveFile;
+
+    fn file(id: &str, mime_type: &str, size: Option<&str>) -> DriveFile {
+        DriveFile {
+            id: id.to_string(),
+            name: id.to_string(),
+            mime_type: mime_type.to_string(),
+            size: size.map(str::to_string),
+            parents: vec![],
+            drive_id: None,
+            resource_key: None,
+            shortcut_details: None,
+            trashed: None,
+            modified_time: None,
+            md5_checksum: None,
+            version: None,
+            capabilities: None,
+            copy_requires_writer_permission: None,
+            app_properties: Default::default(),
+        }
+    }
+
+    #[test]
+    fn clone_plan_counts_drive_kinds_and_bytes() {
+        let mut plan = ClonePlan::default();
+        plan.add(&file("folder", FOLDER_MIME_TYPE, None));
+        plan.add(&file("bin", "application/octet-stream", Some("2048")));
+        plan.add(&file("doc", "application/vnd.google-apps.document", None));
+        plan.add(&file(
+            "shortcut",
+            crate::drive::types::SHORTCUT_MIME_TYPE,
+            None,
+        ));
+
+        assert_eq!(plan.folders, 1);
+        assert_eq!(plan.files, 3);
+        assert_eq!(plan.google_native, 1);
+        assert_eq!(plan.shortcuts, 1);
+        assert_eq!(plan.known_bytes, 2048);
     }
 }
 
