@@ -31,6 +31,8 @@ pub enum Command {
     Cancel(String),
     #[command(description = "thử lại các item lỗi")]
     Retry(String),
+    #[command(description = "gửi lại report JSON/CSV của job gần nhất")]
+    LastReport,
     #[command(description = "xem Telegram user id và quyền hiện tại")]
     Whoami,
     #[command(description = "đặt thư mục Drive đích mặc định")]

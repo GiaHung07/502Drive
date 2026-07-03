@@ -62,6 +62,7 @@ fn core_bot_commands() -> Vec<BotCommand> {
         ("resume", "Tiếp tục job"),
         ("cancel", "Huỷ job"),
         ("retry", "Làm lại item lỗi"),
+        ("last_report", "Gửi lại report gần nhất"),
         ("preview", "Bảng tổng quan realtime"),
     ]
     .into_iter()

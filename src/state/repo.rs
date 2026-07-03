@@ -280,6 +280,40 @@ pub async fn list_active_jobs_for_user(
         .await?)
 }
 
+pub async fn latest_reportable_job_for_user(
+    db: &Database,
+    telegram_user_id: i64,
+) -> anyhow::Result<Option<JobSummary>> {
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT id, kind, status, total_discovered, completed_items,
+                        failed_items, skipped_items, updated_at_ms
+                 FROM jobs
+                 WHERE telegram_user_id = ?1
+                   AND status IN ('completed', 'partially_completed', 'failed')
+                 ORDER BY updated_at_ms DESC, id
+                 LIMIT 1",
+                params![telegram_user_id],
+                |row| {
+                    Ok(JobSummary {
+                        id: row.get(0)?,
+                        kind: row.get(1)?,
+                        status: row.get(2)?,
+                        total_discovered: row.get(3)?,
+                        completed_items: row.get(4)?,
+                        failed_items: row.get(5)?,
+                        skipped_items: row.get(6)?,
+                        updated_at_ms: row.get(7)?,
+                    })
+                },
+            )
+            .optional()
+        })
+        .await?)
+}
+
 pub async fn active_job_count_for_user(
     db: &Database,
     telegram_user_id: i64,

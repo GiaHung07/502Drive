@@ -19,4 +19,8 @@ fn parses_snake_case_commands_used_in_help_text() {
         Command::parse("/preview", "gdclone_bot").unwrap(),
         Command::Preview
     ));
+    assert!(matches!(
+        Command::parse("/last_report", "gdclone_bot").unwrap(),
+        Command::LastReport
+    ));
 }

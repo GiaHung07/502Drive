@@ -21,6 +21,7 @@ use crate::{
         copy::{CloneOutcome, CloneRequest, CloneService},
         recovery,
     },
+    report,
     secrets::FileSecretStore,
     state::{db::Database, repo},
     telegram::{
@@ -215,6 +216,7 @@ async fn handle_command(
                  /resume <job_id>       Tiếp tục\n\
                  /cancel <job_id>       Huỷ\n\
                  /retry <job_id>        Làm lại phần lỗi\n\
+                 /last_report           Gửi lại report job gần nhất\n\
                  /preview               Bảng tổng quan realtime\n\
                  /account               Tài khoản Google\n\
                  \n\
@@ -319,6 +321,9 @@ async fn handle_command(
             let text = retry_job(&config, &db, user_id, &job_id).await;
             bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
                 .await?;
+        }
+        Command::LastReport => {
+            send_last_report(&bot, msg.chat.id, &config, &db, user_id).await?;
         }
         Command::Grant(input) => {
             let text = grant_user(&db, user_id, &input).await;
@@ -547,6 +552,55 @@ async fn send_clone_outcome(
         bot.send_document(chat_id, InputFile::file(paths.csv))
             .await?;
     }
+    Ok(())
+}
+
+async fn send_last_report(
+    bot: &Bot,
+    chat_id: ChatId,
+    config: &AppConfig,
+    db: &Database,
+    telegram_user_id: i64,
+) -> ResponseResult<()> {
+    let job = match repo::latest_reportable_job_for_user(db, telegram_user_id).await {
+        Ok(Some(job)) => job,
+        Ok(None) => {
+            bot.send_message(chat_id, "Chưa có job hoàn tất/lỗi nào để gửi report.")
+                .await?;
+            return Ok(());
+        }
+        Err(err) => {
+            bot.send_message(chat_id, format!("Lỗi đọc job gần nhất: {err}"))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let paths = match report::write_job_reports(db, &config.storage.report_dir, &job.id).await {
+        Ok(paths) => paths,
+        Err(err) => {
+            bot.send_message(chat_id, format!("Lỗi tạo report: {err}"))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "REPORT GẦN NHẤT\n━━━━━━━━━━━━\n• Job: {}\n• Trạng thái: {}\n• Đã quét: {}\n• Hoàn tất: {}\n• Lỗi: {}",
+            short_job_id(&job.id),
+            vi_job_status(&job.status),
+            job.total_discovered,
+            job.completed_items,
+            job.failed_items,
+        ),
+    )
+    .await?;
+    bot.send_document(chat_id, InputFile::file(paths.json))
+        .await?;
+    bot.send_document(chat_id, InputFile::file(paths.csv))
+        .await?;
     Ok(())
 }
 
