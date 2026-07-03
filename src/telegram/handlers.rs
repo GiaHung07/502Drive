@@ -491,14 +491,16 @@ async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyho
     let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 5).await?;
     let counts = repo::job_status_counts(db).await?;
 
-    let mut lines = vec![
-        "=== Bảng tổng quan gdclone-bot ===".to_string(),
-        format!("Google       : {}", vi_account_status(&account)),
-        match &destination {
-            Some(p) => format!("Thư mục đích : {} ({})", p.label, p.destination_parent_id),
-            None => "Thư mục đích : Chưa đặt - dùng /set_destination".to_string(),
-        },
-    ];
+    let mut lines = vec!["BẢNG TỔNG QUAN".to_string(), "━━━━━━━━━━━━".to_string()];
+    push_field(&mut lines, "Google", vi_account_status(&account));
+    match &destination {
+        Some(p) => push_field(
+            &mut lines,
+            "Thư mục đích",
+            &format!("{} ({})", p.label, p.destination_parent_id),
+        ),
+        None => lines.push("• Thư mục đích: Chưa đặt - dùng /set_destination".to_string()),
+    }
 
     if !counts.is_empty() {
         let summary = counts
@@ -506,16 +508,17 @@ async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyho
             .map(|c| format!("{}: {}", vi_job_status(&c.status), c.count))
             .collect::<Vec<_>>()
             .join(" | ");
-        lines.push(format!("Tong job     : {summary}"));
+        push_field(&mut lines, "Tổng job", &summary);
     }
 
     if jobs.is_empty() {
-        lines.push("Đang chạy    : Không có".to_string());
+        lines.push("• Đang chạy: Không có".to_string());
     } else {
-        lines.push("Đang chạy:".to_string());
+        lines.push(String::new());
+        lines.push("ĐANG CHẠY".to_string());
         for job in &jobs {
             lines.push(format!(
-                "  {} [{}] đã_quét:{} hoàn_tất:{} lỗi:{}",
+                "• {} | {} | quét {} | xong {} | lỗi {}",
                 short_job_id(&job.id),
                 vi_job_status(&job.status),
                 job.total_discovered,
@@ -655,6 +658,13 @@ async fn handle_clone_request(
         return spawn_clone_now(bot, chat_id, config, db, telegram_user_id, input).await;
     }
 
+    let loading = bot
+        .send_message(
+            chat_id,
+            "Đang kiểm tra nguồn Drive...\n░░░░░░░░░░░░░░░░\nVui lòng chờ.",
+        )
+        .await?;
+
     match inspect_clone_source(&config, &db, &input).await {
         Ok(text) => {
             if repo::default_destination_profile(&db, "default")
@@ -677,20 +687,21 @@ async fn handle_clone_request(
                 .await
                 {
                     Ok(state_id) => {
-                        bot.send_message(chat_id, text)
+                        bot.edit_message_text(chat_id, loading.id, text)
                             .reply_markup(keyboards::confirm_clone_keyboard(&state_id))
                             .await?;
                     }
                     Err(err) => {
-                        bot.send_message(chat_id, err.to_string()).await?;
+                        bot.edit_message_text(chat_id, loading.id, err.to_string())
+                            .await?;
                     }
                 }
             } else {
-                bot.send_message(chat_id, text).await?;
+                bot.edit_message_text(chat_id, loading.id, text).await?;
             }
         }
         Err(err) => {
-            bot.send_message(chat_id, format!("Lỗi kiểm tra nguồn: {err}"))
+            bot.edit_message_text(chat_id, loading.id, format!("Lỗi kiểm tra nguồn: {err}"))
                 .await?;
         }
     }
@@ -848,21 +859,20 @@ fn render_job_progress(job: &repo::JobDetail, elapsed_secs: u64) -> String {
         .map(format_duration_secs)
         .unwrap_or_else(|| "--".to_string());
 
-    format!(
-        "Trạng thái  : {status}\n\
-         Job         : {job_id}\n\
-         Thời gian   : {elapsed}  Tốc độ: {rate}  Dự kiến: {eta}\n\
-         Đã quét    : {discovered}  Bỏ qua: {skipped}\n\
-         {bar}",
-        status = vi_job_status(&job.status),
-        job_id = short_job_id(&job.id),
-        elapsed = format_duration_secs(elapsed_secs),
-        rate = rate_str,
-        eta = eta_str,
-        discovered = job.total_discovered,
-        skipped = job.skipped_items,
-        bar = render_progress(total, done, job.failed_items as u64),
-    )
+    [
+        "TIẾN TRÌNH CLONE".to_string(),
+        "━━━━━━━━━━━━━━".to_string(),
+        format!("• Trạng thái: {}", vi_job_status(&job.status)),
+        format!("• Job: {}", short_job_id(&job.id)),
+        format!("• Thời gian: {}", format_duration_secs(elapsed_secs)),
+        format!("• Tốc độ: {rate_str}"),
+        format!("• Dự kiến: {eta_str}"),
+        format!("• Đã quét: {}", job.total_discovered),
+        format!("• Bỏ qua: {}", job.skipped_items),
+        String::new(),
+        render_progress(total, done, job.failed_items as u64),
+    ]
+    .join("\n")
 }
 
 fn is_terminal_status(status: &str) -> bool {
@@ -1267,7 +1277,7 @@ async fn inspect_clone_source(
 }
 
 fn push_field(lines: &mut Vec<String>, label: &str, value: &str) {
-    lines.push(format!("{label:<13}: {value}"));
+    lines.push(format!("• {label}: {value}"));
 }
 
 fn capability_text(value: Option<bool>) -> &'static str {

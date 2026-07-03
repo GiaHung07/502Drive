@@ -26,28 +26,24 @@ impl ProgressThrottle {
     }
 }
 
-/// Render a one-line progress bar with counts.
-///
-/// When `total` is known: `[####----------------] 4/20 (20%) xong:4 lỗi:0`
-/// When scanning:          `Đang quét... xong:4 lỗi:0`
+/// Render a compact Telegram-friendly progress block.
 pub fn render_progress(total: Option<u64>, completed: u64, failed: u64) -> String {
     match total {
         Some(total) if total > 0 => {
-            let width = 20_usize;
+            let width = 16_usize;
             let filled = ((completed.min(total) * width as u64) / total) as usize;
             let pct = (completed.min(total) * 100) / total;
             format!(
-                "[{}{}] {}/{} ({}%) xong:{} lỗi:{}",
-                "#".repeat(filled),
-                "-".repeat(width - filled),
+                "Tiến độ: {}%\n{}{}\nXong: {}/{} | Lỗi: {}",
+                pct,
+                "█".repeat(filled),
+                "░".repeat(width - filled),
                 completed,
                 total,
-                pct,
-                completed,
                 failed,
             )
         }
-        _ => format!("Đang quét... xong:{completed} lỗi:{failed}"),
+        _ => format!("Đang quét...\nXong: {completed} | Lỗi: {failed}"),
     }
 }
 
