@@ -376,7 +376,7 @@ impl CloneService {
         repo::update_job_status(&self.db, job_id, final_status, None).await?;
 
         Ok(format!(
-            "Job {job_id} da hoan tat. Da quet: {} Hoan tat: {} Loi: {} Bo qua: {}",
+            "Job {job_id} đã hoàn tất. Đã quét: {} Hoàn tất: {} Lỗi: {} Bỏ qua: {}",
             counts.total_discovered,
             counts.completed_items,
             counts.failed_items,
@@ -475,7 +475,7 @@ impl CloneService {
         repo::update_job_status(&self.db, job_id, JobStatusValue::Completed, None).await?;
 
         Ok(format!(
-            "Job {job_id} da hoan tat. Da copy file: {}",
+            "Job {job_id} đã hoàn tất. Đã copy file: {}",
             copied.name
         ))
     }
@@ -1136,7 +1136,7 @@ pub fn create_shortcut_request_json(
 
 fn validate_source_for_clone(source: &DriveFile) -> anyhow::Result<()> {
     if source.trashed == Some(true) {
-        bail!("File/folder nguon dang nam trong thung rac");
+        bail!("File/folder nguồn đang nằm trong thùng rác");
     }
     if source.is_folder() {
         if source
@@ -1145,14 +1145,14 @@ fn validate_source_for_clone(source: &DriveFile) -> anyhow::Result<()> {
             .and_then(|cap| cap.can_list_children)
             != Some(true)
         {
-            bail!("Tai khoan Google hien tai khong co quyen doc folder nguon");
+            bail!("Tài khoản Google hiện tại không có quyền đọc folder nguồn");
         }
     } else if source.is_shortcut() {
         if source.shortcut_details.is_none() {
-            bail!("Shortcut nguon thieu thong tin dich");
+            bail!("Shortcut nguồn thiếu thông tin đích");
         }
     } else if source.capabilities.as_ref().and_then(|cap| cap.can_copy) != Some(true) {
-        bail!("Tai khoan Google hien tai khong co quyen copy item nguon");
+        bail!("Tài khoản Google hiện tại không có quyền copy item nguồn");
     }
     Ok(())
 }

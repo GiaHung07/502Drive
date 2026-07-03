@@ -44,7 +44,7 @@ pub async fn handle_message(
     if !repo::is_authorized(&db, user_id).await.unwrap_or(false) {
         bot.send_message(
             msg.chat.id,
-            "Khong co quyen truy cap. Lien he chu so huu de duoc cap phep.",
+            "Không có quyền truy cập. Liên hệ chủ sở hữu để được cấp phép.",
         )
         .await?;
         return Ok(());
@@ -63,7 +63,7 @@ pub async fn handle_message(
             handle_clone_request(bot, msg.chat.id, config, db, user_id, text.to_string()).await?;
         }
         Err(err) => {
-            bot.send_message(msg.chat.id, format!("Link Drive khong hop le: {err}"))
+            bot.send_message(msg.chat.id, format!("Link Drive không hợp lệ: {err}"))
                 .await?;
         }
     }
@@ -82,7 +82,7 @@ pub async fn handle_callback_query(
     let chat_id = query.message.as_ref().map(|m| m.chat().id);
     if !repo::is_authorized(&db, user_id).await.unwrap_or(false) {
         if let Some(chat_id) = chat_id {
-            bot.send_message(chat_id, "Khong co quyen truy cap.")
+            bot.send_message(chat_id, "Không có quyền truy cập.")
                 .await?;
         }
         return Ok(());
@@ -102,7 +102,7 @@ pub async fn handle_callback_query(
                     .await
                     .unwrap_or(None)
             else {
-                let msg_text = "Yeu cau clone da het han hoac khong thuoc ve ban.";
+                let msg_text = "Yêu cầu clone đã hết hạn hoặc không thuộc về bạn.";
                 if let Some(message) = query.message.as_ref() {
                     bot.edit_message_text(chat_id, message.id(), msg_text)
                         .await?;
@@ -113,7 +113,7 @@ pub async fn handle_callback_query(
             };
             if let Some(message) = query.message.as_ref() {
                 let _ = bot
-                    .edit_message_text(chat_id, message.id(), "Dang bat dau clone...")
+                    .edit_message_text(chat_id, message.id(), "Đang bắt đầu clone...")
                     .await;
             }
             spawn_clone_now(bot.clone(), chat_id, config, db, user_id, source).await?;
@@ -124,11 +124,11 @@ pub async fn handle_callback_query(
                 repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "clone_confirm")
                     .await;
             if let Some(message) = query.message.as_ref() {
-                bot.edit_message_text(chat_id, message.id(), "Da huy yeu cau clone.")
+                bot.edit_message_text(chat_id, message.id(), "Đã huỷ yêu cầu clone.")
                     .await?;
                 return Ok(());
             }
-            "Da huy yeu cau clone.".to_string()
+            "Đã huỷ yêu cầu clone.".to_string()
         }
         Some(("job", "pause", job_id)) => pause_job(&db, user_id, job_id)
             .await
@@ -156,12 +156,12 @@ pub async fn handle_callback_query(
                     }
                     text
                 }
-                Ok(false) => "Khong tim thay thu muc dich.".to_string(),
-                Err(err) => format!("Loi doi dich: {err}"),
+                Ok(false) => "Không tìm thấy thư mục đích.".to_string(),
+                Err(err) => format!("Lỗi đổi đích: {err}"),
             }
         }
-        Some(("browse", _, _)) => "Tinh nang chon thu muc chua duoc ho tro.".to_string(),
-        _ => "Hanh dong khong xac dinh.".to_string(),
+        Some(("browse", _, _)) => "Tính năng chọn thư mục chưa được hỗ trợ.".to_string(),
+        _ => "Hành động không xác định.".to_string(),
     };
 
     bot.send_message(chat_id, text).await?;
@@ -187,46 +187,46 @@ async fn handle_command(
         Command::Start => {
             bot.send_message(
                 msg.chat.id,
-                "gdclone-bot dang chay.\n\
-                 Dung /account de kiem tra ket noi Google, sau do dan link Drive vao de bat dau.",
+                "gdclone-bot đang chạy.\n\
+                 Dùng /account để kiểm tra kết nối Google, sau đó dán link Drive vào để bắt đầu.",
             )
             .await?;
         }
         Command::Help => {
             bot.send_message(
                 msg.chat.id,
-                "DANH SACH LENH\n\
+                "DANH SÁCH LỆNH\n\
                  \n\
                  Clone:\n\
-                 /clone <url>          - Xem thong tin va xac nhan\n\
-                 /clone_here <url>     - Clone ngay khong can xac nhan\n\
-                 /jobs                 - Danh sach job dang chay\n\
-                 /status <job_id>      - Chi tiet job\n\
-                 /pause <job_id>       - Tam dung job\n\
-                 /resume <job_id>      - Tiep tuc job\n\
-                 /cancel <job_id>      - Huy job\n\
-                 /retry <job_id>       - Lam lai cac item loi\n\
+                 /clone <url>          - Xem thông tin và xác nhận\n\
+                 /clone_here <url>     - Clone ngay không cần xác nhận\n\
+                 /jobs                 - Danh sách job đang chạy\n\
+                 /status <job_id>      - Chi tiết job\n\
+                 /pause <job_id>       - Tạm dừng job\n\
+                 /resume <job_id>      - Tiếp tục job\n\
+                 /cancel <job_id>      - Huỷ job\n\
+                 /retry <job_id>       - Làm lại các item lỗi\n\
                  \n\
-                 Thu muc dich:\n\
-                 /destination          - Xem thu muc dich hien tai\n\
-                 /set_destination <url>- Dat thu muc dich mac dinh\n\
-                 /clear_destination    - Xoa thu muc dich mac dinh\n\
-                 /preview              - Bang tong quan\n\
+                 Thư mục đích:\n\
+                 /destination          - Xem thư mục đích hiện tại\n\
+                 /set_destination <url>- Đặt thư mục đích mặc định\n\
+                 /clear_destination    - Xoá thư mục đích mặc định\n\
+                 /preview              - Bảng tổng quan\n\
                  \n\
-                 Watch/Dong bo:\n\
-                 /watch <src> <dst>    - Tao watch subscription\n\
-                 /watches              - Danh sach watches\n\
-                 /watch_status <id>    - Trang thai watch\n\
-                 /watch_pause <id>     - Tam dung watch\n\
-                 /watch_resume <id>    - Tiep tuc watch\n\
+                 Watch/Đồng bộ:\n\
+                 /watch <src> <dst>    - Tạo watch subscription\n\
+                 /watches              - Danh sách watches\n\
+                 /watch_status <id>    - Trạng thái watch\n\
+                 /watch_pause <id>     - Tạm dừng watch\n\
+                 /watch_resume <id>    - Tiếp tục watch\n\
                  /watch_policy <id> <policy>\n\
-                 /unwatch <id>         - Dung watch\n\
+                 /unwatch <id>         - Dừng watch\n\
                  \n\
-                 Tai khoan:\n\
-                 /account              - Trang thai Google\n\
-                 /whoami               - ID va quyen cua ban\n\
-                 /grant <user_id>      - Cap quyen nguoi dung\n\
-                 /revoke <user_id>     - Thu hoi quyen",
+                 Tài khoản:\n\
+                 /account              - Trạng thái Google\n\
+                 /whoami               - ID và quyền của bạn\n\
+                 /grant <user_id>      - Cấp quyền người dùng\n\
+                 /revoke <user_id>     - Thu hồi quyền",
             )
             .await?;
         }
@@ -236,23 +236,23 @@ async fn handle_command(
         Command::Connect => {
             bot.send_message(
                 msg.chat.id,
-                "Google Auth chay local-first.\n\
+                "Google Auth chạy local-first.\n\
                  \n\
-                 Chay lenh sau tren may dang chay bot:\n\
+                 Chạy lệnh sau trên máy đang chạy bot:\n\
                  \n\
                    gdclone-bot auth login\n\
                  \n\
-                 Sau do dung /account de kiem tra ket noi.",
+                 Sau đó dùng /account để kiểm tra kết nối.",
             )
             .await?;
         }
         Command::Account => {
             let text = match repo::account_status(&db).await {
-                Ok(Some(status)) => format!("Tai khoan Google: {status}"),
-                Ok(None) => "Chua ket noi Google.\n\
-                     Chay 'gdclone-bot auth login' tren may chay bot."
+                Ok(Some(status)) => format!("Tài khoản Google: {status}"),
+                Ok(None) => "Chưa kết nối Google.\n\
+                     Chạy 'gdclone-bot auth login' trên máy chạy bot."
                     .to_string(),
-                Err(err) => format!("Loi doc trang thai tai khoan: {err}"),
+                Err(err) => format!("Lỗi đọc trạng thái tài khoản: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -273,10 +273,10 @@ async fn handle_command(
                 .ok()
                 .flatten()
                 .map(|u| u.role)
-                .unwrap_or_else(|| "khong ro".to_string());
+                .unwrap_or_else(|| "không rõ".to_string());
             bot.send_message(
                 msg.chat.id,
-                format!("Telegram ID: {user_id}\nQuyen: {role}"),
+                format!("Telegram ID: {user_id}\nQuyền: {role}"),
             )
             .await?;
         }
@@ -285,9 +285,9 @@ async fn handle_command(
         }
         Command::ClearDestination => {
             let text = match repo::clear_default_destination(&db, "default").await {
-                Ok(0) => "Chua co thu muc dich mac dinh de xoa.".to_string(),
-                Ok(_) => "Da xoa thu muc dich mac dinh.".to_string(),
-                Err(err) => format!("Loi xoa thu muc dich: {err}"),
+                Ok(0) => "Chưa có thư mục đích mặc định để xoá.".to_string(),
+                Ok(_) => "Đã xoá thư mục đích mặc định.".to_string(),
+                Err(err) => format!("Lỗi xoá thư mục đích: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -354,19 +354,19 @@ async fn handle_command(
         }
         Command::WatchPause(watch_id) => {
             let text = match repo::pause_watch_for_user(&db, user_id, &watch_id).await {
-                Ok(true) => format!("Watch {watch_id} da tam dung."),
-                Ok(false) => "Khong tim thay watch hoac khong the tam dung.".to_string(),
-                Err(err) => format!("Loi: {err}"),
+                Ok(true) => format!("Watch {watch_id} đã tạm dừng."),
+                Ok(false) => "Không tìm thấy watch hoặc không thể tạm dừng.".to_string(),
+                Err(err) => format!("Lỗi: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
         Command::WatchResume(watch_id) => {
             let text = match repo::resume_watch_for_user(&db, user_id, &watch_id).await {
-                Ok(true) => format!("Watch {watch_id} da tiep tuc (dang bat kip)."),
+                Ok(true) => format!("Watch {watch_id} đã tiếp tục (đang bắt kịp)."),
                 Ok(false) => {
-                    "Khong tim thay watch hoac watch chua o trang thai tam dung.".to_string()
+                    "Không tìm thấy watch hoặc watch chưa ở trạng thái tạm dừng.".to_string()
                 }
-                Err(err) => format!("Loi: {err}"),
+                Err(err) => format!("Lỗi: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -377,9 +377,9 @@ async fn handle_command(
         }
         Command::Unwatch(watch_id) => {
             let text = match repo::stop_watch_for_user(&db, user_id, &watch_id).await {
-                Ok(true) => format!("Watch {watch_id} da dung."),
-                Ok(false) => "Khong tim thay watch hoac da dung truoc do.".to_string(),
-                Err(err) => format!("Loi: {err}"),
+                Ok(true) => format!("Watch {watch_id} đã dừng."),
+                Ok(false) => "Không tìm thấy watch hoặc đã dừng trước đó.".to_string(),
+                Err(err) => format!("Lỗi: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -392,12 +392,12 @@ async fn handle_command(
 async fn list_jobs(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
     let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 10).await?;
     if jobs.is_empty() {
-        return Ok("Khong co job dang chay.".to_string());
+        return Ok("Không có job đang chạy.".to_string());
     }
-    let mut lines = vec!["Job dang hoat dong:".to_string()];
+    let mut lines = vec!["Job đang hoạt động:".to_string()];
     for job in &jobs {
         lines.push(format!(
-            "  {} [{}]  qua_quet:{} hoan_tat:{} loi:{} bo_qua:{}",
+            "  {} [{}]  đã_quét:{} hoàn_tất:{} lỗi:{} bỏ_qua:{}",
             short_job_id(&job.id),
             vi_job_status(&job.status),
             job.total_discovered,
@@ -419,7 +419,7 @@ async fn spawn_preview_dashboard(
 ) -> ResponseResult<()> {
     let text = render_preview_dashboard(&db, telegram_user_id)
         .await
-        .unwrap_or_else(|err| format!("Loi tai bang tong quan: {err}"));
+        .unwrap_or_else(|err| format!("Lỗi tải bảng tổng quan: {err}"));
     let message = bot.send_message(chat_id, text).await?;
     tokio::spawn(async move {
         let mut last_text = String::new();
@@ -427,7 +427,7 @@ async fn spawn_preview_dashboard(
             tokio::time::sleep(Duration::from_secs(2)).await;
             let text = match render_preview_dashboard(&db, telegram_user_id).await {
                 Ok(t) => t,
-                Err(err) => format!("Loi cap nhat: {err}"),
+                Err(err) => format!("Lỗi cập nhật: {err}"),
             };
             if text == last_text {
                 continue;
@@ -445,17 +445,17 @@ async fn spawn_preview_dashboard(
 async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
     let account = repo::account_status(db)
         .await?
-        .unwrap_or_else(|| "chua ket noi".to_string());
+        .unwrap_or_else(|| "chưa kết nối".to_string());
     let destination = repo::default_destination_profile(db, "default").await?;
     let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 5).await?;
     let counts = repo::job_status_counts(db).await?;
 
     let mut lines = vec![
-        "=== Bang tong quan gdclone-bot ===".to_string(),
+        "=== Bảng tổng quan gdclone-bot ===".to_string(),
         format!("Google       : {}", vi_account_status(&account)),
         match &destination {
-            Some(p) => format!("Thu muc dich : {} ({})", p.label, p.destination_parent_id),
-            None => "Thu muc dich : Chua dat - dung /set_destination".to_string(),
+            Some(p) => format!("Thư mục đích : {} ({})", p.label, p.destination_parent_id),
+            None => "Thư mục đích : Chưa đặt - dùng /set_destination".to_string(),
         },
     ];
 
@@ -469,12 +469,12 @@ async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyho
     }
 
     if jobs.is_empty() {
-        lines.push("Dang chay    : Khong co".to_string());
+        lines.push("Đang chạy    : Không có".to_string());
     } else {
-        lines.push("Dang chay:".to_string());
+        lines.push("Đang chạy:".to_string());
         for job in &jobs {
             lines.push(format!(
-                "  {} [{}] qua_quet:{} hoan_tat:{} loi:{}",
+                "  {} [{}] đã_quét:{} hoàn_tất:{} lỗi:{}",
                 short_job_id(&job.id),
                 vi_job_status(&job.status),
                 job.total_discovered,
@@ -484,7 +484,7 @@ async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyho
         }
     }
 
-    lines.push("(Tu cap nhat 30 giay - /preview de mo lai)".to_string());
+    lines.push("(Tự cập nhật 30 giây - /preview để mở lại)".to_string());
     Ok(lines.join("\n"))
 }
 
@@ -535,7 +535,7 @@ async fn spawn_clone_now(
     let source = match parse_drive_reference(&input) {
         Ok(source) => source,
         Err(err) => {
-            bot.send_message(chat_id, format!("Link Drive khong hop le: {err}"))
+            bot.send_message(chat_id, format!("Link Drive không hợp lệ: {err}"))
                 .await?;
             return Ok(());
         }
@@ -544,7 +544,7 @@ async fn spawn_clone_now(
     let progress_message = bot
         .send_message(
             chat_id,
-            format!("Trang thai: dang xep hang\n{}", render_progress(None, 0, 0)),
+            format!("Trạng thái: đang xếp hàng\n{}", render_progress(None, 0, 0)),
         )
         .await?;
     let progress_message_id = progress_message.id;
@@ -561,7 +561,7 @@ async fn spawn_clone_now(
 
     bot.send_message(
         chat_id,
-        "Da nhan job clone. Theo doi bang /jobs hoac /status <job_id>.",
+        "Đã nhận job clone. Theo dõi bằng /jobs hoặc /status <job_id>.",
     )
     .await?;
 
@@ -590,7 +590,7 @@ async fn spawn_clone_now(
                     &bot,
                     chat_id,
                     Some(progress_message_id),
-                    format!("Loi: {err}"),
+                    format!("Lỗi: {err}"),
                 )
                 .await
                 {
@@ -649,7 +649,7 @@ async fn handle_clone_request(
             }
         }
         Err(err) => {
-            bot.send_message(chat_id, format!("Loi kiem tra nguon: {err}"))
+            bot.send_message(chat_id, format!("Lỗi kiểm tra nguồn: {err}"))
                 .await?;
         }
     }
@@ -695,7 +695,7 @@ fn spawn_progress_updater(
                     Ok(Some(detail)) => detail,
                     Ok(None) => {
                         let text = format!(
-                            "Trang thai: dang chuan bi\nThoi gian: {}\n{}",
+                            "Trạng thái: đang chuẩn bị\nThời gian: {}\n{}",
                             format_duration_secs(elapsed_secs),
                             render_progress(None, 0, 0),
                         );
@@ -808,10 +808,10 @@ fn render_job_progress(job: &repo::JobDetail, elapsed_secs: u64) -> String {
         .unwrap_or_else(|| "--".to_string());
 
     format!(
-        "Trang thai  : {status}\n\
+        "Trạng thái  : {status}\n\
          Job         : {job_id}\n\
-         Thoi gian   : {elapsed}  Toc do: {rate}  Du kien: {eta}\n\
-         Qua quet    : {discovered}  Bo qua: {skipped}\n\
+         Thời gian   : {elapsed}  Toc do: {rate}  Du kien: {eta}\n\
+         Đã quét    : {discovered}  Bỏ qua: {skipped}\n\
          {bar}",
         status = vi_job_status(&job.status),
         job_id = short_job_id(&job.id),
@@ -839,31 +839,31 @@ async fn show_job_status(
     job_id: &str,
 ) -> anyhow::Result<String> {
     let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? else {
-        return Ok("Khong tim thay job thuoc tai khoan cua ban.".to_string());
+        return Ok("Không tìm thấy job thuộc tài khoản của bạn.".to_string());
     };
 
     let mut lines = vec![
         format!("Job         : {}", job.id),
         format!("Loai        : {}", job.kind),
-        format!("Trang thai  : {}", vi_job_status(&job.status)),
-        format!("Nguon       : {}", job.source_root_id),
-        format!("Thu muc dich: {}", job.destination_parent_id),
-        format!("Qua quet    : {}", job.total_discovered),
-        format!("Hoan tat    : {}", job.completed_items),
-        format!("Loi         : {}", job.failed_items),
-        format!("Bo qua      : {}", job.skipped_items),
+        format!("Trạng thái  : {}", vi_job_status(&job.status)),
+        format!("Nguồn       : {}", job.source_root_id),
+        format!("Thư mục đích: {}", job.destination_parent_id),
+        format!("Đã quét    : {}", job.total_discovered),
+        format!("Hoàn tất    : {}", job.completed_items),
+        format!("Lỗi         : {}", job.failed_items),
+        format!("Bỏ qua      : {}", job.skipped_items),
     ];
     if let Some(error) = job.error_summary {
-        lines.push(format!("Loi gan nhat: {error}"));
+        lines.push(format!("Lỗi gan nhat: {error}"));
     }
     Ok(lines.join("\n"))
 }
 
 async fn pause_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
     if repo::pause_job_for_user(db, telegram_user_id, job_id).await? {
-        Ok(format!("Da yeu cau tam dung job {job_id}."))
+        Ok(format!("Đã yêu cầu tạm dừng job {job_id}."))
     } else {
-        Ok("Khong tim thay job hoac trang thai hien tai khong cho tam dung.".to_string())
+        Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho tạm dừng.".to_string())
     }
 }
 
@@ -875,17 +875,17 @@ async fn resume_job(
 ) -> anyhow::Result<String> {
     if repo::resume_job_for_user(db, telegram_user_id, job_id).await? {
         let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
-        Ok(format!("Da yeu cau tiep tuc job {job_id}."))
+        Ok(format!("Đã yêu cầu tiếp tục job {job_id}."))
     } else {
-        Ok("Khong tim thay job hoac job chua o trang thai tam dung.".to_string())
+        Ok("Không tìm thấy job hoặc job chưa ở trạng thái tạm dừng.".to_string())
     }
 }
 
 async fn cancel_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
     if repo::cancel_job_for_user(db, telegram_user_id, job_id).await? {
-        Ok(format!("Da yeu cau huy job {job_id}."))
+        Ok(format!("Đã yêu cầu huỷ job {job_id}."))
     } else {
-        Ok("Khong tim thay job hoac trang thai hien tai khong cho huy.".to_string())
+        Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho huỷ.".to_string())
     }
 }
 
@@ -898,15 +898,15 @@ async fn retry_job(
     if let Some(summary) = repo::retry_failed_job_for_user(db, telegram_user_id, job_id).await? {
         let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
         Ok(format!(
-            "Da xep hang lam lai job {job_id}.\n\
-             Thu muc: {}  Item: {}  Thao tac: {}",
+            "Đã xếp hàng làm lại job {job_id}.\n\
+             Thư mục: {}  Item: {}  Thao tác: {}",
             summary.traversal_folders_requeued,
             summary.job_items_requeued,
             summary.operation_intents_replanned,
         ))
     } else {
         Ok(
-            "Khong tim thay job, job khong the retry, hoac khong co phan loi de lam lai."
+            "Không tìm thấy job, job không thể retry, hoặc không có phần lỗi để làm lại."
                 .to_string(),
         )
     }
@@ -918,19 +918,19 @@ async fn grant_user(db: &Database, actor_user_id: i64, input: &str) -> anyhow::R
     ensure_owner(db, actor_user_id).await?;
     let target = parse_telegram_user_id(input)?;
     repo::grant_operator(db, target).await?;
-    Ok(format!("Da cap quyen operator cho {target}."))
+    Ok(format!("Đã cấp quyền operator cho {target}."))
 }
 
 async fn revoke_user(db: &Database, actor_user_id: i64, input: &str) -> anyhow::Result<String> {
     ensure_owner(db, actor_user_id).await?;
     let target = parse_telegram_user_id(input)?;
     if target == actor_user_id {
-        anyhow::bail!("Chu so huu khong the tu thu hoi quyen cua minh");
+        anyhow::bail!("Chủ sở hữu không thể tự thu hồi quyền của mình");
     }
     if repo::revoke_operator(db, target).await? {
-        Ok(format!("Da thu hoi quyen operator cua {target}."))
+        Ok(format!("Đã thu hồi quyền operator của {target}."))
     } else {
-        Ok("Khong tim thay nguoi dung hoac da bi vo hieu hoa.".to_string())
+        Ok("Không tìm thấy người dùng hoặc đã bị vô hiệu hoá.".to_string())
     }
 }
 
@@ -941,11 +941,11 @@ async fn disconnect_google(
 ) -> anyhow::Result<String> {
     ensure_owner(db, actor_user_id).await?;
     let Some(account) = repo::google_account_secret(db, "default").await? else {
-        return Ok("Chua co tai khoan Google nao duoc ket noi.".to_string());
+        return Ok("Chưa có tài khoản Google nào được kết nối.".to_string());
     };
     if account.status != "connected" && account.status != "reconnect_required" {
         return Ok(format!(
-            "Tai khoan Google da o trang thai: {}",
+            "Tài khoản Google đã ở trạng thái: {}",
             account.status
         ));
     }
@@ -958,14 +958,14 @@ async fn disconnect_google(
     )
     .await?;
     repo::mark_account_revoked(db, "default").await?;
-    Ok("Da thu hoi refresh token Google va danh dau tai khoan la revoked.".to_string())
+    Ok("Đã thu hồi refresh token Google và đánh dấu tài khoản là revoked.".to_string())
 }
 
 async fn ensure_owner(db: &Database, actor_user_id: i64) -> anyhow::Result<()> {
     if repo::is_owner(db, actor_user_id).await? {
         Ok(())
     } else {
-        anyhow::bail!("Chi chu so huu moi co the quan ly nguoi dung")
+        anyhow::bail!("Chỉ chủ sở hữu mới có thể quản lý người dùng")
     }
 }
 
@@ -991,8 +991,8 @@ async fn spawn_destination_panel(bot: Bot, chat_id: ChatId, db: Database) -> Res
     if profiles.is_empty() {
         bot.send_message(
             chat_id,
-            "Chua dat thu muc dich mac dinh.\n\
-             Dung /set_destination <folder_url> de cau hinh.",
+            "Chưa đặt thư mục đích mặc định.\n\
+             Dùng /set_destination <folder_url> để cấu hình.",
         )
         .await?;
     } else {
@@ -1005,12 +1005,12 @@ async fn spawn_destination_panel(bot: Bot, chat_id: ChatId, db: Database) -> Res
 
 fn render_destination_list(profiles: &[repo::DestinationProfile]) -> String {
     if profiles.is_empty() {
-        return "Chua co thu muc dich nao duoc luu.\nDung /set_destination <folder_url>."
+        return "Chưa có thư mục đích nào được lưu.\nDung /set_destination <folder_url>."
             .to_string();
     }
-    let mut lines = vec!["Thu muc dich da luu:".to_string()];
+    let mut lines = vec!["Thư mục đích đã lưu:".to_string()];
     for p in profiles {
-        let marker = if p.is_default { "[mac dinh]" } else { "" };
+        let marker = if p.is_default { "[mặc định]" } else { "" };
         let mut row = format!("  {} {}", p.label, marker).trim().to_string();
         if let Some(drive_id) = &p.destination_drive_id {
             row.push_str(&format!(" (Shared Drive {drive_id})"));
@@ -1020,7 +1020,7 @@ fn render_destination_list(profiles: &[repo::DestinationProfile]) -> String {
         lines.push(row);
     }
     lines.push(String::new());
-    lines.push("Nhan vao ten de dat lam mac dinh. Them moi: /set_destination <url>".to_string());
+    lines.push("Nhấn vào tên để đặt làm mặc định. Thêm mới: /set_destination <url>".to_string());
     lines.join("\n")
 }
 
@@ -1031,7 +1031,7 @@ async fn destination_summary(db: &Database) -> anyhow::Result<String> {
     match profiles.first() {
         Some(p) => {
             let mut lines = vec![
-                "Thu muc dich mac dinh:".to_string(),
+                "Thư mục đích mặc định:".to_string(),
                 format!("  Ten : {}", p.label),
                 format!("  ID  : {}", p.destination_parent_id),
             ];
@@ -1039,11 +1039,11 @@ async fn destination_summary(db: &Database) -> anyhow::Result<String> {
                 lines.push(format!("  Shared Drive: {drive_id}"));
             }
             lines.push(String::new());
-            lines.push("Thay doi: /set_destination <url>   Xoa: /clear_destination".to_string());
+            lines.push("Thay đổi: /set_destination <url>   Xoá: /clear_destination".to_string());
             Ok(lines.join("\n"))
         }
-        None => Ok("Chua dat thu muc dich mac dinh.\n\
-             Dung /set_destination <folder_url> de cau hinh."
+        None => Ok("Chưa đặt thư mục đích mặc định.\n\
+             Dùng /set_destination <folder_url> để cấu hình."
             .to_string()),
     }
 }
@@ -1059,10 +1059,10 @@ async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyh
         .await?;
 
     if file.mime_type != FOLDER_MIME_TYPE {
-        anyhow::bail!("Thu muc dich phai la Google Drive folder");
+        anyhow::bail!("Thư mục đích phai la Google Drive folder");
     }
     if file.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
-        anyhow::bail!("Tai khoan Google hien tai khong co quyen ghi vao thu muc dich nay");
+        anyhow::bail!("Tài khoản Google hiện tại không có quyền ghi vào thư mục đích này");
     }
 
     repo::upsert_destination_profile(
@@ -1079,7 +1079,7 @@ async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyh
     .await?;
 
     Ok(format!(
-        "Da dat thu muc dich mac dinh: {}\nDrive folder ID: {}",
+        "Đã đặt thư mục đích mặc định: {}\nDrive folder ID: {}",
         file.name, file.id
     ))
 }
@@ -1101,14 +1101,14 @@ async fn inspect_clone_source(
         .await?;
 
     let item_type = if source.is_folder() {
-        "Thu muc"
+        "Thư mục"
     } else {
         "File"
     };
 
     let mut lines = vec![
-        format!("Nguon       : {}", source.name),
-        format!("Loai        : {item_type}"),
+        format!("Nguồn       : {}", source.name),
+        format!("Loại        : {item_type}"),
         format!("MIME        : {}", source.mime_type),
     ];
 
@@ -1128,23 +1128,23 @@ async fn inspect_clone_source(
     if source.is_folder() {
         if caps.and_then(|c| c.can_list_children) == Some(false) {
             lines.push(
-                "CANH BAO: Khong the liet ke noi dung - thu muc co the bi han che quyen."
+                "CẢNH BÁO: Không thể liệt kê nội dung - thư mục có thể bị hạn chế quyền."
                     .to_string(),
             );
         }
     } else if caps.and_then(|c| c.can_copy) == Some(false) {
-        lines.push("CANH BAO: Khong the sao chep - file bi han che hoac chong copy.".to_string());
+        lines.push("CẢNH BÁO: Không thể sao chép - file bị hạn chế hoặc chống copy.".to_string());
     }
 
     if source.copy_requires_writer_permission == Some(true) {
         lines.push(
-            "CANH BAO: copyRequiresWriterPermission - chi nguoi co quyen ghi moi copy duoc."
+            "CẢNH BÁO: copyRequiresWriterPermission - chỉ người có quyền ghi mới copy được."
                 .to_string(),
         );
     }
 
     if reference.resource_key.is_some() {
-        lines.push("Luu y: Link dung resource key (link han che truy cap).".to_string());
+        lines.push("Lưu ý: Link dùng resource key (link hạn chế truy cập).".to_string());
     }
 
     if let Some(default_dest) = repo::default_destination_profile(db, "default").await? {
@@ -1154,11 +1154,11 @@ async fn inspect_clone_source(
             default_dest.label.clone()
         };
         lines.push(String::new());
-        lines.push(format!("Thu muc dich: {destination_preview}"));
-        lines.push("[Clone ngay]  [Doi dich]  [Huy]".to_string());
+        lines.push(format!("Thư mục đích: {destination_preview}"));
+        lines.push("[Clone ngay]  [Đổi đích]  [Huỷ]".to_string());
     } else {
         lines.push(String::new());
-        lines.push("Chua co thu muc dich. Dung /set_destination <folder_url>.".to_string());
+        lines.push("Chưa có thư mục đích. Dùng /set_destination <folder_url>.".to_string());
     }
 
     Ok(lines.join("\n"))
@@ -1195,8 +1195,8 @@ async fn start_clone_reference(
     let active_count = repo::active_job_count_for_user(db, telegram_user_id).await?;
     if active_count >= config.engine.max_active_jobs_per_user as i64 {
         anyhow::bail!(
-            "Ban dang co {active_count} job hoat dong. \
-             Cho hoan thanh hoac huy bang /cancel <job_id>."
+            "Bạn đang có {active_count} job hoạt động. \
+             Chờ hoàn thành hoặc huỷ bằng /cancel <job_id>."
         );
     }
     let service = CloneService::new(config.clone(), db.clone());
@@ -1236,16 +1236,16 @@ async fn start_watch(
         .get_reference(access_token.as_str(), &source_ref)
         .await?;
     if !source.is_folder() {
-        anyhow::bail!("Nguon phai la Google Drive folder.");
+        anyhow::bail!("Nguồn phai la Google Drive folder.");
     }
     let dest = drive
         .get_reference(access_token.as_str(), &dest_ref)
         .await?;
     if !dest.is_folder() {
-        anyhow::bail!("Dich phai la Google Drive folder.");
+        anyhow::bail!("Đích phải là Google Drive folder.");
     }
     if dest.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
-        anyhow::bail!("Khong co quyen ghi vao thu muc dich.");
+        anyhow::bail!("Không có quyền ghi vào thư mục đích.");
     }
 
     let corpus_kind = if source.drive_id.is_some() {
@@ -1311,11 +1311,11 @@ async fn start_watch(
     }
 
     Ok(format!(
-        "Watch da tao thanh cong.\n\
+        "Watch đã tạo thành công.\n\
          ID          : {short}\n\
-         Nguon       : {src_name} ({src_id})\n\
-         Dich        : {dst_name}\n\
-         Clone ban dau dang chay nen - dung /watch_status {short} de theo doi.",
+         Nguồn       : {src_name} ({src_id})\n\
+         Đích        : {dst_name}\n\
+         Clone ban đầu đang chạy nền - dùng /watch_status {short} để theo dõi.",
         short = &watch_id[..8.min(watch_id.len())],
         src_name = source.name,
         src_id = source.id,
@@ -1326,7 +1326,7 @@ async fn start_watch(
 async fn list_watches(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
     let watches = repo::list_watches_for_user(db, telegram_user_id).await?;
     if watches.is_empty() {
-        return Ok("Chua co watch subscription nao.".to_string());
+        return Ok("Chưa có watch subscription nào.".to_string());
     }
     let mut lines = vec!["Danh sach Watch:".to_string()];
     for w in &watches {
@@ -1347,13 +1347,13 @@ async fn watch_status_detail(
     watch_id: &str,
 ) -> anyhow::Result<String> {
     let Some(w) = repo::watch_for_user(db, telegram_user_id, watch_id).await? else {
-        return Ok("Khong tim thay watch.".to_string());
+        return Ok("Không tìm thấy watch.".to_string());
     };
     Ok(format!(
         "Watch       : {id}\n\
-         Trang thai  : {status}\n\
-         Nguon       : {src}\n\
-         Dich        : {dst}\n\
+         Trạng thái  : {status}\n\
+         Nguồn       : {src}\n\
+         Đích        : {dst}\n\
          Cap nhat ND : {cup}\n\
          Khi xoa     : {del}\n\
          Khi move ra : {mop}\n\
@@ -1389,16 +1389,16 @@ async fn set_watch_policy(
         "versioned_copy" | "replace_copy" | "manual_confirmation"
     ) {
         anyhow::bail!(
-            "Policy khong hop le '{}'. Chon mot trong: versioned_copy | replace_copy | manual_confirmation",
+            "Policy không hợp lệ '{}'. Chọn một trong: versioned_copy | replace_copy | manual_confirmation",
             policy
         );
     }
     if repo::set_watch_content_update_policy(db, telegram_user_id, watch_id, policy).await? {
         Ok(format!(
-            "Watch {watch_id} content_update_policy da doi thanh {policy}."
+            "Watch {watch_id} content_update_policy đã đổi thành {policy}."
         ))
     } else {
-        Ok("Khong tim thay watch.".to_string())
+        Ok("Không tìm thấy watch.".to_string())
     }
 }
 
@@ -1410,40 +1410,40 @@ fn short_job_id(job_id: &str) -> &str {
 
 fn vi_account_status(status: &str) -> &str {
     match status {
-        "connected" => "Da ket noi",
-        "reconnect_required" => "Can dang nhap lai",
-        "revoked" => "Da thu hoi",
-        "disabled" => "Da tat",
+        "connected" => "Đã kết nối",
+        "reconnect_required" => "Cần đăng nhập lại",
+        "revoked" => "Đã thu hồi",
+        "disabled" => "Đã tắt",
         other => other,
     }
 }
 
 fn vi_job_status(status: &str) -> &str {
     match status {
-        "queued" => "dang cho",
-        "discovering" => "dang quet",
-        "running" => "dang chay",
-        "pausing" => "dang tam dung",
-        "paused" => "tam dung",
-        "cancelling" => "dang huy",
-        "cancelled" => "da huy",
-        "recovering" => "dang phuc hoi",
-        "completed" => "hoan tat",
-        "partially_completed" => "hoan tat mot phan",
-        "failed" => "that bai",
+        "queued" => "đang chờ",
+        "discovering" => "đang quét",
+        "running" => "đang chạy",
+        "pausing" => "đang tạm dừng",
+        "paused" => "tạm dừng",
+        "cancelling" => "đang huỷ",
+        "cancelled" => "đã huỷ",
+        "recovering" => "đang phục hồi",
+        "completed" => "hoàn tất",
+        "partially_completed" => "hoàn tất một phần",
+        "failed" => "thất bại",
         other => other,
     }
 }
 
 fn vi_watch_status(status: &str) -> &str {
     match status {
-        "active" => "hoat dong",
-        "paused" => "tam dung",
-        "initializing" => "dang khoi tao",
-        "catching_up" => "dang bat kip",
-        "degraded" => "bi loi",
-        "needs_reconcile" => "can dong bo lai",
-        "stopped" => "da dung",
+        "active" => "hoạt động",
+        "paused" => "tạm dừng",
+        "initializing" => "đang khởi tạo",
+        "catching_up" => "đang bắt kịp",
+        "degraded" => "bi lỗi",
+        "needs_reconcile" => "cần đồng bộ lại",
+        "stopped" => "đã dừng",
         other => other,
     }
 }

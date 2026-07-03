@@ -3,19 +3,19 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 pub fn confirm_clone_keyboard(state_id: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([[
         InlineKeyboardButton::callback("Clone ngay", format!("clone:confirm:{state_id}")),
-        InlineKeyboardButton::callback("Huy", format!("clone:cancel:{state_id}")),
+        InlineKeyboardButton::callback("Huỷ", format!("clone:cancel:{state_id}")),
     ]])
 }
 
 pub fn job_control_keyboard(job_id: &str, paused: bool) -> InlineKeyboardMarkup {
     let primary = if paused {
-        InlineKeyboardButton::callback("Tiep tuc", format!("job:resume:{job_id}"))
+        InlineKeyboardButton::callback("Tiếp tục", format!("job:resume:{job_id}"))
     } else {
-        InlineKeyboardButton::callback("Tam dung", format!("job:pause:{job_id}"))
+        InlineKeyboardButton::callback("Tạm dừng", format!("job:pause:{job_id}"))
     };
     InlineKeyboardMarkup::new([[
         primary,
-        InlineKeyboardButton::callback("Huy", format!("job:cancel:{job_id}")),
+        InlineKeyboardButton::callback("Huỷ", format!("job:cancel:{job_id}")),
     ]])
 }
 
@@ -32,7 +32,7 @@ pub fn recent_destinations_keyboard(
             } else {
                 p.label.clone()
             };
-            let marker = if p.is_default { "[mac dinh] " } else { "" };
+            let marker = if p.is_default { "[mặc định] " } else { "" };
             vec![InlineKeyboardButton::callback(
                 format!("{marker}{label}"),
                 format!("dest:select:{}", p.id),
