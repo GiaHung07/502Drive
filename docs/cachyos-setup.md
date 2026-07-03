@@ -11,7 +11,29 @@ $EDITOR "$HOME/.config/gdclone-bot/config.toml"
 gdclone-bot --config "$HOME/.config/gdclone-bot/config.toml" auth login
 gdclone-bot --config "$HOME/.config/gdclone-bot/config.toml" doctor
 gdclone-bot --config "$HOME/.config/gdclone-bot/config.toml" run
-gdclone-bot --config "$HOME/.config/gdclone-bot/config.toml" service-install
 ```
 
-Use `loginctl enable-linger "$USER"` only if the user service must continue after logout.
+## Run In Background
+
+Install and start the systemd user service:
+
+```bash
+bash scripts/install-systemd-user.sh
+systemctl --user status gdclone-bot --no-pager
+journalctl --user -u gdclone-bot -f
+```
+
+The installer:
+
+- installs `target/release/gdclone-bot` to `~/.local/bin/gdclone-bot`;
+- writes `~/.config/systemd/user/gdclone-bot.service`;
+- enables and starts the user service;
+- enables linger with `loginctl enable-linger "$USER"` when allowed.
+
+Manual controls:
+
+```bash
+systemctl --user restart gdclone-bot
+systemctl --user stop gdclone-bot
+systemctl --user disable --now gdclone-bot
+```
