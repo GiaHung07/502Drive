@@ -955,30 +955,7 @@ async fn show_job_status(
     telegram_user_id: i64,
     job_id: &str,
 ) -> anyhow::Result<String> {
-    let job_id = job_id.trim();
-    let job = if job_id.is_empty() {
-        let Some(job) = repo::list_active_jobs_for_user(db, telegram_user_id, 1)
-            .await?
-            .into_iter()
-            .next()
-        else {
-            return Ok(
-                "Không có job đang chạy. Dùng /last_report để lấy report gần nhất.".to_string(),
-            );
-        };
-        repo::job_detail_for_user(db, telegram_user_id, &job.id)
-            .await?
-            .expect("active job listed but detail missing")
-    } else if let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? {
-        job
-    } else {
-        let matches = repo::job_details_for_user_prefix(db, telegram_user_id, job_id, 2).await?;
-        match matches.as_slice() {
-            [job] => job.clone(),
-            [] => return Ok("Không tìm thấy job thuộc tài khoản của bạn.".to_string()),
-            _ => return Ok("Có nhiều job trùng prefix. Nhập thêm vài ký tự job ID.".to_string()),
-        }
-    };
+    let job = resolve_job_for_user(db, telegram_user_id, job_id).await?;
 
     let mut lines = vec!["CHI TIẾT JOB".to_string(), "━━━━━━━━━━".to_string()];
     push_field(&mut lines, "Job", &job.id);
@@ -998,9 +975,52 @@ async fn show_job_status(
     Ok(lines.join("\n"))
 }
 
+async fn resolve_job_for_user(
+    db: &Database,
+    telegram_user_id: i64,
+    job_id: &str,
+) -> anyhow::Result<repo::JobDetail> {
+    let job_id = job_id.trim();
+    if job_id.is_empty() {
+        let Some(job) = repo::list_active_jobs_for_user(db, telegram_user_id, 1)
+            .await?
+            .into_iter()
+            .next()
+        else {
+            anyhow::bail!("Không có job đang chạy. Dùng /last_report để lấy report gần nhất.");
+        };
+        return repo::job_detail_for_user(db, telegram_user_id, &job.id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Job đang chạy không còn tồn tại."));
+    }
+
+    if let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? {
+        return Ok(job);
+    }
+
+    let matches = repo::job_details_for_user_prefix(db, telegram_user_id, job_id, 2).await?;
+    match matches.as_slice() {
+        [job] => Ok(job.clone()),
+        [] => anyhow::bail!("Không tìm thấy job thuộc tài khoản của bạn."),
+        _ => anyhow::bail!("Có nhiều job trùng prefix. Nhập thêm vài ký tự job ID."),
+    }
+}
+
+async fn resolve_job_id_for_user(
+    db: &Database,
+    telegram_user_id: i64,
+    job_id: &str,
+) -> anyhow::Result<String> {
+    Ok(resolve_job_for_user(db, telegram_user_id, job_id).await?.id)
+}
+
 async fn pause_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
-    if repo::pause_job_for_user(db, telegram_user_id, job_id).await? {
-        Ok(format!("Đã yêu cầu tạm dừng job {job_id}."))
+    let job_id = resolve_job_id_for_user(db, telegram_user_id, job_id).await?;
+    if repo::pause_job_for_user(db, telegram_user_id, &job_id).await? {
+        Ok(format!(
+            "Đã yêu cầu tạm dừng job {}.",
+            short_job_id(&job_id)
+        ))
     } else {
         Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho tạm dừng.".to_string())
     }
@@ -1012,17 +1032,22 @@ async fn resume_job(
     telegram_user_id: i64,
     job_id: &str,
 ) -> anyhow::Result<String> {
-    if repo::resume_job_for_user(db, telegram_user_id, job_id).await? {
+    let job_id = resolve_job_id_for_user(db, telegram_user_id, job_id).await?;
+    if repo::resume_job_for_user(db, telegram_user_id, &job_id).await? {
         let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
-        Ok(format!("Đã yêu cầu tiếp tục job {job_id}."))
+        Ok(format!(
+            "Đã yêu cầu tiếp tục job {}.",
+            short_job_id(&job_id)
+        ))
     } else {
         Ok("Không tìm thấy job hoặc job chưa ở trạng thái tạm dừng.".to_string())
     }
 }
 
 async fn cancel_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
-    if repo::cancel_job_for_user(db, telegram_user_id, job_id).await? {
-        Ok(format!("Đã yêu cầu huỷ job {job_id}."))
+    let job_id = resolve_job_id_for_user(db, telegram_user_id, job_id).await?;
+    if repo::cancel_job_for_user(db, telegram_user_id, &job_id).await? {
+        Ok(format!("Đã yêu cầu huỷ job {}.", short_job_id(&job_id)))
     } else {
         Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho huỷ.".to_string())
     }
@@ -1034,11 +1059,13 @@ async fn retry_job(
     telegram_user_id: i64,
     job_id: &str,
 ) -> anyhow::Result<String> {
-    if let Some(summary) = repo::retry_failed_job_for_user(db, telegram_user_id, job_id).await? {
+    let job_id = resolve_job_id_for_user(db, telegram_user_id, job_id).await?;
+    if let Some(summary) = repo::retry_failed_job_for_user(db, telegram_user_id, &job_id).await? {
         let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
         Ok(format!(
-            "Đã xếp hàng làm lại job {job_id}.\n\
+            "Đã xếp hàng làm lại job {}.\n\
              Thư mục: {}  Item: {}  Thao tác: {}",
+            short_job_id(&job_id),
             summary.traversal_folders_requeued,
             summary.job_items_requeued,
             summary.operation_intents_replanned,

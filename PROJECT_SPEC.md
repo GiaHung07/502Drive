@@ -1996,15 +1996,31 @@ Kill-process test bắt buộc.
 
 ## Phase 3 — Reliability và UX
 
-- adaptive pacer;
-- retry classification;
-- pause/resume/cancel/retry;
-- destination browser;
-- duplicate/shortcut policies;
-- JSON/CSV report;
-- Shared Drive;
-- systemd packaging;
-- security hardening.
+- **Phase 3.1 — Permission/quota diagnostics**
+  - Drive error translator cho Telegram;
+  - report `error_category`;
+  - báo “không dùng được” với file/folder bị policy/quyền chặn;
+  - không xin quyền hộ user, không bypass/capture.
+- **Phase 3.2 — Operational controls**
+  - `/status`, `/pause`, `/resume`, `/cancel`, `/retry` nhận full ID, short ID,
+    và mặc định job active mới nhất khi hợp lý;
+  - `/last_report`;
+  - progress %, elapsed, rate, ETA;
+  - callback hết hạn không làm lỗi handler.
+- **Phase 3.3 — Shared Drive/resource-key polish**
+  - test My Drive ↔ Shared Drive;
+  - thông báo rõ thiếu resource key/quyền;
+  - report lỗi Shared Drive dễ hiểu.
+- **Phase 3.4 — Destination UX**
+  - recent destinations;
+  - optional folder browser nếu paste link gây khó chịu;
+  - không làm dashboard web.
+- **Phase 3.5 — One-shot hardening**
+  - adaptive pacer/retry classification;
+  - duplicate/shortcut policies vừa đủ;
+  - JSON/CSV report;
+  - systemd packaging;
+  - security hardening.
 
 One-shot acceptance phải xanh trước Watch.
 
