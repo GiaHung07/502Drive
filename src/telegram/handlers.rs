@@ -3,9 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
-    types::{InputFile, MessageId},
+    types::{InlineKeyboardMarkup, InputFile, MessageId},
     utils::command::BotCommands,
 };
 use tokio::sync::oneshot;
@@ -16,8 +17,9 @@ use crate::{
     drive::{
         auth as oauth,
         client::{DriveApiError, DriveClient},
-        links::parse_drive_reference,
+        links::{DriveReference, parse_drive_reference},
         token_manager::TokenManager,
+        types::DriveFile,
         types::FOLDER_MIME_TYPE,
     },
     engine::{
@@ -37,6 +39,7 @@ use crate::{
 
 const CALLBACK_STATE_TTL_MS: i64 = 15 * 60 * 1000;
 const CLONE_PLAN_ITEM_LIMIT: usize = 2_000;
+const DESTINATION_BROWSER_LIMIT: usize = 20;
 
 pub async fn handle_message(
     bot: Bot,
@@ -170,7 +173,47 @@ pub async fn handle_callback_query(
                 Err(err) => format!("Lỗi đổi đích: {err}"),
             }
         }
-        Some(("browse", _, _)) => "Tính năng chọn thư mục chưa được hỗ trợ.".to_string(),
+        Some(("browse", "open", state_id)) => {
+            let result = open_destination_browser(&config, &db, user_id, chat_id.0, state_id).await;
+            match result {
+                Ok((text, keyboard)) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        text,
+                        Some(keyboard),
+                    )
+                    .await?;
+                }
+                Err(err) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        format!("Lỗi duyệt thư mục:\n{}", format_error_for_user(&err)),
+                        None,
+                    )
+                    .await?;
+                }
+            }
+            return Ok(());
+        }
+        Some(("browse", "pick", state_id)) => {
+            let result =
+                pick_destination_from_browser(&config, &db, user_id, chat_id.0, state_id).await;
+            edit_or_send_with_keyboard(
+                &bot,
+                chat_id,
+                query.message.as_ref().map(|m| m.id()),
+                result.unwrap_or_else(|err| {
+                    format!("Lỗi đặt thư mục đích:\n{}", format_error_for_user(&err))
+                }),
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
         _ => "Hành động không xác định.".to_string(),
     };
 
@@ -282,7 +325,7 @@ async fn handle_command(
             .await?;
         }
         Command::Destination => {
-            spawn_destination_panel(bot, msg.chat.id, db).await?;
+            spawn_destination_panel(bot, msg.chat.id, db, user_id).await?;
         }
         Command::ClearDestination => {
             let text = match repo::clear_default_destination(&db, "default").await {
@@ -627,6 +670,31 @@ async fn send_or_edit_clone_message(
         return Ok(());
     }
     bot.send_message(chat_id, text).await?;
+    Ok(())
+}
+
+async fn edit_or_send_with_keyboard(
+    bot: &Bot,
+    chat_id: ChatId,
+    message_id: Option<MessageId>,
+    text: String,
+    keyboard: Option<InlineKeyboardMarkup>,
+) -> ResponseResult<()> {
+    if let Some(message_id) = message_id {
+        if let Some(keyboard) = keyboard {
+            bot.edit_message_text(chat_id, message_id, text)
+                .reply_markup(keyboard)
+                .await?;
+        } else {
+            bot.edit_message_text(chat_id, message_id, text).await?;
+        }
+    } else if let Some(keyboard) = keyboard {
+        bot.send_message(chat_id, text)
+            .reply_markup(keyboard)
+            .await?;
+    } else {
+        bot.send_message(chat_id, text).await?;
+    }
     Ok(())
 }
 
@@ -1147,24 +1215,31 @@ fn parse_telegram_user_id(input: &str) -> anyhow::Result<i64> {
 
 /// Send a destination panel message with the current default and recent
 /// destinations as inline quick-switch buttons.
-async fn spawn_destination_panel(bot: Bot, chat_id: ChatId, db: Database) -> ResponseResult<()> {
+async fn spawn_destination_panel(
+    bot: Bot,
+    chat_id: ChatId,
+    db: Database,
+    telegram_user_id: i64,
+) -> ResponseResult<()> {
     let profiles = repo::list_recent_destinations(&db, "default", 5)
         .await
         .unwrap_or_default();
-
     let text = render_destination_list(&profiles);
+    let browse_state = create_destination_browser_state(
+        &db,
+        telegram_user_id,
+        chat_id.0,
+        DestinationBrowseTarget::root(),
+    )
+    .await
+    .ok();
 
-    if profiles.is_empty() {
-        bot.send_message(
-            chat_id,
-            "Chưa đặt thư mục đích mặc định.\n\
-             Dùng /set_destination <folder_url> để cấu hình.",
-        )
-        .await?;
-    } else {
+    if let Some(state_id) = browse_state {
         bot.send_message(chat_id, text)
-            .reply_markup(keyboards::recent_destinations_keyboard(&profiles))
+            .reply_markup(keyboards::destination_panel_keyboard(&profiles, &state_id))
             .await?;
+    } else {
+        bot.send_message(chat_id, text).await?;
     }
     Ok(())
 }
@@ -1193,6 +1268,212 @@ fn render_destination_list(profiles: &[repo::DestinationProfile]) -> String {
     lines.push(String::new());
     lines.push("Nhấn vào tên để đặt làm mặc định. Thêm mới: /set_destination <url>".to_string());
     lines.join("\n")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DestinationBrowseTarget {
+    file_id: String,
+    #[serde(default)]
+    resource_key: Option<String>,
+}
+
+impl DestinationBrowseTarget {
+    fn root() -> Self {
+        Self {
+            file_id: "root".to_string(),
+            resource_key: None,
+        }
+    }
+
+    fn reference(&self) -> DriveReference {
+        DriveReference {
+            file_id: self.file_id.clone(),
+            resource_key: self.resource_key.clone(),
+            hinted_kind: None,
+        }
+    }
+}
+
+async fn create_destination_browser_state(
+    db: &Database,
+    telegram_user_id: i64,
+    chat_id: i64,
+    target: DestinationBrowseTarget,
+) -> anyhow::Result<String> {
+    repo::create_callback_state(
+        db,
+        repo::NewCallbackState {
+            telegram_user_id,
+            chat_id,
+            action: "destination_browse".to_string(),
+            payload: serde_json::to_string(&target)?,
+            ttl_ms: CALLBACK_STATE_TTL_MS,
+        },
+    )
+    .await
+}
+
+async fn consume_destination_browser_state(
+    db: &Database,
+    telegram_user_id: i64,
+    chat_id: i64,
+    state_id: &str,
+) -> anyhow::Result<DestinationBrowseTarget> {
+    let Some(payload) = repo::consume_callback_state(
+        db,
+        state_id,
+        telegram_user_id,
+        chat_id,
+        "destination_browse",
+    )
+    .await?
+    else {
+        anyhow::bail!("Phiên duyệt thư mục đã hết hạn. Mở lại bằng /destination.");
+    };
+    Ok(serde_json::from_str(&payload)?)
+}
+
+async fn open_destination_browser(
+    config: &AppConfig,
+    db: &Database,
+    telegram_user_id: i64,
+    chat_id: i64,
+    state_id: &str,
+) -> anyhow::Result<(String, InlineKeyboardMarkup)> {
+    let target = consume_destination_browser_state(db, telegram_user_id, chat_id, state_id).await?;
+    let token_manager = TokenManager::new(config.clone(), db.clone());
+    let access_token = token_manager.access_token("default").await?;
+    let drive =
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+    let folder = drive
+        .get_reference(access_token.as_str(), &target.reference())
+        .await?;
+    if !folder.is_folder() {
+        anyhow::bail!("Mục này không phải thư mục Drive.");
+    }
+
+    let page = drive
+        .list_children(
+            access_token.as_str(),
+            &folder.id,
+            target
+                .resource_key
+                .as_deref()
+                .or(folder.resource_key.as_deref()),
+            None,
+        )
+        .await?;
+    let mut folders: Vec<DriveFile> = page
+        .files
+        .into_iter()
+        .filter(|file| file.is_folder())
+        .collect();
+    folders.sort_by_key(|file| file.name.to_lowercase());
+    // ponytail: first 20 folders from the first Drive page; add pagination if real folders need it.
+    let hidden = folders.len().saturating_sub(DESTINATION_BROWSER_LIMIT)
+        + usize::from(page.next_page_token.is_some());
+    folders.truncate(DESTINATION_BROWSER_LIMIT);
+
+    let can_pick = folder
+        .capabilities
+        .as_ref()
+        .and_then(|c| c.can_add_children)
+        == Some(true);
+    let pick_state = if can_pick {
+        Some(
+            create_destination_browser_state(
+                db,
+                telegram_user_id,
+                chat_id,
+                DestinationBrowseTarget {
+                    file_id: folder.id.clone(),
+                    resource_key: target.resource_key.clone().or(folder.resource_key.clone()),
+                },
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let parent_state = if let Some(parent_id) = folder.parents.first() {
+        Some(
+            create_destination_browser_state(
+                db,
+                telegram_user_id,
+                chat_id,
+                DestinationBrowseTarget {
+                    file_id: parent_id.clone(),
+                    resource_key: None,
+                },
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let mut child_states = Vec::with_capacity(folders.len());
+    for child in folders {
+        let state_id = create_destination_browser_state(
+            db,
+            telegram_user_id,
+            chat_id,
+            DestinationBrowseTarget {
+                file_id: child.id.clone(),
+                resource_key: child.resource_key.clone(),
+            },
+        )
+        .await?;
+        child_states.push((child.name, state_id));
+    }
+
+    let mut lines = vec![
+        "CHỌN THƯ MỤC ĐÍCH".to_string(),
+        "━━━━━━━━━━━━━━".to_string(),
+    ];
+    push_field(&mut lines, "Tên", &folder.name);
+    push_field(&mut lines, "Folder ID", &folder.id);
+    push_field(&mut lines, "Có thể ghi", capability_text(Some(can_pick)));
+    if let Some(drive_id) = &folder.drive_id {
+        push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
+    } else {
+        push_field(&mut lines, "Drive", "My Drive / được chia sẻ");
+    }
+    lines.push(String::new());
+    if child_states.is_empty() {
+        lines.push("Không có thư mục con trong trang này.".to_string());
+    } else {
+        lines.push(format!("Thư mục con: {}", child_states.len()));
+    }
+    if hidden > 0 {
+        lines.push("Chỉ hiện 20 thư mục đầu. Có thể dùng /set_destination <url>.".to_string());
+    }
+
+    Ok((
+        lines.join("\n"),
+        keyboards::destination_browser_keyboard(
+            pick_state.as_deref(),
+            parent_state.as_deref(),
+            &child_states,
+        ),
+    ))
+}
+
+async fn pick_destination_from_browser(
+    config: &AppConfig,
+    db: &Database,
+    telegram_user_id: i64,
+    chat_id: i64,
+    state_id: &str,
+) -> anyhow::Result<String> {
+    let target = consume_destination_browser_state(db, telegram_user_id, chat_id, state_id).await?;
+    let token_manager = TokenManager::new(config.clone(), db.clone());
+    let access_token = token_manager.access_token("default").await?;
+    let drive =
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+    let folder = drive
+        .get_reference(access_token.as_str(), &target.reference())
+        .await?;
+    save_destination_profile(db, &folder, target.resource_key).await
 }
 
 /// Legacy helper kept for internal callers that only need the default.
@@ -1228,39 +1509,62 @@ async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyh
     let file = drive
         .get_reference(access_token.as_str(), &reference)
         .await?;
+    save_destination_profile(db, &file, reference.resource_key).await
+}
 
+async fn save_destination_profile(
+    db: &Database,
+    file: &DriveFile,
+    resource_key: Option<String>,
+) -> anyhow::Result<String> {
     if file.mime_type != FOLDER_MIME_TYPE {
         anyhow::bail!("Thư mục đích phải là Google Drive folder");
     }
     if file.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
         anyhow::bail!("Tài khoản Google hiện tại không có quyền ghi vào thư mục đích này");
     }
-
     repo::upsert_destination_profile(
         db,
-        repo::NewDestinationProfile {
-            google_account_id: "default".to_string(),
-            label: file.name.clone(),
-            destination_parent_id: file.id.clone(),
-            destination_drive_id: file.drive_id.clone(),
-            destination_resource_key: reference.resource_key.clone().or(file.resource_key.clone()),
-            is_default: true,
-        },
+        destination_profile_from_file(file, resource_key.clone()),
     )
     .await?;
+    Ok(render_destination_saved(file, resource_key))
+}
 
+fn destination_profile_from_file(
+    file: &DriveFile,
+    resource_key: Option<String>,
+) -> repo::NewDestinationProfile {
+    repo::NewDestinationProfile {
+        google_account_id: "default".to_string(),
+        label: file.name.clone(),
+        destination_parent_id: file.id.clone(),
+        destination_drive_id: file.drive_id.clone(),
+        destination_resource_key: resource_key.or(file.resource_key.clone()),
+        is_default: true,
+    }
+}
+
+fn render_destination_saved(file: &DriveFile, input_resource_key: Option<String>) -> String {
     let mut lines = vec![
         "ĐÃ ĐẶT THƯ MỤC ĐÍCH".to_string(),
         "━━━━━━━━━━━━━━━".to_string(),
     ];
     push_field(&mut lines, "Tên", &file.name);
     push_field(&mut lines, "Folder ID", &file.id);
-    if let Some(drive_id) = file.drive_id {
+    push_field(
+        &mut lines,
+        "Resource key",
+        capability_text(Some(
+            input_resource_key.is_some() || file.resource_key.is_some(),
+        )),
+    );
+    if let Some(drive_id) = &file.drive_id {
         push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
     } else {
         push_field(&mut lines, "Drive", "My Drive / được chia sẻ");
     }
-    Ok(lines.join("\n"))
+    lines.join("\n")
 }
 
 // ── Clone source inspect ─────────────────────────────────────────────────────
@@ -1301,6 +1605,13 @@ async fn inspect_clone_source(
     push_field(&mut lines, "ID nguồn", &source.id);
     push_field(&mut lines, "Loại", item_type);
     push_field(&mut lines, "MIME", &source.mime_type);
+    push_field(
+        &mut lines,
+        "Resource key",
+        capability_text(Some(
+            reference.resource_key.is_some() || source.resource_key.is_some(),
+        )),
+    );
 
     if let Some(size) = &source.size {
         let bytes: i64 = size.parse().unwrap_or(0);
@@ -1352,7 +1663,7 @@ async fn inspect_clone_source(
         lines.push("Lưu ý: Link dùng resource key (link hạn chế truy cập).".to_string());
     }
 
-    if let Ok(plan) = build_clone_plan(
+    match build_clone_plan(
         &drive,
         access_token.as_str(),
         &source,
@@ -1360,10 +1671,22 @@ async fn inspect_clone_source(
     )
     .await
     {
-        lines.push(String::new());
-        lines.push("KẾ HOẠCH".to_string());
-        lines.push("━━━━━━━━".to_string());
-        lines.extend(plan.render_lines());
+        Ok(plan) => {
+            lines.push(String::new());
+            lines.push("KẾ HOẠCH".to_string());
+            lines.push("━━━━━━━━".to_string());
+            lines.extend(plan.render_lines());
+        }
+        Err(err) => {
+            lines.push(String::new());
+            lines.push("KẾ HOẠCH".to_string());
+            lines.push("━━━━━━━━".to_string());
+            lines.push("Không quét trước được. Bot vẫn có thể thử khi bạn bấm clone.".to_string());
+            lines.push(format!(
+                "Lý do: {}",
+                first_line(&format_error_for_user(&err))
+            ));
+        }
     }
 
     if let Some(default_dest) = repo::default_destination_profile(db, "default").await? {
@@ -1377,6 +1700,11 @@ async fn inspect_clone_source(
         lines.push("━━━━━━".to_string());
         push_field(&mut lines, "Tên", &destination_preview);
         push_field(&mut lines, "Parent ID", &default_dest.destination_parent_id);
+        push_field(
+            &mut lines,
+            "Resource key",
+            capability_text(Some(default_dest.destination_resource_key.is_some())),
+        );
         if let Some(drive_id) = &default_dest.destination_drive_id {
             push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
         }
@@ -1400,6 +1728,10 @@ fn capability_text(value: Option<bool>) -> &'static str {
         Some(false) => "Không",
         None => "Không rõ",
     }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or(text)
 }
 
 fn format_error_for_user(err: &anyhow::Error) -> String {
@@ -1574,72 +1906,6 @@ fn human_bytes(bytes: i64) -> String {
         format!("{:.1} KB", bytes as f64 / KB as f64)
     } else {
         format!("{bytes} B")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::drive::types::DriveFile;
-    use reqwest::StatusCode;
-
-    fn file(id: &str, mime_type: &str, size: Option<&str>) -> DriveFile {
-        DriveFile {
-            id: id.to_string(),
-            name: id.to_string(),
-            mime_type: mime_type.to_string(),
-            size: size.map(str::to_string),
-            parents: vec![],
-            drive_id: None,
-            resource_key: None,
-            shortcut_details: None,
-            trashed: None,
-            modified_time: None,
-            md5_checksum: None,
-            version: None,
-            capabilities: None,
-            copy_requires_writer_permission: None,
-            app_properties: Default::default(),
-        }
-    }
-
-    #[test]
-    fn clone_plan_counts_drive_kinds_and_bytes() {
-        let mut plan = ClonePlan::default();
-        plan.add(&file("folder", FOLDER_MIME_TYPE, None));
-        plan.add(&file("bin", "application/octet-stream", Some("2048")));
-        plan.add(&file("doc", "application/vnd.google-apps.document", None));
-        plan.add(&file(
-            "shortcut",
-            crate::drive::types::SHORTCUT_MIME_TYPE,
-            None,
-        ));
-
-        assert_eq!(plan.folders, 1);
-        assert_eq!(plan.files, 3);
-        assert_eq!(plan.google_native, 1);
-        assert_eq!(plan.shortcuts, 1);
-        assert_eq!(plan.known_bytes, 2048);
-    }
-
-    #[test]
-    fn drive_errors_are_translated_for_telegram() {
-        let permission = DriveApiError::Api {
-            status: StatusCode::FORBIDDEN,
-            reason: Some("insufficientPermissions".to_string()),
-            message: "The user does not have sufficient permissions".to_string(),
-        };
-        let text = format_drive_error(&permission);
-        assert!(text.contains("không đủ quyền"));
-        assert!(text.contains("HTTP: 403"));
-
-        let not_found = DriveApiError::Api {
-            status: StatusCode::NOT_FOUND,
-            reason: Some("notFound".to_string()),
-            message: "File not found".to_string(),
-        };
-        let text = format_drive_error(&not_found);
-        assert!(text.contains("resource key"));
     }
 }
 
@@ -1907,5 +2173,71 @@ fn vi_watch_status(status: &str) -> &str {
         "needs_reconcile" => "cần đồng bộ lại",
         "stopped" => "đã dừng",
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::drive::types::DriveFile;
+    use reqwest::StatusCode;
+
+    fn file(id: &str, mime_type: &str, size: Option<&str>) -> DriveFile {
+        DriveFile {
+            id: id.to_string(),
+            name: id.to_string(),
+            mime_type: mime_type.to_string(),
+            size: size.map(str::to_string),
+            parents: vec![],
+            drive_id: None,
+            resource_key: None,
+            shortcut_details: None,
+            trashed: None,
+            modified_time: None,
+            md5_checksum: None,
+            version: None,
+            capabilities: None,
+            copy_requires_writer_permission: None,
+            app_properties: Default::default(),
+        }
+    }
+
+    #[test]
+    fn clone_plan_counts_drive_kinds_and_bytes() {
+        let mut plan = ClonePlan::default();
+        plan.add(&file("folder", FOLDER_MIME_TYPE, None));
+        plan.add(&file("bin", "application/octet-stream", Some("2048")));
+        plan.add(&file("doc", "application/vnd.google-apps.document", None));
+        plan.add(&file(
+            "shortcut",
+            crate::drive::types::SHORTCUT_MIME_TYPE,
+            None,
+        ));
+
+        assert_eq!(plan.folders, 1);
+        assert_eq!(plan.files, 3);
+        assert_eq!(plan.google_native, 1);
+        assert_eq!(plan.shortcuts, 1);
+        assert_eq!(plan.known_bytes, 2048);
+    }
+
+    #[test]
+    fn drive_errors_are_translated_for_telegram() {
+        let permission = DriveApiError::Api {
+            status: StatusCode::FORBIDDEN,
+            reason: Some("insufficientPermissions".to_string()),
+            message: "The user does not have sufficient permissions".to_string(),
+        };
+        let text = format_drive_error(&permission);
+        assert!(text.contains("không đủ quyền"));
+        assert!(text.contains("HTTP: 403"));
+
+        let not_found = DriveApiError::Api {
+            status: StatusCode::NOT_FOUND,
+            reason: Some("notFound".to_string()),
+            message: "File not found".to_string(),
+        };
+        let text = format_drive_error(&not_found);
+        assert!(text.contains("resource key"));
     }
 }

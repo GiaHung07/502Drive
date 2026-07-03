@@ -2011,10 +2011,17 @@ Kill-process test bắt buộc.
   - test My Drive ↔ Shared Drive;
   - thông báo rõ thiếu resource key/quyền;
   - report lỗi Shared Drive dễ hiểu.
+  - trạng thái hiện tại: client đã gửi `supportsAllDrives`,
+    `includeItemsFromAllDrives` và resource-key header ở luồng chính; Telegram
+    confirmation đã hiển thị presence resource key và lý do quét trước thất bại,
+    nhưng vẫn cần test thật với Shared Drive.
 - **Phase 3.4 — Destination UX**
   - recent destinations;
   - optional folder browser nếu paste link gây khó chịu;
   - không làm dashboard web.
+  - trạng thái hiện tại: recent destinations đã có; browser My Drive tối giản
+    đã có, giới hạn 20 folder đầu/trang đầu; pagination và Shared Drive root
+    listing để sau khi có nhu cầu thật.
 - **Phase 3.5 — One-shot hardening**
   - adaptive pacer/retry classification;
   - duplicate/shortcut policies vừa đủ;
