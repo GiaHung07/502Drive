@@ -1103,6 +1103,12 @@ async fn inspect_clone_source(
     let source = drive
         .get_reference(access_token.as_str(), &reference)
         .await?;
+    let account_email = drive
+        .about_get(access_token.as_str())
+        .await
+        .ok()
+        .and_then(|about| about.user)
+        .and_then(|user| user.email_address);
 
     let item_type = if source.is_folder() {
         "Thư mục"
@@ -1110,25 +1116,45 @@ async fn inspect_clone_source(
         "File"
     };
 
-    let mut lines = vec![
-        format!("Nguồn       : {}", source.name),
-        format!("Loại        : {item_type}"),
-        format!("MIME        : {}", source.mime_type),
-    ];
+    let mut lines = vec!["THÔNG TIN CLONE".to_string(), "━━━━━━━━━━━━━━".to_string()];
+    push_field(
+        &mut lines,
+        "Google",
+        account_email.as_deref().unwrap_or("không đọc được email"),
+    );
+    push_field(&mut lines, "Tên nguồn", &source.name);
+    push_field(&mut lines, "ID nguồn", &source.id);
+    push_field(&mut lines, "Loại", item_type);
+    push_field(&mut lines, "MIME", &source.mime_type);
 
     if let Some(size) = &source.size {
         let bytes: i64 = size.parse().unwrap_or(0);
-        lines.push(format!("Kích thước  : {}", human_bytes(bytes)));
+        push_field(&mut lines, "Kích thước", &human_bytes(bytes));
     }
 
     if let Some(drive_id) = &source.drive_id {
-        lines.push(format!("Vị trí      : Shared Drive ({drive_id})"));
+        push_field(&mut lines, "Vị trí", &format!("Shared Drive ({drive_id})"));
     } else {
-        lines.push("Vị trí      : My Drive / được chia sẻ".to_string());
+        push_field(&mut lines, "Vị trí", "My Drive / được chia sẻ");
+    }
+    if let Some(modified_time) = &source.modified_time {
+        push_field(&mut lines, "Sửa đổi", modified_time);
+    }
+    if let Some(version) = &source.version {
+        push_field(&mut lines, "Version", version);
+    }
+    if let Some(md5) = &source.md5_checksum {
+        push_field(&mut lines, "MD5", md5);
     }
 
     // Capability warnings
     let caps = source.capabilities.as_ref();
+    let can_read = if source.is_folder() {
+        caps.and_then(|c| c.can_list_children)
+    } else {
+        caps.and_then(|c| c.can_copy)
+    };
+    push_field(&mut lines, "Có thể đọc/copy", capability_text(can_read));
     if source.is_folder() {
         if caps.and_then(|c| c.can_list_children) == Some(false) {
             lines.push(
@@ -1160,6 +1186,8 @@ async fn inspect_clone_source(
     .await
     {
         lines.push(String::new());
+        lines.push("KẾ HOẠCH".to_string());
+        lines.push("━━━━━━━━".to_string());
         lines.extend(plan.render_lines());
     }
 
@@ -1170,14 +1198,33 @@ async fn inspect_clone_source(
             default_dest.label.clone()
         };
         lines.push(String::new());
-        lines.push(format!("Thư mục đích: {destination_preview}"));
-        lines.push("[Clone ngay]  [Đổi đích]  [Huỷ]".to_string());
+        lines.push("ĐÍCH ĐẾN".to_string());
+        lines.push("━━━━━━".to_string());
+        push_field(&mut lines, "Tên", &destination_preview);
+        push_field(&mut lines, "Parent ID", &default_dest.destination_parent_id);
+        if let Some(drive_id) = &default_dest.destination_drive_id {
+            push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
+        }
+        lines.push(String::new());
+        lines.push("Chọn nút bên dưới để bắt đầu hoặc huỷ.".to_string());
     } else {
         lines.push(String::new());
         lines.push("Chưa có thư mục đích. Dùng /set_destination <folder_url>.".to_string());
     }
 
     Ok(lines.join("\n"))
+}
+
+fn push_field(lines: &mut Vec<String>, label: &str, value: &str) {
+    lines.push(format!("{label:<13}: {value}"));
+}
+
+fn capability_text(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "Có",
+        Some(false) => "Không",
+        None => "Không rõ",
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1224,22 +1271,22 @@ impl ClonePlan {
 
     fn render_lines(&self) -> Vec<String> {
         let mut lines = vec![
-            "Dự kiến clone:".to_string(),
-            format!("  Thư mục       : {}", self.folders),
-            format!("  File          : {}", self.files),
-            format!("  Google-native : {}", self.google_native),
-            format!("  Shortcut      : {}", self.shortcuts),
-            format!("  Dung lượng rõ : {}", human_bytes(self.known_bytes as i64)),
+            format!("Đã quét      : {} item", self.scanned_items),
+            format!("Thư mục      : {}", self.folders),
+            format!("File         : {}", self.files),
+            format!("Google-native: {}", self.google_native),
+            format!("Shortcut     : {}", self.shortcuts),
+            format!("Dung lượng rõ: {}", human_bytes(self.known_bytes as i64)),
         ];
         if self.warning_count > 0 {
             lines.push(format!(
-                "  Cảnh báo      : {} item cần chú ý",
+                "Cảnh báo     : {} item cần chú ý",
                 self.warning_count
             ));
         }
         if self.truncated {
             lines.push(format!(
-                "  Lưu ý         : chỉ quét trước {} item đầu",
+                "Lưu ý        : chỉ quét trước {} item đầu",
                 self.scanned_items
             ));
         }
