@@ -982,41 +982,92 @@ async fn inspect_clone_source(
     let item_type = if source.is_folder() { "folder" } else { "file" };
     let mut lines = vec![
         format!("Source: {}", source.name),
-        format!("Type: {item_type}"),
-        format!("MIME: {}", source.mime_type),
+        format!("Type:   {item_type}"),
+        format!("MIME:   {}", source.mime_type),
     ];
 
     if let Some(size) = &source.size {
-        lines.push(format!("Size: {size} bytes"));
+        let bytes: i64 = size.parse().unwrap_or(0);
+        let human = human_bytes(bytes);
+        lines.push(format!("Size:   {human}"));
     }
-    if source.drive_id.is_some() {
-        lines.push("Location: Shared Drive".to_string());
+
+    // Location
+    if let Some(drive_id) = &source.drive_id {
+        lines.push(format!("Location: Shared Drive ({drive_id})"));
     } else {
-        lines.push("Location: My Drive or shared-with-me".to_string());
+        lines.push("Location: My Drive / shared-with-me".to_string());
     }
+
+    // Capability warnings — surface blockers before the user confirms
+    let caps = source.capabilities.as_ref();
+    if source.is_folder() {
+        match caps.and_then(|c| c.can_list_children) {
+            Some(false) | None => {
+                lines.push(
+                    "\u{26a0}\u{fe0f}  Cannot list children — this folder may be restricted."
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    } else {
+        match caps.and_then(|c| c.can_copy) {
+            Some(false) | None => {
+                lines.push(
+                    "\u{26a0}\u{fe0f}  Cannot copy — file may be restricted or copy-protected."
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    if source.copy_requires_writer_permission == Some(true) {
+        lines.push(
+            "\u{26a0}\u{fe0f}  copyRequiresWriterPermission — only writers can copy this file."
+                .to_string(),
+        );
+    }
+
     if reference.resource_key.is_some() {
-        lines.push("Warning: source link uses a resource key".to_string());
+        lines.push("\u{1f511} Source link uses a resource key (restricted link).".to_string());
     }
 
     if let Some(default_dest) = repo::default_destination_profile(db, "default").await? {
         let destination_preview = if source.is_folder() {
             format!("{}/{}", default_dest.label, source.name)
         } else {
-            default_dest.label
+            default_dest.label.clone()
         };
-        lines.push(format!("Destination: {destination_preview}"));
-        lines.push("[Clone now] [Change destination] [Cancel]".to_string());
+        lines.push(format!("\nDestination: {destination_preview}"));
+        lines.push("[Clone now]  [Change destination]  [Cancel]".to_string());
     } else {
-        lines.push(
-            "No default destination configured. Use /set_destination <folder_url_or_id>."
-                .to_string(),
-        );
+        lines
+            .push("\nNo default destination. Use /set_destination <folder_url_or_id>.".to_string());
     }
 
     Ok(lines.join("\n"))
 }
 
 // ── Watch handlers ───────────────────────────────────────────────────────────
+
+/// Human-readable byte count: "1.5 GB", "820 KB", etc.
+fn human_bytes(bytes: i64) -> String {
+    let bytes = bytes.max(0) as u64;
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
 
 /// `/watch <source_url_or_id> <dest_url_or_id>`
 async fn start_watch(
