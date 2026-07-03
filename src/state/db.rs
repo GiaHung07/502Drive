@@ -17,6 +17,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0004_callback_states",
         include_str!("../../migrations/0004_callback_states.sql"),
     ),
+    (
+        "0005_adaptive_poll",
+        include_str!("../../migrations/0005_adaptive_poll.sql"),
+    ),
 ];
 
 #[derive(Clone)]

@@ -1664,6 +1664,9 @@ pub struct ChangeCursor {
     pub last_event_sequence: i64,
     pub next_poll_at_ms: i64,
     pub consecutive_error_count: i64,
+    /// Unix-ms timestamp of the most recent non-empty change page.
+    /// NULL when no events have ever been received on this cursor.
+    pub last_event_at_ms: Option<i64>,
 }
 
 /// Ensure a cursor row exists for this (account, corpus, drive_id) key and
@@ -1702,7 +1705,8 @@ pub async fn upsert_change_cursor(
             conn.query_row(
                 "SELECT id, google_account_id, corpus_kind, drive_id,
                         current_page_token, last_event_sequence,
-                        next_poll_at_ms, consecutive_error_count
+                        next_poll_at_ms, consecutive_error_count,
+                        last_event_at_ms
                  FROM change_cursors
                  WHERE google_account_id = ?1
                    AND corpus_kind = ?2
@@ -1718,6 +1722,7 @@ pub async fn upsert_change_cursor(
                         last_event_sequence: row.get(5)?,
                         next_poll_at_ms: row.get(6)?,
                         consecutive_error_count: row.get(7)?,
+                        last_event_at_ms: row.get(8)?,
                     })
                 },
             )
@@ -1733,7 +1738,8 @@ pub async fn all_change_cursors(db: &Database) -> anyhow::Result<Vec<ChangeCurso
             let mut stmt = conn.prepare(
                 "SELECT id, google_account_id, corpus_kind, drive_id,
                         current_page_token, last_event_sequence,
-                        next_poll_at_ms, consecutive_error_count
+                        next_poll_at_ms, consecutive_error_count,
+                        last_event_at_ms
                  FROM change_cursors
                  ORDER BY id",
             )?;
@@ -1748,6 +1754,7 @@ pub async fn all_change_cursors(db: &Database) -> anyhow::Result<Vec<ChangeCurso
                         last_event_sequence: row.get(5)?,
                         next_poll_at_ms: row.get(6)?,
                         consecutive_error_count: row.get(7)?,
+                        last_event_at_ms: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1828,15 +1835,26 @@ pub async fn commit_change_page(
                 .or(next_page_token.as_deref())
                 .unwrap_or("");
             if !new_token.is_empty() {
+                // Write last_event_at_ms only when this page contained events.
+                let new_last_event_at: Option<i64> =
+                    if events.is_empty() { None } else { Some(now) };
                 tx.execute(
                     "UPDATE change_cursors
                      SET current_page_token = ?1,
                          last_event_sequence = MAX(last_event_sequence, ?2),
                          next_poll_at_ms = ?3,
                          last_success_at_ms = ?4,
-                         consecutive_error_count = 0
+                         consecutive_error_count = 0,
+                         last_event_at_ms = COALESCE(?6, last_event_at_ms)
                      WHERE id = ?5",
-                    params![new_token, last_sequence, next_poll_at_ms, now, cursor_id,],
+                    params![
+                        new_token,
+                        last_sequence,
+                        next_poll_at_ms,
+                        now,
+                        cursor_id,
+                        new_last_event_at,
+                    ],
                 )?;
             }
             tx.commit()?;
@@ -2438,7 +2456,7 @@ pub async fn cursor_by_id(db: &Database, cursor_id: &str) -> anyhow::Result<Chan
             conn.query_row(
                 "SELECT id, google_account_id, corpus_kind, drive_id,
                         current_page_token, last_event_sequence, next_poll_at_ms,
-                        consecutive_error_count
+                        consecutive_error_count, last_event_at_ms
                  FROM change_cursors WHERE id = ?1",
                 params![cursor_id],
                 |row| {
@@ -2451,6 +2469,7 @@ pub async fn cursor_by_id(db: &Database, cursor_id: &str) -> anyhow::Result<Chan
                         last_event_sequence: row.get(5)?,
                         next_poll_at_ms: row.get(6)?,
                         consecutive_error_count: row.get(7)?,
+                        last_event_at_ms: row.get(8)?,
                     })
                 },
             )

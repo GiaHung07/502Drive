@@ -135,18 +135,11 @@ async fn poll_one_cursor(config: &AppConfig, db: &Database, cursor: &ChangeCurso
     let mut page_token = cursor.current_page_token.clone();
     let drive_id = cursor.drive_id.as_deref();
     let mut error_count = 0u32;
-    // Track idle state for adaptive polling.
-    // We approximate idle_since by checking if this poll cycle had any events.
+    // Track whether this cycle had any events for adaptive poll scheduling.
     let mut had_events_this_cycle = false;
-    // idle_since_ms: approximate as now minus last_event_sequence converted to ms.
-    // Conservative: if last_event_sequence == 0, treat as just started (active).
-    let idle_since_ms: i64 = if cursor.last_event_sequence == 0 {
-        0
-    } else {
-        // We don't store last_event_time separately yet; use 0 to stay active.
-        // This keeps polling conservative until a durable last_event_at_ms column is added.
-        0
-    };
+    // Use the persisted timestamp of the last event page so compute_next_poll_ms
+    // can back off correctly when the feed has been quiet for a long time.
+    let idle_since_ms: i64 = cursor.last_event_at_ms.unwrap_or(0);
 
     loop {
         let access_token = match token_manager.access_token("default").await {
