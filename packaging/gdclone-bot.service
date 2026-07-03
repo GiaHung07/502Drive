@@ -1,5 +1,6 @@
 [Unit]
-Description=gdclone-bot
+Description=gdclone-bot — Google Drive clone/watch Telegram bot
+Documentation=https://github.com/your-org/gdclone-bot
 Wants=network-online.target
 After=network-online.target
 
@@ -7,12 +8,31 @@ After=network-online.target
 Type=simple
 ExecStart=%h/.local/bin/gdclone-bot --config %h/.config/gdclone-bot/config.toml run
 Restart=on-failure
-RestartSec=5
+RestartSec=10s
+RestartSteps=3
+RestartMaxDelaySec=60s
+TimeoutStartSec=30
 TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gdclone-bot
+Environment=RUST_LOG=gdclone_bot=info,warn
+
+# Security hardening
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Writable paths
 ReadWritePaths=%h/.local/share/gdclone-bot
 ReadWritePaths=%h/.config/gdclone-bot
 
