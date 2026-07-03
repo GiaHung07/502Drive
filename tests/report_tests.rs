@@ -100,6 +100,7 @@ async fn job_report_contains_items_and_folder_mappings() {
     }));
     assert!(items.iter().any(|item| {
         item.source_item_id == "file-failed"
+            && item.error_category.as_deref() == Some("rate_limit")
             && item.last_error.as_deref() == Some("rateLimitExceeded: try later")
     }));
     assert!(items.iter().any(|item| {

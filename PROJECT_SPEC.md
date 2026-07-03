@@ -90,8 +90,13 @@ Không làm:
 - upload Telegram → Drive;
 - permission cloning đầy đủ;
 - ownership transfer;
+- xin quyền/truy cập hộ người dùng khi nguồn bị chặn; bot chỉ báo không dùng
+  được và ghi rõ vào report;
 - service-account rotation;
 - quota bypass;
+- viewer-only / download-disabled bypass, browser scraping, screenshot/PDF
+  capture, Apple Files/iOS provider interception, MITM, hoặc bất kỳ cách nào
+  nhằm vượt policy của owner;
 - content diff theo từng byte/trang/cell;
 - realtime tuyệt đối.
 
@@ -917,6 +922,8 @@ Không tuyên bố mọi Google MIME type đều copy được. Unsupported/capa
 
 - mark `skipped_unsupported` hoặc `failed_permission`;
 - ghi rõ trong report;
+- report phải phân loại lỗi quyền/quota/rate-limit/resource-key rõ ràng;
+- không tự gửi request xin quyền hoặc hướng người dùng bấm xin quyền trong bot;
 - không download/export/import ngầm.
 
 ---

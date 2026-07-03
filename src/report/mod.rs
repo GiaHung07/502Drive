@@ -15,6 +15,7 @@ pub struct ReportItem {
     pub dest_item_id: Option<String>,
     pub name: String,
     pub status: String,
+    pub error_category: Option<String>,
     pub attempts: u32,
     pub last_error: Option<String>,
 }
@@ -59,6 +60,8 @@ pub async fn collect_job_items(db: &Database, job_id: &str) -> anyhow::Result<Ve
                     dest_item_id: row.get(1)?,
                     name: row.get(2)?,
                     status: row.get(3)?,
+                    error_category: error_category(error_code.as_deref(), error_message.as_deref())
+                        .map(str::to_string),
                     attempts: row.get::<_, i64>(4)? as u32,
                     last_error: join_error(error_code, error_message),
                 })
@@ -84,6 +87,7 @@ pub async fn collect_job_items(db: &Database, job_id: &str) -> anyhow::Result<Ve
                     dest_item_id: row.get(1)?,
                     name: row.get(2)?,
                     status: row.get(3)?,
+                    error_category: None,
                     attempts: 0,
                     last_error: None,
                 })
@@ -149,5 +153,68 @@ fn join_error(code: Option<String>, message: Option<String>) -> Option<String> {
         (Some(code), None) => Some(code),
         (None, Some(message)) => Some(message),
         (None, None) => None,
+    }
+}
+
+fn error_category(code: Option<&str>, message: Option<&str>) -> Option<&'static str> {
+    let haystack = format!(
+        "{} {}",
+        code.unwrap_or_default(),
+        message.unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+
+    if haystack.trim().is_empty() {
+        None
+    } else if haystack.contains("insufficientpermissions")
+        || haystack.contains("copyrequireswriterpermission")
+        || haystack.contains("cannotcopy")
+        || haystack.contains("forbidden")
+        || haystack.contains("permission")
+    {
+        Some("permission")
+    } else if haystack.contains("storagequota")
+        || haystack.contains("quota")
+        || haystack.contains("teamdrivefilelimit")
+    {
+        Some("quota")
+    } else if haystack.contains("ratelimit") || haystack.contains("userlimit") {
+        Some("rate_limit")
+    } else if haystack.contains("notfound") || haystack.contains("404") {
+        Some("not_found_or_resource_key")
+    } else if haystack.contains("backenderror")
+        || haystack.contains("internal")
+        || haystack.contains("timeout")
+        || haystack.contains("unavailable")
+    {
+        Some("transient")
+    } else {
+        Some("unknown")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::error_category;
+
+    #[test]
+    fn categorizes_drive_errors_for_reports() {
+        assert_eq!(
+            error_category(Some("insufficientPermissions"), Some("no access")),
+            Some("permission")
+        );
+        assert_eq!(
+            error_category(Some("storageQuotaExceeded"), None),
+            Some("quota")
+        );
+        assert_eq!(
+            error_category(Some("rateLimitExceeded"), None),
+            Some("rate_limit")
+        );
+        assert_eq!(
+            error_category(Some("notFound"), None),
+            Some("not_found_or_resource_key")
+        );
+        assert_eq!(error_category(None, None), None);
     }
 }
