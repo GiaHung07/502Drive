@@ -648,7 +648,7 @@ fn spawn_progress_updater(
     interval: Duration,
     mut done_rx: oneshot::Receiver<()>,
 ) {
-    let interval = if interval.is_zero() {
+    let base_interval = if interval.is_zero() {
         Duration::from_secs(2)
     } else {
         interval
@@ -656,11 +656,15 @@ fn spawn_progress_updater(
     tokio::spawn(async move {
         let started_at = Instant::now();
         let mut last_text = String::new();
+        // Current wait before the next edit attempt.  Grows on 429, resets on
+        // success.  Never exceeds 60 s so the loop stays responsive.
+        let mut current_interval = base_interval;
+
         loop {
             if !last_text.is_empty() {
                 tokio::select! {
                     _ = &mut done_rx => break,
-                    _ = tokio::time::sleep(interval) => {}
+                    _ = tokio::time::sleep(current_interval) => {}
                 }
             }
 
@@ -680,7 +684,8 @@ fn spawn_progress_updater(
                             last_text = text.clone();
                             if let Err(err) = bot.edit_message_text(chat_id, message_id, text).await
                             {
-                                warn!(error = %err, "edit progress message failed");
+                                current_interval =
+                                    handle_edit_error(err, base_interval, current_interval);
                             }
                         }
                         continue;
@@ -697,23 +702,66 @@ fn spawn_progress_updater(
             }
             last_text = text.clone();
 
-            if is_terminal_status(&detail.status) {
-                if let Err(err) = bot.edit_message_text(chat_id, message_id, text).await {
-                    warn!(error = %err, "edit progress message failed");
+            let paused = detail.status == "paused";
+            let edit_result = if is_terminal_status(&detail.status) {
+                bot.edit_message_text(chat_id, message_id, text).await
+            } else {
+                bot.edit_message_text(chat_id, message_id, text)
+                    .reply_markup(keyboards::job_control_keyboard(&detail.id, paused))
+                    .await
+            };
+
+            match edit_result {
+                Ok(_) => {
+                    current_interval = base_interval;
                 }
-                break;
+                Err(err) => {
+                    current_interval = handle_edit_error(err, base_interval, current_interval);
+                }
             }
 
-            let paused = detail.status == "paused";
-            if let Err(err) = bot
-                .edit_message_text(chat_id, message_id, text)
-                .reply_markup(keyboards::job_control_keyboard(&detail.id, paused))
-                .await
-            {
-                warn!(error = %err, "edit progress message failed");
+            if is_terminal_status(&detail.status) {
+                break;
             }
         }
     });
+}
+
+/// Map a Telegram edit error to the next polling interval.
+///
+/// - 429 RetryAfter(n): wait n seconds then resume.
+/// - MessageNotModified: harmless, keep current cadence.
+/// - Other: exponential back-off, capped at 60 s.
+fn handle_edit_error(
+    err: teloxide::RequestError,
+    base_interval: Duration,
+    current_interval: Duration,
+) -> Duration {
+    use teloxide::ApiError;
+    use teloxide::RequestError;
+
+    match &err {
+        // Telegram 429 — exact retry_after + base_interval buffer.
+        RequestError::RetryAfter(secs) => {
+            let wait = secs.duration().as_secs().max(1);
+            warn!(
+                retry_after_secs = wait,
+                "Telegram 429 — backing off progress edit"
+            );
+            Duration::from_secs(wait) + base_interval
+        }
+        // Identical text — Telegram refuses to edit; keep same cadence.
+        RequestError::Api(ApiError::MessageNotModified) => current_interval,
+        // Message already gone (deleted by user, bot kicked, etc.) — stop loop.
+        RequestError::Api(ApiError::MessageToEditNotFound) => {
+            warn!("progress message deleted — stopping updater");
+            Duration::from_secs(3600) // very long = effectively stop
+        }
+        _ => {
+            warn!(error = %err, "edit progress message failed");
+            (current_interval * 2).min(Duration::from_secs(60))
+        }
+    }
 }
 
 fn render_job_progress(job: &repo::JobDetail, elapsed_secs: u64) -> String {
