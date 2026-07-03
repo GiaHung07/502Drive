@@ -1,4 +1,4 @@
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use super::db::{Database, now_ms};
@@ -241,6 +241,23 @@ pub struct JobDetail {
     pub updated_at_ms: i64,
 }
 
+fn job_detail_from_row(row: &Row<'_>) -> rusqlite::Result<JobDetail> {
+    Ok(JobDetail {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        status: row.get(2)?,
+        source_root_id: row.get(3)?,
+        destination_parent_id: row.get(4)?,
+        total_discovered: row.get(5)?,
+        completed_items: row.get(6)?,
+        failed_items: row.get(7)?,
+        skipped_items: row.get(8)?,
+        error_summary: row.get(9)?,
+        created_at_ms: row.get(10)?,
+        updated_at_ms: row.get(11)?,
+    })
+}
+
 pub async fn list_active_jobs_for_user(
     db: &Database,
     telegram_user_id: i64,
@@ -370,24 +387,39 @@ pub async fn job_detail_for_user(
                  FROM jobs
                  WHERE telegram_user_id = ?1 AND id = ?2",
                 params![telegram_user_id, job_id],
-                |row| {
-                    Ok(JobDetail {
-                        id: row.get(0)?,
-                        kind: row.get(1)?,
-                        status: row.get(2)?,
-                        source_root_id: row.get(3)?,
-                        destination_parent_id: row.get(4)?,
-                        total_discovered: row.get(5)?,
-                        completed_items: row.get(6)?,
-                        failed_items: row.get(7)?,
-                        skipped_items: row.get(8)?,
-                        error_summary: row.get(9)?,
-                        created_at_ms: row.get(10)?,
-                        updated_at_ms: row.get(11)?,
-                    })
-                },
+                job_detail_from_row,
             )
             .optional()
+        })
+        .await?)
+}
+
+pub async fn job_details_for_user_prefix(
+    db: &Database,
+    telegram_user_id: i64,
+    job_id_prefix: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<JobDetail>> {
+    let prefix = format!("{}%", job_id_prefix.trim());
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, kind, status, source_root_id, destination_parent_id,
+                        total_discovered, completed_items, failed_items, skipped_items,
+                        error_summary, created_at_ms, updated_at_ms
+                 FROM jobs
+                 WHERE telegram_user_id = ?1 AND id LIKE ?2
+                 ORDER BY updated_at_ms DESC, id
+                 LIMIT ?3",
+            )?;
+            let rows = stmt
+                .query_map(
+                    params![telegram_user_id, prefix, limit as i64],
+                    job_detail_from_row,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok::<Vec<JobDetail>, rusqlite::Error>(rows)
         })
         .await?)
 }
@@ -409,22 +441,7 @@ pub async fn job_detail_for_progress_message(
                  ORDER BY created_at_ms DESC
                  LIMIT 1",
                 params![telegram_user_id, progress_message_id],
-                |row| {
-                    Ok(JobDetail {
-                        id: row.get(0)?,
-                        kind: row.get(1)?,
-                        status: row.get(2)?,
-                        source_root_id: row.get(3)?,
-                        destination_parent_id: row.get(4)?,
-                        total_discovered: row.get(5)?,
-                        completed_items: row.get(6)?,
-                        failed_items: row.get(7)?,
-                        skipped_items: row.get(8)?,
-                        error_summary: row.get(9)?,
-                        created_at_ms: row.get(10)?,
-                        updated_at_ms: row.get(11)?,
-                    })
-                },
+                job_detail_from_row,
             )
             .optional()
         })

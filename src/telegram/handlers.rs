@@ -955,8 +955,29 @@ async fn show_job_status(
     telegram_user_id: i64,
     job_id: &str,
 ) -> anyhow::Result<String> {
-    let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? else {
-        return Ok("Không tìm thấy job thuộc tài khoản của bạn.".to_string());
+    let job_id = job_id.trim();
+    let job = if job_id.is_empty() {
+        let Some(job) = repo::list_active_jobs_for_user(db, telegram_user_id, 1)
+            .await?
+            .into_iter()
+            .next()
+        else {
+            return Ok(
+                "Không có job đang chạy. Dùng /last_report để lấy report gần nhất.".to_string(),
+            );
+        };
+        repo::job_detail_for_user(db, telegram_user_id, &job.id)
+            .await?
+            .expect("active job listed but detail missing")
+    } else if let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? {
+        job
+    } else {
+        let matches = repo::job_details_for_user_prefix(db, telegram_user_id, job_id, 2).await?;
+        match matches.as_slice() {
+            [job] => job.clone(),
+            [] => return Ok("Không tìm thấy job thuộc tài khoản của bạn.".to_string()),
+            _ => return Ok("Có nhiều job trùng prefix. Nhập thêm vài ký tự job ID.".to_string()),
+        }
     };
 
     let mut lines = vec!["CHI TIẾT JOB".to_string(), "━━━━━━━━━━".to_string()];

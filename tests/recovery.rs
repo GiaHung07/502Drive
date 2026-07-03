@@ -210,6 +210,19 @@ async fn job_visibility_queries_are_scoped_to_user() {
     assert_eq!(detail.status, "completed");
     assert_eq!(detail.source_root_id, "done-source");
 
+    let prefix = &completed_job_id[..8];
+    let prefixed = repo::job_details_for_user_prefix(&db, 2, prefix, 2)
+        .await
+        .unwrap();
+    assert_eq!(prefixed.len(), 1);
+    assert_eq!(prefixed[0].id, completed_job_id);
+    assert!(
+        repo::job_details_for_user_prefix(&db, 999, prefix, 2)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
     assert!(
         repo::job_detail_for_user(&db, 999, &active_job_id)
             .await
