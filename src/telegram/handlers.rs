@@ -191,46 +191,35 @@ async fn handle_command(
         Command::Start => {
             bot.send_message(
                 msg.chat.id,
-                "gdclone-bot đang chạy.\n\
-                 Dùng /account để kiểm tra kết nối Google, sau đó dán link Drive vào để bắt đầu.",
+                "DRIVE502 ĐANG CHẠY\n\
+                 ━━━━━━━━━━━━━━\n\
+                 1. /account để kiểm tra Google\n\
+                 2. /destination để kiểm tra thư mục đích\n\
+                 3. Dán link Drive hoặc dùng /clone <url>",
             )
             .await?;
         }
         Command::Help => {
             bot.send_message(
                 msg.chat.id,
-                "DANH SÁCH LỆNH\n\
+                "LỆNH CHÍNH\n\
+                 ━━━━━━━━━\n\
+                 /clone <url>           Kiểm tra nguồn, xem kế hoạch, rồi clone\n\
+                 /clone_here <url>      Clone ngay vào thư mục đích mặc định\n\
+                 /destination           Xem/đổi thư mục đích đã lưu\n\
+                 /set_destination <url> Đặt thư mục đích mặc định\n\
+                 /clear_destination     Xoá thư mục đích mặc định\n\
+                 /jobs                  Job đang chạy hoặc tạm dừng\n\
+                 /status <job_id>       Chi tiết một job\n\
+                 /pause <job_id>        Tạm dừng\n\
+                 /resume <job_id>       Tiếp tục\n\
+                 /cancel <job_id>       Huỷ\n\
+                 /retry <job_id>        Làm lại phần lỗi\n\
+                 /preview               Bảng tổng quan realtime\n\
+                 /account               Tài khoản Google\n\
                  \n\
-                 Clone:\n\
-                 /clone <url>          - Xem thông tin và xác nhận\n\
-                 /clone_here <url>     - Clone ngay không cần xác nhận\n\
-                 /jobs                 - Danh sách job đang chạy\n\
-                 /status <job_id>      - Chi tiết job\n\
-                 /pause <job_id>       - Tạm dừng job\n\
-                 /resume <job_id>      - Tiếp tục job\n\
-                 /cancel <job_id>      - Huỷ job\n\
-                 /retry <job_id>       - Làm lại các item lỗi\n\
-                 \n\
-                 Thư mục đích:\n\
-                 /destination          - Xem thư mục đích hiện tại\n\
-                 /set_destination <url>- Đặt thư mục đích mặc định\n\
-                 /clear_destination    - Xoá thư mục đích mặc định\n\
-                 /preview              - Bảng tổng quan\n\
-                 \n\
-                 Watch/Đồng bộ:\n\
-                 /watch <src> <dst>    - Tạo watch subscription\n\
-                 /watches              - Danh sách watches\n\
-                 /watch_status <id>    - Trạng thái watch\n\
-                 /watch_pause <id>     - Tạm dừng watch\n\
-                 /watch_resume <id>    - Tiếp tục watch\n\
-                 /watch_policy <id> <policy>\n\
-                 /unwatch <id>         - Dừng watch\n\
-                 \n\
-                 Tài khoản:\n\
-                 /account              - Trạng thái Google\n\
-                 /whoami               - ID và quyền của bạn\n\
-                 /grant <user_id>      - Cấp quyền người dùng\n\
-                 /revoke <user_id>     - Thu hồi quyền",
+                 Quản trị: /whoami /grant /revoke /disconnect\n\
+                 Watch đang để sau, không hiện trong menu chính.",
             )
             .await?;
         }
@@ -251,13 +240,9 @@ async fn handle_command(
             .await?;
         }
         Command::Account => {
-            let text = match repo::account_status(&db).await {
-                Ok(Some(status)) => format!("Tài khoản Google: {status}"),
-                Ok(None) => "Chưa kết nối Google.\n\
-                     Chạy 'gdclone-bot auth login' trên máy chạy bot."
-                    .to_string(),
-                Err(err) => format!("Lỗi đọc trạng thái tài khoản: {err}"),
-            };
+            let text = account_summary(&config, &db)
+                .await
+                .unwrap_or_else(|err| format!("Lỗi đọc trạng thái tài khoản: {err}"));
             bot.send_message(msg.chat.id, text).await?;
         }
         Command::Disconnect => {
@@ -280,7 +265,12 @@ async fn handle_command(
                 .unwrap_or_else(|| "không rõ".to_string());
             bot.send_message(
                 msg.chat.id,
-                format!("Telegram ID: {user_id}\nQuyền: {role}"),
+                format!(
+                    "NGƯỜI DÙNG\n\
+                     ━━━━━━━━━\n\
+                     Telegram ID : {user_id}\n\
+                     Quyền       : {role}"
+                ),
             )
             .await?;
         }
@@ -396,20 +386,67 @@ async fn handle_command(
 async fn list_jobs(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
     let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 10).await?;
     if jobs.is_empty() {
-        return Ok("Không có job đang chạy.".to_string());
+        return Ok("JOB ĐANG CHẠY\n━━━━━━━━━━\nKhông có job đang chạy.".to_string());
     }
-    let mut lines = vec!["Job đang hoạt động:".to_string()];
+    let mut lines = vec!["JOB ĐANG CHẠY".to_string(), "━━━━━━━━━━".to_string()];
     for job in &jobs {
-        lines.push(format!(
-            "  {} [{}]  đã_quét:{} hoàn_tất:{} lỗi:{} bỏ_qua:{}",
-            short_job_id(&job.id),
-            vi_job_status(&job.status),
-            job.total_discovered,
-            job.completed_items,
-            job.failed_items,
-            job.skipped_items,
-        ));
+        lines.push(String::new());
+        push_field(&mut lines, "Job", short_job_id(&job.id));
+        push_field(&mut lines, "Trạng thái", vi_job_status(&job.status));
+        push_field(&mut lines, "Đã quét", &job.total_discovered.to_string());
+        push_field(&mut lines, "Hoàn tất", &job.completed_items.to_string());
+        push_field(&mut lines, "Lỗi", &job.failed_items.to_string());
+        push_field(&mut lines, "Bỏ qua", &job.skipped_items.to_string());
     }
+    Ok(lines.join("\n"))
+}
+
+async fn account_summary(config: &AppConfig, db: &Database) -> anyhow::Result<String> {
+    let status = repo::account_status(db)
+        .await?
+        .unwrap_or_else(|| "chưa kết nối".to_string());
+    let destination = repo::default_destination_profile(db, "default").await?;
+
+    let mut lines = vec!["TÀI KHOẢN GOOGLE".to_string(), "━━━━━━━━━━━━━━".to_string()];
+    push_field(&mut lines, "Trạng thái", vi_account_status(&status));
+
+    if status == "connected" {
+        let token_manager = TokenManager::new(config.clone(), db.clone());
+        let access_token = token_manager.access_token("default").await?;
+        let drive =
+            DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+        if let Ok(about) = drive.about_get(access_token.as_str()).await
+            && let Some(user) = about.user
+        {
+            if let Some(email) = user.email_address {
+                push_field(&mut lines, "Email", &email);
+            }
+            if let Some(name) = user.display_name {
+                push_field(&mut lines, "Tên", &name);
+            }
+        }
+    } else {
+        lines.push(String::new());
+        lines.push("Chạy trên máy đang chạy bot:".to_string());
+        lines.push("  gdclone-bot auth login".to_string());
+    }
+
+    lines.push(String::new());
+    lines.push("THƯ MỤC ĐÍCH".to_string());
+    lines.push("━━━━━━━━━━━━".to_string());
+    match destination {
+        Some(dest) => {
+            push_field(&mut lines, "Tên", &dest.label);
+            push_field(&mut lines, "Parent ID", &dest.destination_parent_id);
+            if let Some(drive_id) = dest.destination_drive_id {
+                push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
+            }
+        }
+        None => {
+            lines.push("Chưa đặt. Dùng /set_destination <folder_url>.".to_string());
+        }
+    }
+
     Ok(lines.join("\n"))
 }
 
@@ -814,7 +851,7 @@ fn render_job_progress(job: &repo::JobDetail, elapsed_secs: u64) -> String {
     format!(
         "Trạng thái  : {status}\n\
          Job         : {job_id}\n\
-         Thời gian   : {elapsed}  Toc do: {rate}  Du kien: {eta}\n\
+         Thời gian   : {elapsed}  Tốc độ: {rate}  Dự kiến: {eta}\n\
          Đã quét    : {discovered}  Bỏ qua: {skipped}\n\
          {bar}",
         status = vi_job_status(&job.status),
@@ -846,19 +883,20 @@ async fn show_job_status(
         return Ok("Không tìm thấy job thuộc tài khoản của bạn.".to_string());
     };
 
-    let mut lines = vec![
-        format!("Job         : {}", job.id),
-        format!("Loai        : {}", job.kind),
-        format!("Trạng thái  : {}", vi_job_status(&job.status)),
-        format!("Nguồn       : {}", job.source_root_id),
-        format!("Thư mục đích: {}", job.destination_parent_id),
-        format!("Đã quét    : {}", job.total_discovered),
-        format!("Hoàn tất    : {}", job.completed_items),
-        format!("Lỗi         : {}", job.failed_items),
-        format!("Bỏ qua      : {}", job.skipped_items),
-    ];
+    let mut lines = vec!["CHI TIẾT JOB".to_string(), "━━━━━━━━━━".to_string()];
+    push_field(&mut lines, "Job", &job.id);
+    push_field(&mut lines, "Loại", &job.kind);
+    push_field(&mut lines, "Trạng thái", vi_job_status(&job.status));
+    push_field(&mut lines, "Nguồn", &job.source_root_id);
+    push_field(&mut lines, "Đích", &job.destination_parent_id);
+    lines.push(String::new());
+    push_field(&mut lines, "Đã quét", &job.total_discovered.to_string());
+    push_field(&mut lines, "Hoàn tất", &job.completed_items.to_string());
+    push_field(&mut lines, "Lỗi", &job.failed_items.to_string());
+    push_field(&mut lines, "Bỏ qua", &job.skipped_items.to_string());
     if let Some(error) = job.error_summary {
-        lines.push(format!("Lỗi gan nhat: {error}"));
+        lines.push(String::new());
+        push_field(&mut lines, "Lỗi gần nhất", &error);
     }
     Ok(lines.join("\n"))
 }
@@ -976,7 +1014,7 @@ async fn ensure_owner(db: &Database, actor_user_id: i64) -> anyhow::Result<()> {
 fn parse_telegram_user_id(input: &str) -> anyhow::Result<i64> {
     let value = input.trim().parse::<i64>()?;
     if value <= 0 {
-        anyhow::bail!("Telegram user id phai la so duong");
+        anyhow::bail!("Telegram user id phải là số dương");
     }
     Ok(value)
 }
@@ -1009,19 +1047,24 @@ async fn spawn_destination_panel(bot: Bot, chat_id: ChatId, db: Database) -> Res
 
 fn render_destination_list(profiles: &[repo::DestinationProfile]) -> String {
     if profiles.is_empty() {
-        return "Chưa có thư mục đích nào được lưu.\nDung /set_destination <folder_url>."
+        return "Chưa có thư mục đích nào được lưu.\nDùng /set_destination <folder_url>."
             .to_string();
     }
-    let mut lines = vec!["Thư mục đích đã lưu:".to_string()];
+    let mut lines = vec!["THƯ MỤC ĐÍCH".to_string(), "━━━━━━━━━━━━".to_string()];
     for p in profiles {
-        let marker = if p.is_default { "[mặc định]" } else { "" };
-        let mut row = format!("  {} {}", p.label, marker).trim().to_string();
-        if let Some(drive_id) = &p.destination_drive_id {
-            row.push_str(&format!(" (Shared Drive {drive_id})"));
+        lines.push(String::new());
+        let title = if p.is_default {
+            format!("{} [mặc định]", p.label)
         } else {
-            row.push_str(&format!(" (ID: {})", p.destination_parent_id));
+            p.label.clone()
+        };
+        push_field(&mut lines, "Tên", &title);
+        push_field(&mut lines, "Parent ID", &p.destination_parent_id);
+        if let Some(drive_id) = &p.destination_drive_id {
+            push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
+        } else {
+            push_field(&mut lines, "Drive", "My Drive / được chia sẻ");
         }
-        lines.push(row);
     }
     lines.push(String::new());
     lines.push("Nhấn vào tên để đặt làm mặc định. Thêm mới: /set_destination <url>".to_string());
@@ -1063,7 +1106,7 @@ async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyh
         .await?;
 
     if file.mime_type != FOLDER_MIME_TYPE {
-        anyhow::bail!("Thư mục đích phai la Google Drive folder");
+        anyhow::bail!("Thư mục đích phải là Google Drive folder");
     }
     if file.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
         anyhow::bail!("Tài khoản Google hiện tại không có quyền ghi vào thư mục đích này");
@@ -1082,10 +1125,18 @@ async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyh
     )
     .await?;
 
-    Ok(format!(
-        "Đã đặt thư mục đích mặc định: {}\nDrive folder ID: {}",
-        file.name, file.id
-    ))
+    let mut lines = vec![
+        "ĐÃ ĐẶT THƯ MỤC ĐÍCH".to_string(),
+        "━━━━━━━━━━━━━━━".to_string(),
+    ];
+    push_field(&mut lines, "Tên", &file.name);
+    push_field(&mut lines, "Folder ID", &file.id);
+    if let Some(drive_id) = file.drive_id {
+        push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
+    } else {
+        push_field(&mut lines, "Drive", "My Drive / được chia sẻ");
+    }
+    Ok(lines.join("\n"))
 }
 
 // ── Clone source inspect ─────────────────────────────────────────────────────
