@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use teloxide::{
     prelude::*,
@@ -20,7 +20,11 @@ use crate::{
     },
     secrets::FileSecretStore,
     state::{db::Database, repo},
-    telegram::{commands::Command, keyboards, progress::render_progress},
+    telegram::{
+        commands::Command,
+        keyboards,
+        progress::{estimate_eta_secs, format_duration_secs, render_progress},
+    },
     watch::run_initial_clone,
 };
 
@@ -101,18 +105,18 @@ pub async fn handle_callback_query(
                     bot.edit_message_text(
                         chat_id,
                         message.id(),
-                        "Yêu cầu clone đã hết hạn hoặc không thuộc về bạn.",
+                        "Clone request expired or does not belong to you.",
                     )
                     .await?;
                 } else {
-                    bot.send_message(chat_id, "Yêu cầu clone đã hết hạn hoặc không thuộc về bạn.")
+                    bot.send_message(chat_id, "Clone request expired or does not belong to you.")
                         .await?;
                 }
                 return Ok(());
             };
             if let Some(message) = query.message.as_ref() {
                 let _ = bot
-                    .edit_message_text(chat_id, message.id(), "Đã bắt đầu clone.")
+                    .edit_message_text(chat_id, message.id(), "Clone started.")
                     .await;
             }
             spawn_clone_now(bot.clone(), chat_id, config, db, user_id, source).await?;
@@ -123,11 +127,11 @@ pub async fn handle_callback_query(
                 repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "clone_confirm")
                     .await;
             if let Some(message) = query.message.as_ref() {
-                bot.edit_message_text(chat_id, message.id(), "Đã huỷ yêu cầu clone.")
+                bot.edit_message_text(chat_id, message.id(), "Clone request cancelled.")
                     .await?;
                 return Ok(());
             }
-            "Đã huỷ yêu cầu clone.".to_string()
+            "Clone request cancelled.".to_string()
         }
         Some(("job", "pause", job_id)) => pause_job(&db, user_id, job_id)
             .await
@@ -161,13 +165,30 @@ async fn handle_command(
 ) -> ResponseResult<()> {
     match command {
         Command::Start => {
-            bot.send_message(msg.chat.id, "gdclone-bot đang chạy. Dùng /account để kiểm tra Google auth, rồi dùng /clone <Drive URL>.")
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                "gdclone-bot is running.\nUse /account to check Google auth, then /clone <Drive URL> to start.",
+            )
+            .await?;
         }
         Command::Help => {
             bot.send_message(
                 msg.chat.id,
-                "Lệnh chính: /preview /account /destination /set_destination <url> /clone <url> /clone_here <url> /jobs /status <job_id> /pause <job_id> /resume <job_id> /cancel <job_id> /retry <job_id>",
+                concat!(
+                    "Commands:\n",
+                    "/preview — dashboard\n",
+                    "/account — Google auth status\n",
+                    "/destination — show/change default destination\n",
+                    "/set_destination <url> — set default destination folder\n",
+                    "/clone <url> — start clone job\n",
+                    "/clone_here <url> — clone immediately (skip confirmation)\n",
+                    "/jobs — list active jobs\n",
+                    "/status <job_id>\n",
+                    "/pause /resume /cancel /retry <job_id>\n",
+                    "/watch <src_url> <dst_url> — create watch subscription\n",
+                    "/watches /watch_status /watch_pause /watch_resume /watch_policy /unwatch\n",
+                    "/whoami /grant <user_id> /revoke <user_id>"
+                ),
             )
             .await?;
         }
@@ -177,16 +198,18 @@ async fn handle_command(
         Command::Connect => {
             bot.send_message(
                 msg.chat.id,
-                "Google auth chạy local-first. Hãy chạy `gdclone-bot --config ~/.config/gdclone-bot/config.toml auth login` trên chính máy đang chạy bot, rồi dùng /account lại.",
+                "Google auth is local-first.\nRun `gdclone-bot auth login` on the machine running the bot, then use /account to verify.",
             )
             .await?;
         }
         Command::Account => {
             let text = match repo::account_status(&db).await {
-                Ok(Some(status)) => format!("Trạng thái tài khoản Google: {status}"),
-                Ok(None) => "Chưa kết nối Google. Chạy `gdclone-bot auth login` trên máy chạy bot."
-                    .to_string(),
-                Err(err) => format!("Không đọc được trạng thái account: {err}"),
+                Ok(Some(status)) => format!("Google account status: {status}"),
+                Ok(None) => {
+                    "No Google account connected. Run `gdclone-bot auth login` on the bot machine."
+                        .to_string()
+                }
+                Err(err) => format!("Could not read account status: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -207,29 +230,23 @@ async fn handle_command(
                 .ok()
                 .flatten()
                 .map(|user| user.role)
-                .unwrap_or_else(|| "không rõ".to_string());
+                .unwrap_or_else(|| "unknown".to_string());
             bot.send_message(
                 msg.chat.id,
-                format!("Telegram user id: {user_id}\nQuyền: {role}"),
+                format!("Telegram user id: {user_id}\nRole: {role}"),
             )
             .await?;
         }
         Command::Destination => {
-            let text = match repo::default_destination_profile(&db, "default").await {
-                Ok(Some(profile)) => format!(
-                    "Thư mục đích mặc định: {}\nDrive item ID: {}",
-                    profile.label, profile.destination_parent_id
-                ),
-                Ok(None) => "Chưa đặt thư mục đích. Dùng /set_destination <folder_url> sau khi Google auth đã connected.".to_string(),
-                Err(err) => format!("Không đọc được thư mục đích: {err}"),
-            };
-            bot.send_message(msg.chat.id, text).await?;
+            let text = destination_summary(&db).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
         }
         Command::ClearDestination => {
             let text = match repo::clear_default_destination(&db, "default").await {
-                Ok(0) => "Chưa có thư mục đích mặc định để xoá.".to_string(),
-                Ok(_) => "Đã xoá thư mục đích mặc định.".to_string(),
-                Err(err) => format!("Không xoá được thư mục đích: {err}"),
+                Ok(0) => "No default destination was configured.".to_string(),
+                Ok(_) => "Default destination cleared.".to_string(),
+                Err(err) => format!("Could not clear destination: {err}"),
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -330,15 +347,15 @@ async fn handle_command(
 async fn list_jobs(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
     let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 10).await?;
     if jobs.is_empty() {
-        return Ok("Không có job đang chạy hoặc tạm dừng.".to_string());
+        return Ok("No active jobs.".to_string());
     }
 
-    let mut lines = vec!["Job đang hoạt động:".to_string()];
+    let mut lines = vec!["Active jobs:".to_string()];
     for job in jobs {
         lines.push(format!(
-            "{}  {}  đã quét={} xong={} lỗi={} bỏ qua={}",
+            "{}  {}  discovered={} done={} err={} skipped={}",
             short_job_id(&job.id),
-            vi_job_status(&job.status),
+            job.status,
             job.total_discovered,
             job.completed_items,
             job.failed_items,
@@ -382,45 +399,43 @@ async fn spawn_preview_dashboard(
 async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyhow::Result<String> {
     let account = repo::account_status(db)
         .await?
-        .unwrap_or_else(|| "chưa kết nối".to_string());
+        .unwrap_or_else(|| "not connected".to_string());
     let destination = repo::default_destination_profile(db, "default").await?;
     let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 5).await?;
     let counts = repo::job_status_counts(db).await?;
 
     let mut lines = vec![
-        "Bảng trạng thái gdclone-bot".to_string(),
-        format!("Google: {}", vi_account_status(&account)),
+        "gdclone-bot dashboard".to_string(),
+        format!("Google: {account}"),
         match destination {
             Some(profile) => format!(
-                "Đích: {} ({})",
+                "Destination: {} ({})",
                 profile.label, profile.destination_parent_id
             ),
-            None => {
-                "Cảnh báo: chưa đặt thư mục đích. Dùng /set_destination <folder_url>.".to_string()
-            }
+            None => "⚠️ No default destination set. Use /set_destination <folder_url>.".to_string(),
         },
     ];
 
     if counts.is_empty() {
-        lines.push("Tổng job: chưa có".to_string());
+        lines.push("Jobs: none".to_string());
     } else {
         let summary = counts
             .into_iter()
-            .map(|item| format!("{}={}", vi_job_status(&item.status), item.count))
+            .map(|item| format!("{}={}", item.status, item.count))
             .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(format!("Tổng job: {summary}"));
+            .join(" ");
+        lines.push(format!("Jobs: {summary}"));
     }
 
     if jobs.is_empty() {
-        lines.push("Đang chạy: không có".to_string());
+        lines.push("Active: none".to_string());
     } else {
-        lines.push("Đang chạy:".to_string());
+        lines.push("Active:".to_string());
         for job in jobs {
             lines.push(format!(
-                "- {} {} | quét={} xong={} lỗi={} bỏ_qua={}",
+                "  {} {} discovered={} done={} err={} skipped={}",
                 short_job_id(&job.id),
-                vi_job_status(&job.status),
+                job.status,
                 job.total_discovered,
                 job.completed_items,
                 job.failed_items,
@@ -429,7 +444,7 @@ async fn render_preview_dashboard(db: &Database, telegram_user_id: i64) -> anyho
         }
     }
 
-    lines.push("Tự cập nhật trong 30 giây. Dùng /preview để mở lại.".to_string());
+    lines.push("(auto-refresh 30 s — /preview to re-open)".to_string());
     Ok(lines.join("\n"))
 }
 
@@ -486,7 +501,7 @@ async fn spawn_clone_now(
     let progress_message = bot
         .send_message(
             chat_id,
-            format!("State: Queued\n{}", render_progress(None, 0, 0)),
+            format!("State: queued\n{}", render_progress(None, 0, 0)),
         )
         .await?;
     let progress_message_id = progress_message.id;
@@ -503,7 +518,7 @@ async fn spawn_clone_now(
 
     bot.send_message(
         chat_id,
-        "Đã nhận job clone. Dùng /preview, /jobs hoặc /status <job_id> để theo dõi.",
+        "Clone accepted. Track with /jobs or /status <job_id>.",
     )
     .await?;
 
@@ -612,6 +627,7 @@ fn spawn_progress_updater(
         interval
     };
     tokio::spawn(async move {
+        let started_at = Instant::now();
         let mut last_text = String::new();
         loop {
             if !last_text.is_empty() {
@@ -621,14 +637,18 @@ fn spawn_progress_updater(
                 }
             }
 
+            let elapsed_secs = started_at.elapsed().as_secs();
             let detail =
                 match repo::job_detail_for_progress_message(&db, telegram_user_id, message_id.0)
                     .await
                 {
                     Ok(Some(detail)) => detail,
                     Ok(None) => {
-                        let text = "Trạng thái: đang chuẩn bị job\nĐang quét... xong: 0 lỗi: 0"
-                            .to_string();
+                        let text = format!(
+                            "State: queued\nElapsed: {}\n{}",
+                            format_duration_secs(elapsed_secs),
+                            render_progress(None, 0, 0),
+                        );
                         if text != last_text {
                             last_text = text.clone();
                             if let Err(err) = bot.edit_message_text(chat_id, message_id, text).await
@@ -644,7 +664,7 @@ fn spawn_progress_updater(
                     }
                 };
 
-            let text = render_job_progress(&detail);
+            let text = render_job_progress(&detail, elapsed_secs);
             if text == last_text {
                 continue;
             }
@@ -669,7 +689,7 @@ fn spawn_progress_updater(
     });
 }
 
-fn render_job_progress(job: &repo::JobDetail) -> String {
+fn render_job_progress(job: &repo::JobDetail, elapsed_secs: u64) -> String {
     let total = if matches!(
         job.status.as_str(),
         "running" | "completed" | "partially_completed" | "failed"
@@ -679,23 +699,29 @@ fn render_job_progress(job: &repo::JobDetail) -> String {
     } else {
         None
     };
-    let percent = total
-        .filter(|total| *total > 0)
-        .map(|total| {
-            format!(
-                "Tiến độ: {}%",
-                (job.completed_items * 100 / total as i64).min(100)
-            )
-        })
-        .unwrap_or_else(|| "Tiến độ: đang xác định tổng số item".to_string());
+
+    let done = job.completed_items as u64;
+    let rate = if elapsed_secs > 0 {
+        format!("{:.1} items/s", done as f64 / elapsed_secs as f64)
+    } else {
+        "—".to_string()
+    };
+
+    let eta_str = total
+        .and_then(|t| estimate_eta_secs(done, t, elapsed_secs))
+        .map(format_duration_secs)
+        .unwrap_or_else(|| "—".to_string());
+
     format!(
-        "Trạng thái: {}\nJob: {}\nĐã quét: {}\n{}\n{}\nBỏ qua: {}",
-        vi_job_status(&job.status),
+        "State: {}\nJob:   {}\nElapsed: {}  Rate: {}  ETA: {}\nDiscovered: {}  Skipped: {}\n{}",
+        job.status,
         short_job_id(&job.id),
+        format_duration_secs(elapsed_secs),
+        rate,
+        eta_str,
         job.total_discovered,
-        percent,
-        render_progress(total, job.completed_items as u64, job.failed_items as u64),
-        job.skipped_items
+        job.skipped_items,
+        render_progress(total, done, job.failed_items as u64),
     )
 }
 
@@ -712,31 +738,31 @@ async fn show_job_status(
     job_id: &str,
 ) -> anyhow::Result<String> {
     let Some(job) = repo::job_detail_for_user(db, telegram_user_id, job_id).await? else {
-        return Ok("Không tìm thấy job thuộc Telegram user của bạn.".to_string());
+        return Ok("Job not found for your account.".to_string());
     };
 
     let mut lines = vec![
-        format!("Job: {}", job.id),
-        format!("Loại: {}", job.kind),
-        format!("Trạng thái: {}", vi_job_status(&job.status)),
-        format!("Nguồn ID: {}", job.source_root_id),
-        format!("Thư mục đích ID: {}", job.destination_parent_id),
-        format!("Đã quét: {}", job.total_discovered),
-        format!("Hoàn tất: {}", job.completed_items),
-        format!("Lỗi: {}", job.failed_items),
-        format!("Bỏ qua: {}", job.skipped_items),
+        format!("Job:         {}", job.id),
+        format!("Kind:        {}", job.kind),
+        format!("Status:      {}", job.status),
+        format!("Source:      {}", job.source_root_id),
+        format!("Destination: {}", job.destination_parent_id),
+        format!("Discovered:  {}", job.total_discovered),
+        format!("Completed:   {}", job.completed_items),
+        format!("Failed:      {}", job.failed_items),
+        format!("Skipped:     {}", job.skipped_items),
     ];
     if let Some(error) = job.error_summary {
-        lines.push(format!("Lỗi gần nhất: {error}"));
+        lines.push(format!("Last error:  {error}"));
     }
     Ok(lines.join("\n"))
 }
 
 async fn pause_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
     if repo::pause_job_for_user(db, telegram_user_id, job_id).await? {
-        Ok(format!("Đã yêu cầu tạm dừng job {job_id}."))
+        Ok(format!("Pause requested for job {job_id}."))
     } else {
-        Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho tạm dừng.".to_string())
+        Ok("Job not found or cannot be paused from its current state.".to_string())
     }
 }
 
@@ -748,17 +774,17 @@ async fn resume_job(
 ) -> anyhow::Result<String> {
     if repo::resume_job_for_user(db, telegram_user_id, job_id).await? {
         let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
-        Ok(format!("Đã yêu cầu tiếp tục job {job_id}."))
+        Ok(format!("Resume requested for job {job_id}."))
     } else {
-        Ok("Không tìm thấy job hoặc job chưa ở trạng thái tạm dừng.".to_string())
+        Ok("Job not found or is not paused.".to_string())
     }
 }
 
 async fn cancel_job(db: &Database, telegram_user_id: i64, job_id: &str) -> anyhow::Result<String> {
     if repo::cancel_job_for_user(db, telegram_user_id, job_id).await? {
-        Ok(format!("Đã yêu cầu huỷ job {job_id}."))
+        Ok(format!("Cancel requested for job {job_id}."))
     } else {
-        Ok("Không tìm thấy job hoặc trạng thái hiện tại không cho huỷ.".to_string())
+        Ok("Job not found or cannot be cancelled from its current state.".to_string())
     }
 }
 
@@ -771,16 +797,13 @@ async fn retry_job(
     if let Some(summary) = repo::retry_failed_job_for_user(db, telegram_user_id, job_id).await? {
         let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
         Ok(format!(
-            "Đã yêu cầu làm lại job {job_id}. folder={} item={} operation={}",
+            "Retry queued for job {job_id}. folders={} items={} operations={}",
             summary.traversal_folders_requeued,
             summary.job_items_requeued,
             summary.operation_intents_replanned
         ))
     } else {
-        Ok(
-            "Không tìm thấy job, job không thể retry, hoặc không có phần lỗi để làm lại."
-                .to_string(),
-        )
+        Ok("Job not found, not retryable, or has no failed work.".to_string())
     }
 }
 
@@ -849,32 +872,29 @@ fn short_job_id(job_id: &str) -> &str {
     job_id.get(..8).unwrap_or(job_id)
 }
 
-fn vi_account_status(status: &str) -> &str {
-    match status {
-        "connected" => "đã kết nối",
-        "reconnect_required" => "cần đăng nhập lại",
-        "revoked" => "đã thu hồi",
-        "disabled" => "đã tắt",
-        "chưa kết nối" => "chưa kết nối",
-        other => other,
-    }
-}
+/// Build a rich /destination summary listing default + recent destinations.
+async fn destination_summary(db: &Database) -> anyhow::Result<String> {
+    let default = repo::default_destination_profile(db, "default").await?;
+    let mut lines: Vec<String> = Vec::new();
 
-fn vi_job_status(status: &str) -> &str {
-    match status {
-        "queued" => "đang chờ",
-        "discovering" => "đang quét",
-        "running" => "đang chạy",
-        "pausing" => "đang tạm dừng",
-        "paused" => "đã tạm dừng",
-        "cancelling" => "đang huỷ",
-        "cancelled" => "đã huỷ",
-        "recovering" => "đang khôi phục",
-        "completed" => "hoàn tất",
-        "partially_completed" => "hoàn tất một phần",
-        "failed" => "thất bại",
-        other => other,
+    match &default {
+        Some(p) => {
+            lines.push(format!("Default destination: {}", p.label));
+            lines.push(format!("  Drive folder ID: {}", p.destination_parent_id));
+            if let Some(drive_id) = &p.destination_drive_id {
+                lines.push(format!("  Shared Drive:    {drive_id}"));
+            }
+        }
+        None => {
+            lines.push(
+                "No default destination set.\nUse /set_destination <folder_url_or_id>.".to_string(),
+            );
+        }
     }
+
+    lines.push("".to_string());
+    lines.push("Change or clear: /set_destination <url>  /clear_destination".to_string());
+    Ok(lines.join("\n"))
 }
 
 async fn start_clone_reference(
@@ -885,6 +905,14 @@ async fn start_clone_reference(
     source: crate::drive::links::DriveReference,
     progress_message_id: Option<i32>,
 ) -> anyhow::Result<CloneOutcome> {
+    // Per-user concurrency guard: count active jobs for this user.
+    let active_count = repo::active_job_count_for_user(db, telegram_user_id).await?;
+    if active_count >= config.engine.max_active_jobs_per_user as i64 {
+        anyhow::bail!(
+            "You already have {active_count} active job(s). \
+             Wait for them to finish or cancel with /cancel <job_id>."
+        );
+    }
     let service = CloneService::new(config.clone(), db.clone());
     service
         .start_one_shot(CloneRequest {
@@ -1092,7 +1120,12 @@ async fn start_watch(
     }
 
     Ok(format!(
-        "Watch created.\nWatch ID: {short}\nSource: {src_name} ({src_id})\nDestination: {dst_name}\n⏳ Initial clone starting in background — use /watch_status {short} to monitor.",
+        "Watch created.\n\
+         ID:          {short}\n\
+         Source:      {src_name} ({src_id})\n\
+         Destination: {dst_name}\n\
+         ⌛ Initial clone starting in background.\n\
+         Track with /watch_status {short}",
         short = &watch_id[..8.min(watch_id.len())],
         src_name = source.name,
         src_id = source.id,
