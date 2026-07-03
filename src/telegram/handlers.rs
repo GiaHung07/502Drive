@@ -84,7 +84,9 @@ pub async fn handle_callback_query(
     config: AppConfig,
     db: Database,
 ) -> ResponseResult<()> {
-    bot.answer_callback_query(query.id.clone()).await?;
+    if let Err(err) = bot.answer_callback_query(query.id.clone()).await {
+        warn!(error = %err, "answer callback query failed");
+    }
 
     let user_id = query.from.id.0 as i64;
     let chat_id = query.message.as_ref().map(|m| m.chat().id);
