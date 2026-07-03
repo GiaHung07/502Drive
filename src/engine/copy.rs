@@ -376,7 +376,7 @@ impl CloneService {
         repo::update_job_status(&self.db, job_id, final_status, None).await?;
 
         Ok(format!(
-            "Job {job_id} completed. Discovered: {} Completed: {} Failed: {} Skipped: {}",
+            "Job {job_id} da hoan tat. Da quet: {} Hoan tat: {} Loi: {} Bo qua: {}",
             counts.total_discovered,
             counts.completed_items,
             counts.failed_items,
@@ -475,7 +475,7 @@ impl CloneService {
         repo::update_job_status(&self.db, job_id, JobStatusValue::Completed, None).await?;
 
         Ok(format!(
-            "Job {job_id} completed. Copied file: {}",
+            "Job {job_id} da hoan tat. Da copy file: {}",
             copied.name
         ))
     }
@@ -1136,7 +1136,7 @@ pub fn create_shortcut_request_json(
 
 fn validate_source_for_clone(source: &DriveFile) -> anyhow::Result<()> {
     if source.trashed == Some(true) {
-        bail!("Source item is trashed");
+        bail!("File/folder nguon dang nam trong thung rac");
     }
     if source.is_folder() {
         if source
@@ -1145,14 +1145,14 @@ fn validate_source_for_clone(source: &DriveFile) -> anyhow::Result<()> {
             .and_then(|cap| cap.can_list_children)
             != Some(true)
         {
-            bail!("Authenticated account cannot list this source folder");
+            bail!("Tai khoan Google hien tai khong co quyen doc folder nguon");
         }
     } else if source.is_shortcut() {
         if source.shortcut_details.is_none() {
-            bail!("Shortcut is missing target details");
+            bail!("Shortcut nguon thieu thong tin dich");
         }
     } else if source.capabilities.as_ref().and_then(|cap| cap.can_copy) != Some(true) {
-        bail!("Authenticated account cannot copy this source item");
+        bail!("Tai khoan Google hien tai khong co quyen copy item nguon");
     }
     Ok(())
 }

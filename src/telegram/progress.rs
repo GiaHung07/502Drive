@@ -28,8 +28,8 @@ impl ProgressThrottle {
 
 /// Render a one-line progress bar with counts.
 ///
-/// When `total` is known: `[####----------------] 4/20 (20%) done:4 err:0`
-/// When scanning:          `Scanning… done:4 err:0`
+/// When `total` is known: `[####----------------] 4/20 (20%) xong:4 loi:0`
+/// When scanning:          `Dang quet... xong:4 loi:0`
 pub fn render_progress(total: Option<u64>, completed: u64, failed: u64) -> String {
     match total {
         Some(total) if total > 0 => {
@@ -37,7 +37,7 @@ pub fn render_progress(total: Option<u64>, completed: u64, failed: u64) -> Strin
             let filled = ((completed.min(total) * width as u64) / total) as usize;
             let pct = (completed.min(total) * 100) / total;
             format!(
-                "[{}{}] {}/{} ({}%) done:{} err:{}",
+                "[{}{}] {}/{} ({}%) xong:{} loi:{}",
                 "#".repeat(filled),
                 "-".repeat(width - filled),
                 completed,
@@ -47,7 +47,7 @@ pub fn render_progress(total: Option<u64>, completed: u64, failed: u64) -> Strin
                 failed,
             )
         }
-        _ => format!("Scanning… done:{completed} err:{failed}"),
+        _ => format!("Dang quet... xong:{completed} loi:{failed}"),
     }
 }
 
