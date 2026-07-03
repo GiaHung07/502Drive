@@ -1522,6 +1522,75 @@ pub async fn clear_default_destination(
         .await?)
 }
 
+/// Return up to `limit` destination profiles ordered by most-recently used.
+/// The default profile is always first if present.
+pub async fn list_recent_destinations(
+    db: &Database,
+    google_account_id: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<DestinationProfile>> {
+    let google_account_id = google_account_id.to_string();
+    let limit = limit as i64;
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, google_account_id, label, destination_parent_id,
+                        destination_drive_id, destination_resource_key, is_default
+                 FROM destination_profiles
+                 WHERE google_account_id = ?1
+                 ORDER BY is_default DESC, updated_at_ms DESC
+                 LIMIT ?2",
+            )?;
+            let rows = stmt
+                .query_map(params![google_account_id, limit], |row| {
+                    Ok(DestinationProfile {
+                        id: row.get(0)?,
+                        google_account_id: row.get(1)?,
+                        label: row.get(2)?,
+                        destination_parent_id: row.get(3)?,
+                        destination_drive_id: row.get(4)?,
+                        destination_resource_key: row.get(5)?,
+                        is_default: row.get::<_, i64>(6)? == 1,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok::<Vec<DestinationProfile>, rusqlite::Error>(rows)
+        })
+        .await?)
+}
+
+/// Switch the default destination to a specific profile by ID.
+pub async fn set_default_destination_by_id(
+    db: &Database,
+    google_account_id: &str,
+    profile_id: &str,
+) -> anyhow::Result<bool> {
+    let google_account_id = google_account_id.to_string();
+    let profile_id = profile_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let now = now_ms();
+            let tx = conn.transaction()?;
+            // Clear all defaults for this account.
+            tx.execute(
+                "UPDATE destination_profiles SET is_default = 0, updated_at_ms = ?2
+                 WHERE google_account_id = ?1",
+                params![google_account_id, now],
+            )?;
+            // Set the chosen profile as default.
+            let changed = tx.execute(
+                "UPDATE destination_profiles SET is_default = 1, updated_at_ms = ?2
+                 WHERE id = ?1 AND google_account_id = ?3",
+                params![profile_id, now, google_account_id],
+            )?;
+            tx.commit()?;
+            Ok::<bool, rusqlite::Error>(changed > 0)
+        })
+        .await?)
+}
+
 #[derive(Debug, Clone)]
 pub struct NewOperationIntent {
     pub idempotency_key: String,

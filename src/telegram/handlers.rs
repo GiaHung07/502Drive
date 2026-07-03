@@ -139,6 +139,27 @@ pub async fn handle_callback_query(
         Some(("job", "cancel", job_id)) => cancel_job(&db, user_id, job_id)
             .await
             .unwrap_or_else(|err| err.to_string()),
+        Some(("dest", "select", profile_id)) => {
+            match repo::set_default_destination_by_id(&db, "default", profile_id).await {
+                Ok(true) => {
+                    // Re-render the destination panel in place.
+                    let profiles = repo::list_recent_destinations(&db, "default", 5)
+                        .await
+                        .unwrap_or_default();
+                    let text = render_destination_list(&profiles);
+                    if let Some(message) = query.message.as_ref() {
+                        let _ = bot
+                            .edit_message_text(chat_id, message.id(), &text)
+                            .reply_markup(keyboards::recent_destinations_keyboard(&profiles))
+                            .await;
+                        return Ok(());
+                    }
+                    text
+                }
+                Ok(false) => "Khong tim thay thu muc dich.".to_string(),
+                Err(err) => format!("Loi doi dich: {err}"),
+            }
+        }
         Some(("browse", _, _)) => "Tinh nang chon thu muc chua duoc ho tro.".to_string(),
         _ => "Hanh dong khong xac dinh.".to_string(),
     };
@@ -260,9 +281,7 @@ async fn handle_command(
             .await?;
         }
         Command::Destination => {
-            let text = destination_summary(&db).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
+            spawn_destination_panel(bot, msg.chat.id, db).await?;
         }
         Command::ClearDestination => {
             let text = match repo::clear_default_destination(&db, "default").await {
@@ -960,9 +979,56 @@ fn parse_telegram_user_id(input: &str) -> anyhow::Result<i64> {
 
 // ── Destination ──────────────────────────────────────────────────────────────
 
+/// Send a destination panel message with the current default and recent
+/// destinations as inline quick-switch buttons.
+async fn spawn_destination_panel(bot: Bot, chat_id: ChatId, db: Database) -> ResponseResult<()> {
+    let profiles = repo::list_recent_destinations(&db, "default", 5)
+        .await
+        .unwrap_or_default();
+
+    let text = render_destination_list(&profiles);
+
+    if profiles.is_empty() {
+        bot.send_message(
+            chat_id,
+            "Chua dat thu muc dich mac dinh.\n\
+             Dung /set_destination <folder_url> de cau hinh.",
+        )
+        .await?;
+    } else {
+        bot.send_message(chat_id, text)
+            .reply_markup(keyboards::recent_destinations_keyboard(&profiles))
+            .await?;
+    }
+    Ok(())
+}
+
+fn render_destination_list(profiles: &[repo::DestinationProfile]) -> String {
+    if profiles.is_empty() {
+        return "Chua co thu muc dich nao duoc luu.\nDung /set_destination <folder_url>."
+            .to_string();
+    }
+    let mut lines = vec!["Thu muc dich da luu:".to_string()];
+    for p in profiles {
+        let marker = if p.is_default { "[mac dinh]" } else { "" };
+        let mut row = format!("  {} {}", p.label, marker).trim().to_string();
+        if let Some(drive_id) = &p.destination_drive_id {
+            row.push_str(&format!(" (Shared Drive {drive_id})"));
+        } else {
+            row.push_str(&format!(" (ID: {})", p.destination_parent_id));
+        }
+        lines.push(row);
+    }
+    lines.push(String::new());
+    lines.push("Nhan vao ten de dat lam mac dinh. Them moi: /set_destination <url>".to_string());
+    lines.join("\n")
+}
+
+/// Legacy helper kept for internal callers that only need the default.
+#[allow(dead_code)]
 async fn destination_summary(db: &Database) -> anyhow::Result<String> {
-    let default = repo::default_destination_profile(db, "default").await?;
-    match &default {
+    let profiles = repo::list_recent_destinations(db, "default", 1).await?;
+    match profiles.first() {
         Some(p) => {
             let mut lines = vec![
                 "Thu muc dich mac dinh:".to_string(),
