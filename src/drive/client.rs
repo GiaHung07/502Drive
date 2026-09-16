@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::{
     changes::{ChangeList, StartPageTokenResponse},
     links::DriveReference,
+    pacer::{Pacer, PacerDecision},
     types::{
         DriveAbout, DriveFile, FOLDER_MIME_TYPE, FileList, GoogleErrorEnvelope, SHORTCUT_MIME_TYPE,
         SharedDriveList,
@@ -29,6 +30,7 @@ pub const FILE_FIELDS: &str = concat!(
 #[derive(Clone)]
 pub struct DriveClient {
     http: HttpClient,
+    pacer: Pacer,
 }
 
 impl DriveClient {
@@ -42,18 +44,49 @@ impl DriveClient {
                 .timeout(timeout)
                 .build()
                 .expect("build Drive HTTP client"),
+            pacer: Pacer::default(),
         }
+    }
+
+    /// Access the shared pacer — retry loops use it to honor `Retry-After`
+    /// across every worker, not just the one that saw the 429.
+    pub fn pacer(&self) -> &Pacer {
+        &self.pacer
+    }
+
+    /// Send a request through the shared pacer: acquire a token (sleeping
+    /// while the bucket is empty or the circuit breaker is open), then record
+    /// the outcome so the circuit breaker adapts to 429/5xx pressure.
+    async fn paced_send(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, anyhow::Error> {
+        loop {
+            match self.pacer.acquire() {
+                PacerDecision::Proceed => break,
+                PacerDecision::Wait(wait) => tokio::time::sleep(wait).await,
+            }
+        }
+        let response = request.send().await?;
+        let status = response.status();
+        if status.is_success() {
+            self.pacer.record_success();
+        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            self.pacer.record_error();
+        }
+        Ok(response)
     }
 
     pub async fn about_get(&self, access_token: &str) -> Result<DriveAbout, DriveApiError> {
         decode_response(
-            self.http
-                .get(DRIVE_ABOUT_URL)
-                .bearer_auth(access_token)
-                .query(&[("fields", "user(displayName,emailAddress)")])
-                .send()
-                .await
-                .context("send about.get")?,
+            self.paced_send(
+                self.http
+                    .get(DRIVE_ABOUT_URL)
+                    .bearer_auth(access_token)
+                    .query(&[("fields", "user(displayName,emailAddress)")]),
+            )
+            .await
+            .context("send about.get")?,
         )
         .await
     }
@@ -64,11 +97,12 @@ impl DriveClient {
         file_id: &str,
     ) -> Result<DriveFile, DriveApiError> {
         let response = self
-            .http
-            .get(format!("{DRIVE_FILES_URL}/{file_id}"))
-            .bearer_auth(access_token)
-            .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
-            .send()
+            .paced_send(
+                self.http
+                    .get(format!("{DRIVE_FILES_URL}/{file_id}"))
+                    .bearer_auth(access_token)
+                    .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")]),
+            )
             .await
             .context("send files.get")?;
 
@@ -88,7 +122,7 @@ impl DriveClient {
         if let Some(header) = reference.resource_key_header_value() {
             request = request.header("X-Goog-Drive-Resource-Keys", header);
         }
-        decode_response(request.send().await.context("send files.get")?).await
+        decode_response(self.paced_send(request).await.context("send files.get")?).await
     }
 
     pub async fn list_children(
@@ -189,7 +223,7 @@ impl DriveClient {
             request = request.query(&[("pageToken", token)]);
         }
 
-        decode_response(request.send().await.context("send files.list")?).await
+        decode_response(self.paced_send(request).await.context("send files.list")?).await
     }
 
     pub async fn list_shared_drives_page_size(
@@ -210,7 +244,7 @@ impl DriveClient {
         if let Some(token) = page_token {
             request = request.query(&[("pageToken", token)]);
         }
-        decode_response(request.send().await.context("send drives.list")?).await
+        decode_response(self.paced_send(request).await.context("send drives.list")?).await
     }
 
     pub async fn find_by_copy_key(
@@ -221,17 +255,18 @@ impl DriveClient {
     ) -> Result<Vec<DriveFile>, DriveApiError> {
         let query = app_property_copy_key_query(destination_parent_id, copy_key);
         let response = self
-            .http
-            .get(DRIVE_FILES_URL)
-            .bearer_auth(access_token)
-            .query(&[
-                ("q", query.as_str()),
-                ("pageSize", "10"),
-                ("fields", &format!("files({FILE_FIELDS})")),
-                ("supportsAllDrives", "true"),
-                ("includeItemsFromAllDrives", "true"),
-            ])
-            .send()
+            .paced_send(
+                self.http
+                    .get(DRIVE_FILES_URL)
+                    .bearer_auth(access_token)
+                    .query(&[
+                        ("q", query.as_str()),
+                        ("pageSize", "10"),
+                        ("fields", &format!("files({FILE_FIELDS})")),
+                        ("supportsAllDrives", "true"),
+                        ("includeItemsFromAllDrives", "true"),
+                    ]),
+            )
             .await
             .context("send files.list appProperties lookup")?;
         Ok(decode_response::<FileList>(response).await?.files)
@@ -252,14 +287,15 @@ impl DriveClient {
         insert_app_properties(&mut body, app_properties);
 
         decode_response(
-            self.http
-                .post(DRIVE_FILES_URL)
-                .bearer_auth(access_token)
-                .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
-                .json(&body)
-                .send()
-                .await
-                .context("send files.create")?,
+            self.paced_send(
+                self.http
+                    .post(DRIVE_FILES_URL)
+                    .bearer_auth(access_token)
+                    .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
+                    .json(&body),
+            )
+            .await
+            .context("send files.create")?,
         )
         .await
     }
@@ -287,14 +323,15 @@ impl DriveClient {
         insert_app_properties(&mut body, app_properties);
 
         decode_response(
-            self.http
-                .post(DRIVE_FILES_URL)
-                .bearer_auth(access_token)
-                .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
-                .json(&body)
-                .send()
-                .await
-                .context("send files.create shortcut")?,
+            self.paced_send(
+                self.http
+                    .post(DRIVE_FILES_URL)
+                    .bearer_auth(access_token)
+                    .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
+                    .json(&body),
+            )
+            .await
+            .context("send files.create shortcut")?,
         )
         .await
     }
@@ -323,7 +360,7 @@ impl DriveClient {
             request = request.header("X-Goog-Drive-Resource-Keys", header);
         }
 
-        decode_response(request.send().await.context("send files.copy")?).await
+        decode_response(self.paced_send(request).await.context("send files.copy")?).await
     }
 
     /// `changes.getStartPageToken` — returns the token representing the head
@@ -346,7 +383,12 @@ impl DriveClient {
         if let Some(id) = drive_id {
             req = req.query(&[("driveId", id)]);
         }
-        decode_response(req.send().await.context("send changes.getStartPageToken")?).await
+        decode_response(
+            self.paced_send(req)
+                .await
+                .context("send changes.getStartPageToken")?,
+        )
+        .await
     }
 
     /// `changes.list` — fetch one page of changes starting from `page_token`.
@@ -381,7 +423,7 @@ impl DriveClient {
         if let Some(id) = drive_id {
             req = req.query(&[("driveId", id)]);
         }
-        decode_response(req.send().await.context("send changes.list")?).await
+        decode_response(self.paced_send(req).await.context("send changes.list")?).await
     }
 
     /// `files.update` — rename a file in place.
@@ -394,14 +436,15 @@ impl DriveClient {
     ) -> Result<DriveFile, DriveApiError> {
         let body = serde_json::json!({ "name": new_name });
         decode_response(
-            self.http
-                .patch(format!("{DRIVE_FILES_URL}/{file_id}"))
-                .bearer_auth(access_token)
-                .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
-                .json(&body)
-                .send()
-                .await
-                .context("send files.update (rename)")?,
+            self.paced_send(
+                self.http
+                    .patch(format!("{DRIVE_FILES_URL}/{file_id}"))
+                    .bearer_auth(access_token)
+                    .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
+                    .json(&body),
+            )
+            .await
+            .context("send files.update (rename)")?,
         )
         .await
     }
@@ -423,19 +466,20 @@ impl DriveClient {
         let remove_parents = current.parents.join(",");
 
         decode_response(
-            self.http
-                .patch(format!("{DRIVE_FILES_URL}/{file_id}"))
-                .bearer_auth(access_token)
-                .query(&[
-                    ("addParents", new_parent_id),
-                    ("removeParents", &remove_parents),
-                    ("fields", FILE_FIELDS),
-                    ("supportsAllDrives", "true"),
-                ])
-                .json(&serde_json::json!({}))
-                .send()
-                .await
-                .context("send files.update (move)")?,
+            self.paced_send(
+                self.http
+                    .patch(format!("{DRIVE_FILES_URL}/{file_id}"))
+                    .bearer_auth(access_token)
+                    .query(&[
+                        ("addParents", new_parent_id),
+                        ("removeParents", &remove_parents),
+                        ("fields", FILE_FIELDS),
+                        ("supportsAllDrives", "true"),
+                    ])
+                    .json(&serde_json::json!({})),
+            )
+            .await
+            .context("send files.update (move)")?,
         )
         .await
     }
@@ -447,14 +491,15 @@ impl DriveClient {
         file_id: &str,
     ) -> Result<DriveFile, DriveApiError> {
         decode_response(
-            self.http
-                .patch(format!("{DRIVE_FILES_URL}/{file_id}"))
-                .bearer_auth(access_token)
-                .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
-                .json(&serde_json::json!({ "trashed": true }))
-                .send()
-                .await
-                .context("send files.update (trash)")?,
+            self.paced_send(
+                self.http
+                    .patch(format!("{DRIVE_FILES_URL}/{file_id}"))
+                    .bearer_auth(access_token)
+                    .query(&[("fields", FILE_FIELDS), ("supportsAllDrives", "true")])
+                    .json(&serde_json::json!({ "trashed": true })),
+            )
+            .await
+            .context("send files.update (trash)")?,
         )
         .await
     }
@@ -485,6 +530,7 @@ pub enum DriveApiError {
         status: StatusCode,
         message: String,
         reason: Option<String>,
+        retry_after: Option<Duration>,
     },
     #[error(transparent)]
     Transport(#[from] anyhow::Error),
@@ -504,6 +550,15 @@ impl DriveApiError {
             DriveApiError::Transport(_) => None,
         }
     }
+
+    /// Server-advertised backoff from the `Retry-After` header (seconds form),
+    /// present on some 429/5xx responses.
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            DriveApiError::Api { retry_after, .. } => *retry_after,
+            DriveApiError::Transport(_) => None,
+        }
+    }
 }
 
 async fn decode_response<T: serde::de::DeserializeOwned>(
@@ -517,6 +572,12 @@ async fn decode_response<T: serde::de::DeserializeOwned>(
             .map_err(|err| DriveApiError::Transport(err.into()));
     }
 
+    let retry_after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|secs| secs.trim().parse::<u64>().ok())
+        .map(Duration::from_secs);
     let text = response.text().await.unwrap_or_default();
     let parsed = serde_json::from_str::<GoogleErrorEnvelope>(&text).ok();
     let message = parsed
@@ -534,6 +595,7 @@ async fn decode_response<T: serde::de::DeserializeOwned>(
         status,
         message,
         reason,
+        retry_after,
     })
 }
 
