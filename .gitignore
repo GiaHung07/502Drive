@@ -17,3 +17,9 @@ master.key
 
 /target
 __pycache__/
+
+# Frontend & Distribution artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/

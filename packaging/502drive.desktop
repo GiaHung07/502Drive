@@ -5,7 +5,7 @@ GenericName=Google Drive Cloud Sync & Clone
 GenericName[vi]=Đồng bộ & Sao chép Google Drive
 Comment=Local-first Google Drive sync and clone tool with Telegram control
 Comment[vi]=Công cụ đồng bộ và sao chép Google Drive chạy cục bộ điều khiển qua Telegram
-Exec=502drive-tray
+Exec=502drive-gui
 Icon=502drive
 StartupWMClass=502Drive
 Terminal=false
@@ -18,7 +18,7 @@ Actions=Dashboard;Doctor;RestartService;ViewLogs;OpenTelegram;
 [Desktop Action Dashboard]
 Name=Mở Bảng điều khiển (App Window)
 Name[en]=Open Dashboard (App Window)
-Exec=502drive-tray
+Exec=502drive-gui
 
 [Desktop Action Doctor]
 Name=Kiểm tra hệ thống (Doctor)
