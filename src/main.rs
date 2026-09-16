@@ -1,10 +1,12 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use gdclone_bot::{
     cli,
     config::AppConfig,
+    drive::client::DriveClient,
     engine::recovery,
     platform, report,
     state::db::Database,
@@ -97,13 +99,21 @@ async fn run_bot(config: AppConfig) -> anyhow::Result<()> {
         Err(err) => tracing::warn!(error = %err, "report cleanup failed"),
     }
     recovery::recover_on_startup(&db).await?;
-    let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
+    // One shared DriveClient for the whole process: reqwest connection pools
+    // and the Drive rate-limit pacer are internally Arc'd, so every clone
+    // (poller, dispatcher, clone engine) reuses the same pool instead of
+    // building a fresh one per component/per cycle.
+    let drive =
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+    let _resume_worker =
+        recovery::spawn_startup_resume_worker(config.clone(), db.clone(), drive.clone());
     // Recover any watches that were stuck in 'initializing' at the time of the last crash.
-    let _init_recovery = recovery::recover_initializing_watches(config.clone(), db.clone());
+    let _init_recovery =
+        recovery::recover_initializing_watches(config.clone(), db.clone(), drive.clone());
 
     // Start watch/sync infrastructure.
     let (_stop_tx, _poller_handles) = if config.watch.enabled {
-        let (tx, handles, notify_rx) = spawn_all_pollers(config.clone(), db.clone());
+        let (tx, handles, notify_rx) = spawn_all_pollers(config.clone(), db.clone(), drive.clone());
         tracing::info!("watch pollers started");
         // Forward watch notifications to Telegram in a background task.
         // The actual Bot handle is created by the telegram layer; we route via

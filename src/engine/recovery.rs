@@ -3,6 +3,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     config::AppConfig,
+    drive::client::DriveClient,
     engine::copy::{CloneService, JobControlStop},
     state::{
         db::Database,
@@ -32,9 +33,13 @@ pub async fn recover_on_startup(db: &Database) -> anyhow::Result<StartupRecovery
     Ok(summary)
 }
 
-pub fn spawn_startup_resume_worker(config: AppConfig, db: Database) -> JoinHandle<()> {
+pub fn spawn_startup_resume_worker(
+    config: AppConfig,
+    db: Database,
+    drive: DriveClient,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
-        match resume_startup_jobs(config, db).await {
+        match resume_startup_jobs(config, db, drive).await {
             Ok(summary) if summary != ResumeSummary::default() => {
                 info!(
                     attempted_jobs = summary.attempted_jobs,
@@ -49,13 +54,17 @@ pub fn spawn_startup_resume_worker(config: AppConfig, db: Database) -> JoinHandl
     })
 }
 
-pub async fn resume_startup_jobs(config: AppConfig, db: Database) -> anyhow::Result<ResumeSummary> {
+pub async fn resume_startup_jobs(
+    config: AppConfig,
+    db: Database,
+    drive: DriveClient,
+) -> anyhow::Result<ResumeSummary> {
     let jobs = repo::resumable_one_shot_jobs(&db).await?;
     if jobs.is_empty() {
         return Ok(ResumeSummary::default());
     }
 
-    let service = CloneService::new(config, db.clone());
+    let service = CloneService::new(config, db.clone(), drive);
     let mut summary = ResumeSummary {
         attempted_jobs: jobs.len(),
         ..ResumeSummary::default()
@@ -92,7 +101,11 @@ pub async fn resume_startup_jobs(config: AppConfig, db: Database) -> anyhow::Res
 /// the first initial-clone run.
 ///
 /// Called from `main.rs` after `recover_on_startup`.
-pub fn recover_initializing_watches(config: AppConfig, db: Database) -> JoinHandle<()> {
+pub fn recover_initializing_watches(
+    config: AppConfig,
+    db: Database,
+    drive: DriveClient,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let watches = match repo::initializing_watches(&db).await {
             Ok(w) => w,
@@ -114,11 +127,14 @@ pub fn recover_initializing_watches(config: AppConfig, db: Database) -> JoinHand
         for watch in watches {
             let config2 = config.clone();
             let db2 = db.clone();
+            let drive2 = drive.clone();
             let watch_id = watch.id.clone();
             tokio::spawn(async move {
                 // Silent notify — no active Telegram session at startup.
                 let noop = |_msg: String| {};
-                if let Err(err) = run_initial_clone(config2, db2, watch_id.clone(), noop).await {
+                if let Err(err) =
+                    run_initial_clone(config2, db2, drive2, watch_id.clone(), noop).await
+                {
                     warn!(
                         watch_id,
                         error = %err,

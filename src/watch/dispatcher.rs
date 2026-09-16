@@ -1,11 +1,16 @@
-use std::time::Duration;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use tracing::{info, warn};
 
 use crate::{
     config::AppConfig,
-    drive::{client::DriveClient, token_manager::TokenManager, types::FOLDER_MIME_TYPE},
+    drive::{
+        client::DriveClient,
+        token_manager::TokenManager,
+        types::{DriveFile, FOLDER_MIME_TYPE},
+    },
     engine::{
         mapping::{MappingRecord, record_mapping},
         operation::ScopeType,
@@ -14,8 +19,9 @@ use crate::{
     state::{
         db::Database,
         repo::{
-            self, WatchSubscription, active_watches, advance_watch_consumed_sequence,
-            pending_events_for_watch, upsert_event_application,
+            self, WatchBatchEntry, WatchBatchQuery, WatchSubscription, active_watches,
+            advance_watch_consumed_sequence, pending_events_for_watch, upsert_event_application,
+            upsert_event_applications_batch,
         },
     },
     watch::poller::NotifySender,
@@ -25,16 +31,35 @@ use super::classifier::{Classification, ItemFingerprint, classify};
 
 const DISPATCH_BATCH: usize = 200;
 
+/// In-memory gating state for `scan_missing_children`: the fallback source
+/// scan is expensive (a full paginated `list_children` of every mapped
+/// folder), so it runs once per watch when first dispatched (right after
+/// initialization/catch-up) and afterwards at most once per
+/// `watch.scan_interval_ms`.
+#[derive(Default)]
+pub struct DispatchState {
+    last_scan: HashMap<String, Instant>,
+}
+
+impl DispatchState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Process pending change events for every active watch subscription.
-/// Called once per dispatch cycle from the top-level poll loop.
+/// Called once per dispatch cycle from the dispatch loop (or on a Notify wake
+/// right after the poll loop committed fresh events).
 pub async fn dispatch_pending(
     config: &AppConfig,
     db: &Database,
+    drive: &DriveClient,
     notify_tx: &NotifySender,
+    state: &mut DispatchState,
 ) -> anyhow::Result<()> {
     let watches = active_watches(db).await?;
     for watch in watches {
-        if let Err(err) = dispatch_one(config, db, &watch, notify_tx).await {
+        if let Err(err) = dispatch_one(config, db, drive, &watch, notify_tx, state).await {
             warn!(
                 watch_id = watch.id,
                 error = %err,
@@ -48,12 +73,12 @@ pub async fn dispatch_pending(
 async fn dispatch_one(
     config: &AppConfig,
     db: &Database,
+    drive: &DriveClient,
     watch: &WatchSubscription,
     notify_tx: &NotifySender,
+    state: &mut DispatchState,
 ) -> anyhow::Result<()> {
     let token_manager = TokenManager::new(config.clone(), db.clone());
-    let drive =
-        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
 
     let cursor = repo::cursor_by_id(db, &watch.cursor_id).await?;
     if backlog_exceeds_limit(
@@ -77,42 +102,63 @@ async fn dispatch_one(
 
     if events.is_empty() {
         finish_catch_up_if_current(db, watch, watch.last_consumed_sequence).await?;
-        scan_missing_children(config, db, &drive, &token_manager, watch, notify_tx).await?;
+        maybe_scan_missing_children(config, db, drive, &token_manager, watch, notify_tx, state)
+            .await?;
         return Ok(());
+    }
+
+    // Parse event payloads once (CPU) and pre-resolve tree membership plus
+    // mapping fingerprints for the whole batch in a single DB round-trip,
+    // instead of 2 + #parents cross-thread calls per event.
+    let files: Vec<Option<DriveFile>> = events
+        .iter()
+        .map(|event| {
+            event
+                .file_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<DriveFile>(j).ok())
+        })
+        .collect();
+    let queries: Vec<WatchBatchQuery> = events
+        .iter()
+        .zip(files.iter())
+        .map(|(event, file)| WatchBatchQuery {
+            file_id: event.file_id.clone(),
+            parents: file.as_ref().map(|f| f.parents.clone()).unwrap_or_default(),
+        })
+        .collect();
+    let mut batch_ctx: HashMap<String, WatchBatchEntry> =
+        repo::resolve_watch_batch_context(db, &watch.id, &queries).await?;
+
+    // Final application rows are flushed in one transactional write per batch
+    // (the intermediate "applying" rows stay per-event: they must be recorded
+    // before the Drive I/O they bookkeep).
+    let mut final_rows: Vec<(i64, String, String)> = Vec::new();
+    // Flush helper: run at every exit of the loop so the DB end-state matches
+    // the old per-event writes.
+    macro_rules! flush_final_rows {
+        () => {
+            if !final_rows.is_empty() {
+                upsert_event_applications_batch(db, &watch.id, std::mem::take(&mut final_rows))
+                    .await?;
+            }
+        };
     }
 
     let mut last_consumed = watch.last_consumed_sequence;
 
-    for event in &events {
-        // Determine membership of this file_id in the watch tree.
-        let in_tree = repo::is_in_watch_tree(db, &watch.id, &event.file_id).await?;
-
-        // Parse current file metadata from the event JSON (no extra Drive call yet).
-        let file = event
-            .file_json
-            .as_deref()
-            .and_then(|j| serde_json::from_str::<crate::drive::types::DriveFile>(j).ok());
-        let prior = repo::watch_mapping_fingerprint(db, &watch.id, &event.file_id)
-            .await?
-            .map(|f| ItemFingerprint {
-                parents: f.parents,
-                name: f.name,
-                md5: f.md5_checksum,
-                version: f.version,
-                trashed: false,
-            });
-
-        // Determine which parents are in-tree.
-        let parents_in_tree: Vec<bool> = if let Some(f) = &file {
-            let mut results = Vec::with_capacity(f.parents.len());
-            for parent in &f.parents {
-                let r = repo::is_parent_in_watch_tree(db, &watch.id, parent).await?;
-                results.push(r);
-            }
-            results
-        } else {
-            vec![]
-        };
+    for (event, file) in events.iter().zip(files.iter()) {
+        // Determine membership of this file_id in the watch tree, from the
+        // batch snapshot or (after a mapping mutation invalidated it) a fresh
+        // single-round-trip resolve.
+        let (in_tree, prior, parents_in_tree) = resolve_event_context(
+            db,
+            &watch.id,
+            &event.file_id,
+            file.as_ref().map(|f| f.parents.as_slice()).unwrap_or(&[]),
+            &mut batch_ctx,
+        )
+        .await?;
 
         let classification = classify(
             watch,
@@ -125,14 +171,12 @@ async fn dispatch_one(
         );
         if classification == Classification::Ambiguous {
             repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
-            upsert_event_application(
-                db,
-                &watch.id,
+            final_rows.push((
                 event.sequence,
-                classification.as_str(),
-                "failed",
-            )
-            .await?;
+                classification.as_str().to_string(),
+                "failed".into(),
+            ));
+            flush_final_rows!();
             let msg = format!(
                 "⚠️ Watch `{}` cần đồng bộ lại vì event `{}` không đủ metadata để áp an toàn.",
                 &watch.id[..8.min(watch.id.len())],
@@ -155,7 +199,7 @@ async fn dispatch_one(
         let apply_result = apply_classification(
             config,
             db,
-            &drive,
+            drive,
             &token_manager,
             watch,
             &event.file_id,
@@ -179,38 +223,105 @@ async fn dispatch_one(
             }
         };
 
-        upsert_event_application(
-            db,
-            &watch.id,
-            event.sequence,
-            classification.as_str(),
-            if classification == Classification::Irrelevant {
-                "ignored"
-            } else {
-                final_status
-            },
-        )
-        .await?;
-
         let stored_status = if classification == Classification::Irrelevant {
             "ignored"
         } else {
             final_status
         };
+        final_rows.push((
+            event.sequence,
+            classification.as_str().into(),
+            stored_status.into(),
+        ));
+
+        // Apply paths can insert/detach source_mappings (record_mapping,
+        // mark_*). Later events in this batch must observe the new state,
+        // matching the old fresh-read-per-event semantics, so drop the
+        // snapshot; subsequent events re-resolve on demand.
+        if matches!(
+            classification,
+            Classification::NewItem
+                | Classification::ContentChanged
+                | Classification::MovedOutside
+                | Classification::MovedBack
+                | Classification::TrashedOrRemoved
+        ) {
+            batch_ctx.clear();
+        }
+
         if should_advance_consumed(stored_status) {
             last_consumed = last_consumed.max(event.sequence);
         } else {
+            flush_final_rows!();
             break;
         }
     }
+
+    flush_final_rows!();
 
     if last_consumed > watch.last_consumed_sequence {
         advance_watch_consumed_sequence(db, &watch.id, last_consumed).await?;
     }
     finish_catch_up_if_current(db, watch, last_consumed).await?;
-    scan_missing_children(config, db, &drive, &token_manager, watch, notify_tx).await?;
+    maybe_scan_missing_children(config, db, drive, &token_manager, watch, notify_tx, state).await?;
 
     Ok(())
+}
+
+type EventContextParts = (bool, Option<ItemFingerprint>, Vec<bool>);
+
+/// Read the event's tree-membership/fingerprint context from the batch
+/// snapshot, falling back to a single-round-trip resolve when the snapshot has
+/// no complete entry for this file (first sighting or post-mutation refresh).
+async fn resolve_event_context(
+    db: &Database,
+    watch_id: &str,
+    file_id: &str,
+    parents: &[String],
+    batch_ctx: &mut HashMap<String, WatchBatchEntry>,
+) -> anyhow::Result<EventContextParts> {
+    if let Some(entry) = batch_ctx.get(file_id) {
+        let mut parents_in_tree = Vec::with_capacity(parents.len());
+        let mut complete = true;
+        for parent in parents {
+            match entry.parents_in_tree.get(parent) {
+                Some(&in_tree) => parents_in_tree.push(in_tree),
+                None => {
+                    complete = false;
+                    break;
+                }
+            }
+        }
+        if complete {
+            let prior = entry.fingerprint.as_ref().map(|f| ItemFingerprint {
+                parents: f.parents.clone(),
+                name: f.name.clone(),
+                md5: f.md5_checksum.clone(),
+                version: f.version.clone(),
+                trashed: false,
+            });
+            return Ok((entry.in_tree, prior, parents_in_tree));
+        }
+    }
+
+    let ctx = repo::resolve_watch_event_context(db, watch_id, file_id, parents).await?;
+    let prior = ctx.fingerprint.as_ref().map(|f| ItemFingerprint {
+        parents: f.parents.clone(),
+        name: f.name.clone(),
+        md5: f.md5_checksum.clone(),
+        version: f.version.clone(),
+        trashed: false,
+    });
+    let parents_in_tree = ctx.parents_in_tree.clone();
+    batch_ctx.insert(
+        file_id.to_string(),
+        WatchBatchEntry {
+            in_tree: ctx.in_tree,
+            fingerprint: ctx.fingerprint,
+            parents_in_tree: parents.iter().cloned().zip(ctx.parents_in_tree).collect(),
+        },
+    );
+    Ok((ctx.in_tree, prior, parents_in_tree))
 }
 
 fn should_advance_consumed(status: &str) -> bool {
@@ -238,6 +349,35 @@ fn should_finish_catch_up(status: &str, last_consumed: i64, cursor_last_sequence
 
 fn backlog_exceeds_limit(last_consumed: i64, cursor_last: i64, limit: u64) -> bool {
     cursor_last > last_consumed && (cursor_last - last_consumed) as u64 > limit
+}
+
+/// Gate `scan_missing_children`: run it once per watch when first dispatched
+/// (post-initialization) and afterwards at most once per
+/// `watch.scan_interval_ms`.
+async fn maybe_scan_missing_children(
+    config: &AppConfig,
+    db: &Database,
+    drive: &DriveClient,
+    token_manager: &TokenManager,
+    watch: &WatchSubscription,
+    notify_tx: &NotifySender,
+    state: &mut DispatchState,
+) -> anyhow::Result<()> {
+    let interval = Duration::from_millis(config.watch.scan_interval_ms);
+    let now = Instant::now();
+    let due = match state.last_scan.get(&watch.id) {
+        // First dispatch for this watch in this process — the scan that
+        // backstops initialization/catch-up.
+        None => true,
+        Some(last) => now.duration_since(*last) >= interval,
+    };
+    if !due {
+        return Ok(());
+    }
+    // Record the attempt up-front so a failing scan retries after the full
+    // interval instead of hammering the Drive API every dispatch cycle.
+    state.last_scan.insert(watch.id.clone(), now);
+    scan_missing_children(config, db, drive, token_manager, watch, notify_tx).await
 }
 
 async fn scan_missing_children(

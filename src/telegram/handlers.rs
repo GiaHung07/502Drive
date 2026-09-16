@@ -3794,7 +3794,11 @@ async fn resume_job(
 ) -> anyhow::Result<String> {
     let job_id = resolve_job_id_for_user(db, telegram_user_id, job_id, lang).await?;
     if repo::resume_job_for_user(db, telegram_user_id, &job_id).await? {
-        let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
+        let _resume_worker = recovery::spawn_startup_resume_worker(
+            config.clone(),
+            db.clone(),
+            DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds)),
+        );
         Ok(job_resume_requested_text(lang, &job_id))
     } else {
         Ok(job_resume_failed_text(lang).to_string())
@@ -3824,7 +3828,11 @@ async fn retry_job(
 ) -> anyhow::Result<String> {
     let job_id = resolve_job_id_for_user(db, telegram_user_id, job_id, lang).await?;
     if let Some(summary) = repo::retry_failed_job_for_user(db, telegram_user_id, &job_id).await? {
-        let _resume_worker = recovery::spawn_startup_resume_worker(config.clone(), db.clone());
+        let _resume_worker = recovery::spawn_startup_resume_worker(
+            config.clone(),
+            db.clone(),
+            DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds)),
+        );
         Ok(job_retry_requested_text(lang, &job_id, &summary))
     } else {
         Ok(job_retry_failed_text(lang).to_string())
@@ -5003,7 +5011,11 @@ async fn start_clone_reference(
     if active_count >= config.engine.max_active_jobs_per_user as i64 {
         anyhow::bail!(clone_active_limit_text(lang, active_count));
     }
-    let service = CloneService::new(config.clone(), db.clone());
+    let service = CloneService::new(
+        config.clone(),
+        db.clone(),
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds)),
+    );
     service
         .start_one_shot(CloneRequest {
             chat_id,
@@ -5127,7 +5139,15 @@ async fn start_watch(
                         .await;
                 });
             };
-            if let Err(err) = run_initial_clone(config2, db2, watch_id2.clone(), notify).await {
+            // Local shared client for this initialization flow (the shared
+            // process-wide client lives in main.rs and is not threaded into
+            // the Telegram handler layer).
+            let drive2 = DriveClient::with_timeout(Duration::from_secs(
+                config2.engine.request_timeout_seconds,
+            ));
+            if let Err(err) =
+                run_initial_clone(config2, db2, drive2, watch_id2.clone(), notify).await
+            {
                 tracing::error!(watch_id = watch_id2, error = %err, "watch initializer failed");
             }
         });

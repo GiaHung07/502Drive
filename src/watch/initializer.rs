@@ -27,7 +27,7 @@ use tracing::{info, warn};
 
 use crate::{
     config::AppConfig,
-    drive::links::DriveReference,
+    drive::{client::DriveClient, links::DriveReference},
     engine::copy::{CloneRequest, CloneService},
     state::{
         db::Database,
@@ -36,7 +36,7 @@ use crate::{
     watch::poller::NotifySender,
 };
 
-use super::dispatcher::dispatch_pending;
+use super::dispatcher::{DispatchState, dispatch_pending};
 
 /// Notification callback type — must be Send+Sync so it can cross await points
 /// inside a tokio::spawn task.
@@ -49,6 +49,7 @@ type NotifyFn = Arc<dyn Fn(String) + Send + Sync>;
 pub async fn run_initial_clone(
     config: AppConfig,
     db: Database,
+    drive: DriveClient,
     watch_id: String,
     notify_fn: impl Fn(String) + Send + Sync + 'static,
 ) -> anyhow::Result<()> {
@@ -56,12 +57,13 @@ pub async fn run_initial_clone(
     let notify: NotifyFn = Arc::new(notify_fn);
     // Local mpsc channel for catch-up dispatch_pending calls.
     let (notify_tx, _notify_rx) = mpsc::channel::<(i64, String)>(32);
-    run_initial_clone_inner(config, db, watch_id, notify, notify_tx).await
+    run_initial_clone_inner(config, db, drive, watch_id, notify, notify_tx).await
 }
 
 async fn run_initial_clone_inner(
     config: AppConfig,
     db: Database,
+    drive: DriveClient,
     watch_id: String,
     notify: NotifyFn,
     notify_tx: NotifySender,
@@ -93,7 +95,7 @@ async fn run_initial_clone_inner(
     // source is already validated by the /watch handler; no need to re-fetch here.
 
     // Create the clone job using the destination_root_id as the destination parent.
-    let clone_service = CloneService::new(config.clone(), db.clone());
+    let clone_service = CloneService::new(config.clone(), db.clone(), drive.clone());
     let job_id = run_watch_clone_job(&clone_service, &watch, &source_ref, &notify)
         .await
         .with_context(|| "Watch initial clone job failed")?;
@@ -132,7 +134,10 @@ async fn run_initial_clone_inner(
         }
 
         // Dispatch one batch of pending events.
-        if let Err(err) = dispatch_pending(&config, &db, &notify_tx).await {
+        let mut dispatch_state = DispatchState::new();
+        if let Err(err) =
+            dispatch_pending(&config, &db, &drive, &notify_tx, &mut dispatch_state).await
+        {
             warn!(watch_id, error = %err, "catch-up dispatch error (will retry)");
         }
     }

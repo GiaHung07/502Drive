@@ -60,15 +60,16 @@ pub struct CloneService {
 }
 
 impl CloneService {
-    pub fn new(config: AppConfig, db: Database) -> Self {
+    /// `drive` is the process-wide shared client: reqwest pools are
+    /// internally Arc'd, so passing a clone reuses the connection pool and
+    /// the shared rate-limit pacer instead of building a fresh one per job.
+    pub fn new(config: AppConfig, db: Database, drive: DriveClient) -> Self {
         let token_manager = TokenManager::new(config.clone(), db.clone());
         // The effective write concurrency: the GUI writes max_write_concurrency,
         // so it (not initial_write_concurrency) is the knob users actually set.
         let write_concurrency = config.engine.max_write_concurrency;
         Self {
-            drive: DriveClient::with_timeout(Duration::from_secs(
-                config.engine.request_timeout_seconds,
-            )),
+            drive,
             config,
             db,
             token_manager,

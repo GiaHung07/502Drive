@@ -2007,6 +2007,14 @@ pub async fn commit_change_page(
             let tx = conn.transaction()?;
 
             // Insert events — IGNORE on duplicate (page re-fetched after crash).
+            // The table's sequence is INTEGER PRIMARY KEY AUTOINCREMENT, so
+            // last_insert_rowid() after each INSERT gives the row's sequence
+            // without a per-row SELECT round-trip. For an INSERT OR IGNORE that
+            // skipped a duplicate, the value stays at the previous insert's
+            // rowid, which is safe: any pre-existing sequence is already <= the
+            // cursor's stored last_event_sequence (inserts and the cursor
+            // update commit in the same transaction), so MAX() below is
+            // unaffected either way.
             let mut last_sequence: i64 = 0;
             for event in &events {
                 tx.execute(
@@ -2025,19 +2033,7 @@ pub async fn commit_change_page(
                     ],
                 )?;
                 // Track the max sequence inserted.
-                let seq: i64 = tx.query_row(
-                    "SELECT sequence FROM change_events
-                     WHERE cursor_id = ?1
-                       AND request_page_token = ?2
-                       AND ordinal_in_page = ?3",
-                    params![
-                        event.cursor_id,
-                        event.request_page_token,
-                        event.ordinal_in_page,
-                    ],
-                    |row| row.get(0),
-                )?;
-                last_sequence = last_sequence.max(seq);
+                last_sequence = last_sequence.max(tx.last_insert_rowid());
             }
 
             // Advance cursor token. Use newStartPageToken only at end of list.
@@ -2786,6 +2782,231 @@ pub async fn is_parent_in_watch_tree(
             )
         })
         .await?)
+}
+
+/// Single-round-trip resolution of everything the dispatcher needs to classify
+/// one change event (batched variant of `is_in_watch_tree` +
+/// `watch_mapping_fingerprint` + `is_parent_in_watch_tree`).
+#[derive(Debug, Clone)]
+pub struct WatchEventContext {
+    pub in_tree: bool,
+    pub fingerprint: Option<WatchMappingFingerprint>,
+    pub parents_in_tree: Vec<bool>,
+}
+
+pub async fn resolve_watch_event_context(
+    db: &Database,
+    watch_id: &str,
+    file_id: &str,
+    parent_ids: &[String],
+) -> anyhow::Result<WatchEventContext> {
+    let watch_id = watch_id.to_string();
+    let file_id = file_id.to_string();
+    let parent_ids = parent_ids.to_vec();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let in_tree = conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM source_mappings
+                    WHERE scope_type = 'watch'
+                      AND scope_id = ?1
+                      AND source_item_id = ?2
+                      AND mapping_state = 'active'
+                 )",
+                params![watch_id, file_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            let fingerprint = conn
+                .query_row(
+                    "SELECT source_parent_id, source_name, source_md5_checksum, source_version
+                     FROM source_mappings
+                     WHERE scope_type = 'watch' AND scope_id = ?1 AND source_item_id = ?2",
+                    params![watch_id, file_id],
+                    |row| {
+                        let parent: Option<String> = row.get(0)?;
+                        Ok(WatchMappingFingerprint {
+                            parents: parent.into_iter().collect(),
+                            name: row.get(1)?,
+                            md5_checksum: row.get(2)?,
+                            version: row.get(3)?,
+                        })
+                    },
+                )
+                .optional()?;
+            let mut parents_in_tree = Vec::with_capacity(parent_ids.len());
+            for parent_id in &parent_ids {
+                parents_in_tree.push(conn.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM source_mappings
+                        WHERE scope_type = 'watch'
+                          AND scope_id = ?1
+                          AND source_item_id = ?2
+                          AND mapping_state = 'active'
+                     )",
+                    params![watch_id, parent_id],
+                    |row| row.get::<_, bool>(0),
+                )?);
+            }
+            Ok::<WatchEventContext, rusqlite::Error>(WatchEventContext {
+                in_tree,
+                fingerprint,
+                parents_in_tree,
+            })
+        })
+        .await?)
+}
+
+/// One query input for `resolve_watch_batch_context`: the event's file id plus
+/// the parents parsed from its stored JSON.
+#[derive(Debug, Clone)]
+pub struct WatchBatchQuery {
+    pub file_id: String,
+    pub parents: Vec<String>,
+}
+
+/// Per-file context resolved for a dispatch batch.
+#[derive(Debug, Clone, Default)]
+pub struct WatchBatchEntry {
+    pub in_tree: bool,
+    pub fingerprint: Option<WatchMappingFingerprint>,
+    /// parent_id → in-tree, for the parents supplied in the query.
+    pub parents_in_tree: std::collections::HashMap<String, bool>,
+}
+
+/// Resolve tree-membership and mapping fingerprints for a whole dispatch batch
+/// in a single cross-thread call (chunked `IN` queries) — kills the per-event
+/// N+1 at batch start. Equivalent to running `resolve_watch_event_context` per
+/// event with an empty mapping state (callers must invalidate/re-resolve after
+/// any mapping mutation, see the dispatcher's batch cache).
+pub async fn resolve_watch_batch_context(
+    db: &Database,
+    watch_id: &str,
+    queries: &[WatchBatchQuery],
+) -> anyhow::Result<std::collections::HashMap<String, WatchBatchEntry>> {
+    let watch_id = watch_id.to_string();
+    let queries = queries.to_vec();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            // Distinct ids needing an active-mapping check: every file id and
+            // every parent id. Chunks stay well under SQLite's variable limit.
+            let mut all_ids: Vec<String> = Vec::new();
+            for q in &queries {
+                all_ids.push(q.file_id.clone());
+                all_ids.extend(q.parents.iter().cloned());
+            }
+            all_ids.sort();
+            all_ids.dedup();
+            let mut active: std::collections::HashSet<String> = Default::default();
+            for chunk in all_ids.chunks(400) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let sql = format!(
+                    "SELECT DISTINCT source_item_id FROM source_mappings
+                     WHERE scope_type = 'watch' AND scope_id = ?1
+                       AND mapping_state = 'active'
+                       AND source_item_id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut params_vec: Vec<&dyn rusqlite::ToSql> = vec![&watch_id];
+                for id in chunk {
+                    params_vec.push(id);
+                }
+                let rows = stmt.query_map(params_vec.as_slice(), |row| row.get::<_, String>(0))?;
+                for id in rows {
+                    active.insert(id?);
+                }
+            }
+
+            let mut file_ids: Vec<&String> = queries.iter().map(|q| &q.file_id).collect();
+            file_ids.sort();
+            file_ids.dedup();
+            let mut fingerprints: std::collections::HashMap<String, WatchMappingFingerprint> =
+                Default::default();
+            for chunk in file_ids.chunks(400) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let sql = format!(
+                    "SELECT source_item_id, source_parent_id, source_name,
+                            source_md5_checksum, source_version
+                     FROM source_mappings
+                     WHERE scope_type = 'watch' AND scope_id = ?1
+                       AND source_item_id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut params_vec: Vec<&dyn rusqlite::ToSql> = vec![&watch_id];
+                for id in chunk {
+                    params_vec.push(id);
+                }
+                let rows = stmt.query_map(params_vec.as_slice(), |row| {
+                    let item_id: String = row.get(0)?;
+                    let parent: Option<String> = row.get(1)?;
+                    Ok((
+                        item_id,
+                        WatchMappingFingerprint {
+                            parents: parent.into_iter().collect(),
+                            name: row.get(2)?,
+                            md5_checksum: row.get(3)?,
+                            version: row.get(4)?,
+                        },
+                    ))
+                })?;
+                for row in rows {
+                    let (item_id, fingerprint) = row?;
+                    fingerprints.insert(item_id, fingerprint);
+                }
+            }
+
+            let mut entries = std::collections::HashMap::with_capacity(queries.len());
+            for q in &queries {
+                let mut parents_in_tree = std::collections::HashMap::with_capacity(q.parents.len());
+                for parent in &q.parents {
+                    parents_in_tree.insert(parent.clone(), active.contains(parent));
+                }
+                entries.insert(
+                    q.file_id.clone(),
+                    WatchBatchEntry {
+                        in_tree: active.contains(&q.file_id),
+                        fingerprint: fingerprints.get(&q.file_id).cloned(),
+                        parents_in_tree,
+                    },
+                );
+            }
+            Ok::<_, rusqlite::Error>(entries)
+        })
+        .await?)
+}
+
+/// Transactional batch variant of `upsert_event_application` — used to flush
+/// the final application rows of a dispatch batch in one cross-thread call.
+/// Row tuple: (event_sequence, classification, status).
+pub async fn upsert_event_applications_batch(
+    db: &Database,
+    watch_id: &str,
+    rows: Vec<(i64, String, String)>,
+) -> anyhow::Result<()> {
+    let watch_id = watch_id.to_string();
+    db.conn()
+        .call(move |conn| {
+            let now = now_ms();
+            let tx = conn.transaction()?;
+            for (event_sequence, classification, status) in &rows {
+                tx.execute(
+                    "INSERT INTO watch_event_applications (
+                        watch_id, event_sequence, classification, status,
+                        attempts, updated_at_ms
+                     ) VALUES (?1, ?2, ?3, ?4, 0, ?5)
+                     ON CONFLICT(watch_id, event_sequence) DO UPDATE SET
+                        classification = excluded.classification,
+                        status = excluded.status,
+                        attempts = watch_event_applications.attempts + 1,
+                        updated_at_ms = excluded.updated_at_ms",
+                    params![watch_id, event_sequence, classification, status, now],
+                )?;
+            }
+            tx.commit()
+        })
+        .await?;
+    Ok(())
 }
 
 pub async fn mark_watch_mapping_detached(

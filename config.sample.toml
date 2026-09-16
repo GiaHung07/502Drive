@@ -35,7 +35,10 @@ default_shortcut_policy = "preserve"
 
 [watch]
 enabled = false
-active_poll_seconds = 20
+active_poll_seconds = 10
+# Fallback source scan (scan_missing_children) cadence per watch, in ms.
+# It also runs once right after a watch finishes initialization.
+scan_interval_ms = 600000
 warm_idle_poll_seconds = 60
 cold_idle_poll_seconds = 300
 warm_idle_after_seconds = 600

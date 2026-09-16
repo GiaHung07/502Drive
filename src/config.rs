@@ -65,7 +65,13 @@ pub struct EngineConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WatchConfig {
     pub enabled: bool,
+    #[serde(default = "default_active_poll_seconds")]
     pub active_poll_seconds: u64,
+    /// Minimum interval (ms) between fallback source scans per watch
+    /// (`scan_missing_children`). The scan also runs once right after a watch
+    /// finishes initialization; between scans it is gated by this knob.
+    #[serde(default = "default_scan_interval_ms")]
+    pub scan_interval_ms: u64,
     pub warm_idle_poll_seconds: u64,
     pub cold_idle_poll_seconds: u64,
     pub warm_idle_after_seconds: u64,
@@ -189,6 +195,9 @@ impl AppConfig {
         }
         if self.engine.request_timeout_seconds == 0 {
             bail!("engine.request_timeout_seconds must be > 0");
+        }
+        if self.watch.active_poll_seconds == 0 || self.watch.scan_interval_ms == 0 {
+            bail!("watch.active_poll_seconds and watch.scan_interval_ms must be > 0");
         }
         validate_choice(
             "engine.default_duplicate_policy",
@@ -344,6 +353,14 @@ fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {
 
 fn default_telegram_language() -> String {
     "vi".to_string()
+}
+
+fn default_active_poll_seconds() -> u64 {
+    10
+}
+
+fn default_scan_interval_ms() -> u64 {
+    600_000
 }
 
 fn env_string(key: &str, target: &mut String) {

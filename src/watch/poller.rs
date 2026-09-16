@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::{
-    sync::{broadcast, mpsc},
+    sync::{Notify, broadcast, mpsc},
     task::JoinHandle,
     time::Instant,
 };
@@ -17,7 +18,7 @@ use crate::{
     },
 };
 
-use super::dispatcher::dispatch_pending;
+use super::dispatcher::{DispatchState, dispatch_pending};
 use super::retention::prune_old_events;
 
 /// Shutdown signal sent to all pollers.
@@ -33,12 +34,30 @@ pub type NotifyReceiver = mpsc::Receiver<(i64, String)>;
 pub fn spawn_all_pollers(
     config: AppConfig,
     db: Database,
+    drive: DriveClient,
 ) -> (StopSignal, Vec<JoinHandle<()>>, NotifyReceiver) {
     let (stop_tx, _) = broadcast::channel::<()>(1);
     let (notify_tx, notify_rx) = mpsc::channel::<(i64, String)>(256);
+    // Realtime dispatch trigger: the poll loop notifies after committing a
+    // page with events; the dispatch loop wakes immediately instead of
+    // waiting for its next interval tick.
+    let dispatch_notify = Arc::new(Notify::new());
     let handles = vec![
-        spawn_poll_loop(config.clone(), db.clone(), stop_tx.clone()),
-        spawn_dispatch_loop(config, db, stop_tx.clone(), notify_tx),
+        spawn_poll_loop(
+            config.clone(),
+            db.clone(),
+            drive.clone(),
+            stop_tx.clone(),
+            Arc::clone(&dispatch_notify),
+        ),
+        spawn_dispatch_loop(
+            config,
+            db,
+            drive,
+            stop_tx.clone(),
+            notify_tx,
+            dispatch_notify,
+        ),
     ];
     (stop_tx, handles, notify_rx)
 }
@@ -46,9 +65,19 @@ pub fn spawn_all_pollers(
 /// One task that loads all cursors from DB and polls them in sequence.
 /// This is intentionally single-threaded per cursor to keep Drive API load
 /// proportional (one account = one change feed at a time).
-fn spawn_poll_loop(config: AppConfig, db: Database, stop_tx: StopSignal) -> JoinHandle<()> {
+fn spawn_poll_loop(
+    config: AppConfig,
+    db: Database,
+    drive: DriveClient,
+    stop_tx: StopSignal,
+    dispatch_notify: Arc<Notify>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut stop_rx = stop_tx.subscribe();
+        // Constructed once and reused for every cursor and every cycle: the
+        // TokenManager caches the access token (Arc'd) and the DriveClient
+        // shares one reqwest connection pool + pacer.
+        let token_manager = TokenManager::new(config.clone(), db.clone());
         loop {
             // Re-read cursors on every cycle so newly created ones are picked up.
             let cursors = match repo::all_change_cursors(&db).await {
@@ -73,7 +102,15 @@ fn spawn_poll_loop(config: AppConfig, db: Database, stop_tx: StopSignal) -> Join
                     });
                     continue;
                 }
-                poll_one_cursor(&config, &db, cursor).await;
+                poll_one_cursor(
+                    &config,
+                    &db,
+                    &token_manager,
+                    &drive,
+                    cursor,
+                    &dispatch_notify,
+                )
+                .await;
             }
 
             // Sleep until the soonest cursor needs to run again.
@@ -89,27 +126,38 @@ fn spawn_poll_loop(config: AppConfig, db: Database, stop_tx: StopSignal) -> Join
     })
 }
 
-/// Separate loop for dispatching pending events to active watches.
+/// Separate loop for dispatching pending events to active watches. Wakes
+/// immediately when the poll loop commits fresh events (Notify) and otherwise
+/// ticks on a fallback heartbeat interval.
 fn spawn_dispatch_loop(
     config: AppConfig,
     db: Database,
+    drive: DriveClient,
     stop_tx: StopSignal,
     notify_tx: NotifySender,
+    dispatch_notify: Arc<Notify>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut stop_rx = stop_tx.subscribe();
         let retention_days = config.watch.raw_event_retention_days;
+        // Fallback heartbeat only: fresh events trigger dispatch via the
+        // shared Notify, so a change waits at most one page commit. The
+        // default active_poll_seconds is 10 (previously 20).
         let dispatch_interval = Duration::from_secs(config.watch.active_poll_seconds.max(2));
         let prune_interval = Duration::from_secs(3600);
         let mut last_prune = Instant::now();
+        let mut dispatch_state = DispatchState::new();
 
         loop {
             tokio::select! {
                 _ = stop_rx.recv() => return,
                 _ = tokio::time::sleep(dispatch_interval) => {}
+                _ = dispatch_notify.notified() => {}
             }
 
-            if let Err(err) = dispatch_pending(&config, &db, &notify_tx).await {
+            if let Err(err) =
+                dispatch_pending(&config, &db, &drive, &notify_tx, &mut dispatch_state).await
+            {
                 warn!(error = %err, "dispatch_pending error");
             }
 
@@ -127,11 +175,14 @@ fn spawn_dispatch_loop(
 
 /// Fetch one page of changes for `cursor`, commit atomically, repeat until
 /// we exhaust the current feed (got a `newStartPageToken`).
-async fn poll_one_cursor(config: &AppConfig, db: &Database, cursor: &ChangeCursor) {
-    let token_manager = TokenManager::new(config.clone(), db.clone());
-    let drive =
-        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
-
+async fn poll_one_cursor(
+    config: &AppConfig,
+    db: &Database,
+    token_manager: &TokenManager,
+    drive: &DriveClient,
+    cursor: &ChangeCursor,
+    dispatch_notify: &Notify,
+) {
     let mut page_token = cursor.current_page_token.clone();
     let drive_id = cursor.drive_id.as_deref();
     let mut error_count = 0u32;
@@ -173,15 +224,18 @@ async fn poll_one_cursor(config: &AppConfig, db: &Database, cursor: &ChangeCurso
                         ordinal_in_page: i as i64,
                         file_id: change.file_id.clone(),
                         removed: change.removed,
-                        file_json: change
-                            .file
-                            .as_ref()
-                            .and_then(|f| serde_json::to_string(f).ok()),
+                        // Slim projection: only the fields the dispatcher
+                        // reads, nulls/empties omitted (see
+                        // DriveFile::event_projection_json).
+                        file_json: change.file.as_ref().map(|f| f.event_projection_json()),
                     })
                     .collect();
 
                 if !events.is_empty() {
                     had_events_this_cycle = true;
+                    // Realtime trigger: wake the dispatch loop right away so
+                    // fresh events don't wait for the next heartbeat tick.
+                    dispatch_notify.notify_one();
                 }
                 let next_poll_at =
                     compute_next_poll_ms(config, 0, had_events_this_cycle, idle_since_ms);
