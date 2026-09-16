@@ -2,7 +2,7 @@
 
 # 502Drive
 
-**Hệ thống Sao chép & Đồng bộ Realtime Google Drive Local-first Hiệu Năng Cao qua Telegram**
+**Bản sao Google Drive local-first & engine đồng bộ một chiều realtime — điều khiển qua Telegram hoặc GUI desktop.**
 
 [![CI](https://github.com/GiaHung07/502Drive/actions/workflows/ci.yml/badge.svg)](https://github.com/GiaHung07/502Drive/actions/workflows/ci.yml)
 [![Release](https://github.com/GiaHung07/502Drive/actions/workflows/release.yml/badge.svg)](https://github.com/GiaHung07/502Drive/actions/workflows/release.yml)
@@ -13,227 +13,249 @@
 
 [English README](README.md)
 
+<img src="docs/assets/screenshot-dashboard-dark.png" alt="Dashboard desktop của 502Drive (giao diện tối)" width="900">
+
 </div>
 
 ---
 
-## Giới thiệu tổng quan
+## 502Drive là gì?
 
-**502Drive** là bot Telegram chuẩn production, kiến trúc local-first được phát triển hoàn toàn bằng Rust hiện đại nhằm giải quyết bài toán sao chép (clone), quản lý thư mục đích và đồng bộ thời gian thực (realtime sync) giữa các tài khoản Google Drive cá nhân và Shared Drives (Bộ nhớ dùng chung).
+502Drive là **bản sao Google Drive (clone) chạy local-first** kết hợp **engine đồng bộ một chiều (one-way) realtime**, được viết bằng Rust. Bạn điều khiển nó qua **bot Telegram** (clone cloud-to-cloud, quản lý job, quản lý watch) và qua **GUI desktop Tauri v2** (React 19) trên Linux.
 
-Khác biệt hoàn toàn với các mirror/leech bot truyền thống vốn phải tải hàng chục GB về máy chủ trung gian rồi mới upload lại, **502Drive kích hoạt lệnh sao chép server-side trực tiếp thông qua Google Drive API v3 ngay trong hạ tầng đám mây của Google**. Quá trình sao chép diễn ra gần như tức thì, không tốn băng thông mạng tải về, bảo mật tuyệt đối mã truy cập và lưu trữ trạng thái ngay trên máy tính của bạn.
+Mọi thứ — database, khóa mã hóa, log — đều nằm trên máy của chính bạn. Dữ liệu file không bao giờ đi qua 502Drive: thao tác copy được thực thi **server-side ngay trong hạ tầng cloud của Google** thông qua Drive API.
 
-```mermaid
-graph LR
-    subgraph Người dùng
-        TG[Telegram App / Chatbot]
-    end
+> **Một binary, ba cái tên.** Repo biên dịch một file `src/main.rs` duy nhất thành hai binary hoạt động giống hệt nhau:
+> - **`502drive`** — daemon/CLI chính (tên chuẩn).
+> - **`gdclone-bot`** — alias của cùng một binary (giữ lại vì lý do lịch sử/đường dẫn cấu hình; thư mục config là `~/.config/gdclone-bot/`).
+> - **`502drive-gui`** — ứng dụng desktop Tauri, là binary riêng biệt.
+>
+> Tài liệu có thể dùng `502drive` hoặc `gdclone-bot` — đó là cùng một chương trình.
 
-    subgraph "Máy chủ / Thiết bị chạy 502Drive"
-        Bot[Telegram Controller / Long Polling]
-        Engine[Clone & Watch Sync Engine]
-        DB[(SQLite WAL State\nPhân quyền 0600)]
-        Sec[Kho mã hóa AES-GCM]
-        Tray[Khay hệ thống Tray Applet]
-    end
+## Vì sao chọn 502Drive?
 
-    subgraph Google Cloud
-        GDAPI[Google Drive API v3]
-        DriveSrc[Thư mục / File Nguồn]
-        DriveDst[Thư mục Đích]
-    end
+- **Copy server-side = nhanh & tiết kiệm băng thông.** Clone dùng `files.copy` ngay bên trong hạ tầng của Google — không cần relay tải xuống/tải lên, hoàn tất trong vài giây, gần như không tốn băng thông máy chủ của bạn.
+- **Local-first.** Token, trạng thái và báo cáo nằm trong SQLite ngay trên phần cứng của bạn — không phải trên server của người khác.
+- **BYOK (Bring Your Own Keys).** Dùng Google Cloud OAuth Client ID/Secret của chính bạn (giống rclone), hoặc dùng preset 1-chạm trong setup wizard của GUI.
+- **Điều khiển Telegram + GUI desktop.** Quản lý clone, job và watch realtime từ khung chat; theo dõi mọi thứ trên dashboard desktop native.
 
-    TG <-->|Lệnh & Nút bấm Inline| Bot
-    Bot <--> Engine
-    Engine <--> DB
-    Engine <--> Sec
-    Bot <--> Tray
-    Engine -->|Server-Side Copy / Watch API| GDAPI
-    GDAPI -->|Sao chép trực tiếp trên Cloud| DriveDst
-    DriveSrc -.->|Dữ liệu gốc| DriveDst
-```
+## Trạng thái tính năng
 
----
+| Khả năng | Trạng thái |
+| :--- | :--- |
+| Clone cloud-to-cloud (`files.copy`, thư mục & Shared Drives) | ✅ Hoạt động |
+| Watch một chiều realtime (nguồn → đích, Drive Changes API) | ✅ Hoạt động |
+| Điều khiển qua bot Telegram (job, watch, destination, phân quyền) | ✅ Hoạt động |
+| GUI desktop dashboard (Tauri v2 / React 19, Linux) | ✅ Hoạt động |
+| Kiểm tra doctor / preflight | ✅ Hoạt động |
+| Daemon headless qua Docker | ✅ Hoạt động |
+| Build Windows + cài đặt Task Scheduler | 🟡 Mong cộng đồng xác nhận |
+| Đồng bộ hai chiều | 🚧 Đang phát triển / roadmap |
+| Drive push webhooks (VPS, không cần polling) | 🚧 Đang phát triển / roadmap |
+| UI đa tài khoản | 🚧 Đang phát triển / roadmap |
+| Folder browser trong GUI | 🚧 Đang phát triển / roadmap |
 
-## Tính năng nổi bật
+## Bắt đầu nhanh
 
-- **Sao chép siêu tốc (Cloud-to-Cloud Copy)**: Clone tệp đơn hoặc toàn bộ cấu trúc thư mục lồng nhau trực tiếp trên máy chủ Google qua Drive API v3.
-- **Đồng bộ thời gian thực (`/sync <nguồn> [đích]`)**: Tự động theo dõi các thay đổi ở thư mục nguồn và đồng bộ sang thư mục đích. Tự động nhận diện thư mục đích mặc định khi chỉ truyền 1 tham số.
-- **Nhận diện link thông minh (Smart Link Detection)**: Dán trực tiếp bất kỳ link thư mục Google Drive nào vào khung chat Telegram để mở ngay menu tương tác: `[Sao chép (Clone)]`, `[Đồng bộ (Realtime Sync)]`, hoặc `[Đổi thư mục đích]`.
-- **Duyệt thư mục trực quan (Visual Drive Browser)**: Duyệt "My Drive" và "Shared Drives" qua hệ thống nút bấm phân trang trực tiếp trong Telegram để chọn thư mục đích chỉ với vài cú chạm.
-- **Kiểm soát Job linh hoạt**: Tạm dừng (pause), tiếp tục (resume), thử lại file lỗi (retry failed), xem thanh tiến trình động theo thời gian thực và xuất báo cáo kiểm toán định dạng JSON/CSV.
-- **Độc lập hoàn toàn (Zero-C Dependency)**: Sử dụng thuần Rust TLS (`rustls`) và SQLite bundled tĩnh. Không cần cài đặt OpenSSL hay các thư viện runtime phức tạp.
-- **Bảo mật chuẩn chuyên sâu (Hardened Security)**: Cơ sở dữ liệu SQLite tự động khóa quyền `0600` (`rw-------`) trên Unix; Google OAuth refresh token được mã hóa an toàn bằng thuật toán AES-256-GCM.
-- **Giao diện đa nền tảng**:
-  - **Linux**: Dịch vụ nền systemd user service + Khay hệ thống (System Tray) GTK symbolic native.
-  - **Windows**: Chạy nền tự khởi động cùng Windows qua Scheduled Task.
-  - **Docker / VPS / NAS**: Triển khai 1-click nhẹ nhàng tối ưu tài nguyên.
+> Cần có Telegram bot token (từ [@BotFather](https://t.me/BotFather)), Telegram user ID của bạn và Google OAuth credentials — xem [docs/oauth-setup.md](docs/oauth-setup.md).
 
----
-
-## Bảng tra cứu lệnh Telegram
-
-| Lệnh | Tham số | Mô tả tính năng |
-| :--- | :--- | :--- |
-| `/sync` | `<nguồn> [đích]` | **Đồng bộ Realtime**: Đồng bộ thư mục nguồn sang đích. Tự động dùng đích mặc định nếu bỏ qua đích. |
-| `/clone` | `<url_hoặc_id>` | Quét thư mục nguồn, hiển thị số lượng file/dung lượng và xác nhận clone. |
-| `/clone_here`| `<url_hoặc_id>` | Clone ngay lập tức vào thư mục đích mặc định mà không cần hỏi lại. |
-| `/menu` | - | Mở Bảng điều khiển chính (Control Center) dạng nút bấm. |
-| `/destination`| - | Xem danh sách các thư mục đích đã lưu hoặc chọn thư mục mặc định. |
-| `/set_destination` | `<url_hoặc_id>` | Cài đặt thư mục đích mặc định mới. |
-| `/clear_destination` | - | Xóa thư mục đích mặc định. |
-| `/jobs` | - | Liệt kê danh sách các job đang chạy, tạm dừng hoặc hoàn tất. |
-| `/status` | `[job_id]` | Xem chi tiết tiến độ, tốc độ và các file của một job. |
-| `/pause` | `<job_id>` | Tạm dừng một job đang chạy. |
-| `/resume` | `<job_id>` | Tiếp tục chạy job đã tạm dừng. |
-| `/cancel` | `<job_id>` | Hủy job với bảng xác nhận an toàn. |
-| `/retry` | `<job_id>` | Thử lại các file/thư mục bị lỗi trong job. |
-| `/last_report` | - | Tải về file báo cáo chi tiết JSON và CSV của job gần nhất. |
-| `/preview` | - | Xem bảng theo dõi tiến độ tổng thể realtime trong chat. |
-| `/watches` | - | Xem danh sách các cặp thư mục đang đồng bộ thời gian thực. |
-| `/watch_status` | `<watch_id>` | Kiểm tra chi tiết backlog, con trỏ cursor và chính sách xử lý file. |
-| `/watch_pause` | `<watch_id>` | Tạm dừng áp dụng thay đổi vào thư mục đích. |
-| `/watch_resume` | `<watch_id>` | Tiếp tục áp dụng các thay đổi từ nguồn sang đích. |
-| `/watch_policy` | `<id> <policy>` | Thay đổi chính sách ghi đè file (`versioned_copy` \| `replace_copy` \| `manual_confirmation`). |
-| `/unwatch` | `<watch_id>` | Dừng đồng bộ và hủy đăng ký theo dõi thư mục. |
-| `/account` | - | Xem trạng thái liên kết tài khoản Google và đổi ngôn ngữ hiển thị. |
-| `/whoami` | - | Xem ID Telegram của bạn và quyền hạn hiện tại. |
-| `/grant` | `<user_id>` | Cấp quyền điều khiển bot cho người dùng khác (*chỉ Owner*). |
-| `/revoke` | `<user_id>` | Thu hồi quyền điều khiển bot (*chỉ Owner*). |
-
----
-
-## Hướng dẫn cài đặt & Triển khai
-
-### Cách 1: Tải bản đóng gói sẵn (GitHub Releases)
-
-Tải gói cài đặt biên dịch sẵn cho hệ điều hành của bạn tại mục [Releases](https://github.com/GiaHung07/502Drive/releases):
-
-#### Linux (x86_64 / aarch64 - PC, Laptop, VPS, Raspberry Pi)
-```bash
-# Giải nén gói cài đặt
-tar -xzf 502drive-v*-linux-x86_64.tar.gz
-cd 502drive-v*-linux-x86_64
-
-# Chạy trình cài đặt tự động
-bash packaging/install.sh
-```
-
-#### Windows (x86_64 - Windows 10, 11, Windows Server)
-1. Tải file `502drive-v*-windows-x86_64.zip` và giải nén (ví dụ `C:\502Drive`).
-2. Copy `config.sample.toml` thành `config.toml` và điền Bot Token, Google Client ID/Secret.
-3. Chạy lệnh: `502drive.exe run` hoặc đăng ký khởi động cùng hệ thống bằng quyền Admin PowerShell: `.\windows-task.ps1`.
-
----
-
-### Cách 2: Triển khai 1-Click bằng Docker Compose (VPS / NAS / Máy chủ cá nhân)
-
-Lựa chọn lý tưởng cho các VPS miễn phí (Oracle Cloud Free Tier), Hetzner hoặc NAS gia đình (Synology, Unraid, TrueNAS):
+### 1. Docker Compose (VPS / NAS / homelab)
 
 ```bash
-# 1. Clone repository
-git clone https://github.com/GiaHung07/502Drive.git
-cd 502Drive
-
-# 2. Chuẩn bị cấu hình
+git clone https://github.com/GiaHung07/502Drive.git && cd 502Drive
 mkdir -p config data
 cp config.sample.toml config/config.toml
-# Mở file config/config.toml để điền thông tin xác thực
-
-# 3. Khởi chạy bot nền container
+# Sửa config/config.toml: bot_token, owner_telegram_id, google_oauth client_id/secret
 docker compose up -d
-
-# 4. Xem nhật ký hoạt động
 docker compose logs -f
 ```
 
----
+Hướng dẫn đầy đủ: [docs/install-docker.md](docs/install-docker.md).
 
-### Cách 3: Biên dịch từ mã nguồn (Build from Source)
-
-Yêu cầu: Rust phiên bản 1.85 trở lên (Rust 2024 edition).
+### 2. Install script trên Linux + systemd user service
 
 ```bash
-git clone https://github.com/GiaHung07/502Drive.git
-cd 502Drive
+# Tải và giải nén bản release (x86_64 / aarch64)
+tar -xzf 502drive-v*-linux-x86_64.tar.gz && cd 502drive-v*-linux-x86_64
+# Cài binary, asset tray và systemd user service
+bash packaging/install.sh
+systemctl --user enable --now gdclone-bot.service
+```
 
-# Biên dịch binary tối ưu release
+### 3. Build từ mã nguồn
+
+```bash
+git clone https://github.com/GiaHung07/502Drive.git && cd 502Drive
 cargo build --release --bin 502drive
-
-# Kiểm tra chạy thử
 ./target/release/502drive --help
 ```
 
----
+Yêu cầu Rust 1.85+ (bản 2024 edition).
 
-## Mẫu cấu hình chuẩn (`config.toml`)
+### Windows
 
-Tạo file tại `~/.config/gdclone-bot/config.toml` (hoặc `./config/config.toml` nếu dùng Docker):
+Bản build Windows đi kèm trình cài đặt logon-task qua Task Scheduler (lệnh `502drive service-install`). Xem [docs/install-windows.md](docs/install-windows.md). Windows chưa được xác minh đầy đủ — rất hoan nghênh cộng đồng thử nghiệm và báo lỗi. Linux và Docker là nền tảng chính.
+
+## Cơ chế đồng bộ
+
+Đồng bộ là **một chiều: nguồn → đích**, được vận hành bởi Google Drive **Changes API** (`changes.list`, poll ở phạm vi toàn account). Thư mục đích là đích mirror — các chỉnh sửa thực hiện ở đích không bao giờ được copy ngược lại.
+
+```mermaid
+graph LR
+    TG[Telegram / GUI desktop] --> Engine
+    Engine -->|con trỏ changes.list| API[Drive API v3]
+    Engine -->|files.copy server-side| API
+    API --> Src[(Thư mục nguồn)] -.->|copy trong cloud Google| Dst[(Đích)]
+    Engine --> DB[(Trạng thái SQLite WAL)]
+```
+
+- **Polling thích ứng (adaptive polling)**: 10s / 60s / 300s (active / warm / cold). Khi nguồn đang thay đổi liên tục, các chỉnh sửa thường xuất hiện ở đích trong vòng vài giây đến vài chục giây; watch rảnh việc sẽ tự động giảm tần suất.
+- **Chính sách xóa (deletion policy)** — mặc định `preserve_destination`: nếu file nguồn bị xóa, đưa vào thùng rác hoặc mất quyền truy cập, bản copy ở đích vẫn **được giữ lại**.
+- **Move-out** — `detach`: file bị di chuyển ra khỏi thư mục nguồn sẽ được ngắt liên kết khỏi mapping của watch (di chuyển quay lại sẽ tái sử dụng mapping hiện có).
+- **Chính sách cập nhật nội dung** (đổi qua `/watch_policy`): `versioned_copy` (mặc định — tạo bản copy mới cạnh bản cũ), `replace_copy` (ghi đè tại chỗ), `manual_confirmation` (hỏi trước khi áp dụng).
+
+Semantics đầy đủ: [docs/sync-semantics.md](docs/sync-semantics.md).
+
+**Toàn vẹn engine:** trạng thái lưu trong SQLite (chế độ WAL) với con trỏ thay đổi transactional, idempotency key và crash recovery — lần chạy bị gián đoạn sẽ tiếp tục mà không nhân đôi công việc. Mọi thao tác copy đều chạy server-side (`files.copy`), nên nội dung file không bao giờ đi qua ứng dụng.
+
+## Cấu hình
+
+File cấu hình: `~/.config/gdclone-bot/config.toml` (native/desktop) hoặc `/config/config.toml` (Docker). Mọi giá trị đều có thể ghi đè bằng biến môi trường theo mẫu `GDCLONE__SECTION__KEY` (hai dấu gạch dưới). Tham khảo đầy đủ: [config.sample.toml](config.sample.toml).
 
 ```toml
 [telegram]
-# Token lấy từ @BotFather
-bot_token = "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
-# [LƯU Ý] 987654321 là ID MẪU VÍ DỤ!
-# Hãy thay bằng Telegram User ID thực tế của bạn (lấy bằng cách chat với @userinfobot hoặc gõ /whoami)
-owner_telegram_id = 987654321
-progress_edit_min_interval_ms = 3000
-language = "vi" # "vi" hoặc "en"
-
-[destination]
-auto_use_default = true
-auto_confirm_clone = false
-wrap_single_file_in_folder = false
-root_name_policy = "preserve"
-same_name_policy = "keep_both"
+bot_token = "123456789:ABC..."        # lấy từ @BotFather
+owner_telegram_id = 987654321          # Telegram user ID của bạn (/whoami)
+language = "vi"                        # "vi" | "en"
 
 [google_oauth]
-client_id = "CLIENT_ID_CUA_BAN.apps.googleusercontent.com"
-client_secret = "CLIENT_SECRET_CUA_BAN"
-redirect_port_start = 51000
+client_id = "YOUR_ID.apps.googleusercontent.com"   # BYOK: OAuth client của bạn
+client_secret = "YOUR_SECRET"
+redirect_port_start = 51000            # dải OAuth loopback 51000-51100
 redirect_port_end = 51100
-scope = "https://www.googleapis.com/auth/drive"
 
 [engine]
 max_active_jobs = 2
-max_active_jobs_per_user = 1
 initial_write_concurrency = 5
-min_write_concurrency = 1
-max_write_concurrency = 8
-list_concurrency = 2
-max_retry_attempts = 6
-retry_base_delay_ms = 1000
-retry_max_delay_ms = 64000
-request_timeout_seconds = 60
-default_duplicate_policy = "skip_same_source"
-default_shortcut_policy = "preserve"
 
 [watch]
-enabled = true
-active_poll_seconds = 20
-warm_idle_poll_seconds = 60
-cold_idle_poll_seconds = 300
+enabled = false                        # watch realtime mặc định tắt (opt-in)
 default_content_update_policy = "versioned_copy"
 default_deletion_policy = "preserve_destination"
 default_move_out_policy = "detach"
-
-[security]
-redact_file_names_in_info_logs = true
-report_retention_days = 30
-allow_operators = false
 ```
 
----
+Các biến môi trường chính (đều theo mẫu `GDCLONE__SECTION__KEY`):
 
-## Mô hình bảo mật
+| Biến | Ghi đè |
+| :--- | :--- |
+| `GDCLONE__TELEGRAM__BOT_TOKEN` | Telegram bot token |
+| `GDCLONE__TELEGRAM__OWNER_TELEGRAM_ID` | Telegram user ID của owner |
+| `GDCLONE__TELEGRAM__LANGUAGE` | Ngôn ngữ UI (`vi` / `en`) |
+| `GDCLONE__GOOGLE_OAUTH__CLIENT_ID` | Google OAuth Client ID |
+| `GDCLONE__GOOGLE_OAUTH__CLIENT_SECRET` | Google OAuth Client Secret |
+| `GDCLONE__GOOGLE_OAUTH__SCOPE` | OAuth scope |
+| `GDCLONE__ENGINE__MAX_ACTIVE_JOBS` | Số job chạy đồng thời tối đa |
+| `GDCLONE__ENGINE__INITIAL_WRITE_CONCURRENCY` | Độ song song khi copy |
+| `GDCLONE__ENGINE__MAX_RETRY_ATTEMPTS` | Số lần retry tối đa mỗi item |
+| `GDCLONE__STORAGE__DB_PATH` | Đường dẫn database SQLite |
+| `GDCLONE__STORAGE__LOG_DIR` / `GDCLONE__STORAGE__REPORT_DIR` | Thư mục log / báo cáo |
 
-1. **Bảo vệ vật lý tập tin**: Database SQLite được gán quyền nghiêm ngặt `0600` (`rw-------`) và thư mục cha `0700` (`rwx------`) trên Unix, ngăn chặn các tài khoản khác trên máy chủ truy cập trái phép.
-2. **Mã hóa token lưu trữ**: Mã làm mới OAuth (Refresh Token) được mã hóa đối xứng AES-256-GCM trước khi ghi vào cơ sở dữ liệu.
-3. **Phân quyền người dùng**: Chỉ ID người dùng Telegram được cấp quyền mới có thể điều khiển bot. Người lạ gửi tin nhắn tới bot sẽ bị chặn tức thì.
-4. **Không mở cổng tấn công**: Hoạt động qua giao thức Telegram Long Polling và OAuth loopback cục bộ, không yêu cầu mở cổng công khai hay thiết lập reverse proxy ra internet.
+## Lệnh Telegram
 
----
+Bắt đầu bằng `/start`, sau đó `/connect` để liên kết tài khoản Google. Các lệnh hữu ích nhất:
 
-## Giấy phép (License)
+| Lệnh | Mô tả |
+| :--- | :--- |
+| `/connect` | Hướng dẫn đăng nhập Google trên máy đang chạy bot |
+| `/account` | Trạng thái tài khoản Google |
+| `/clone <url_hoặc_id>` | Xem trước và clone file/thư mục Drive (copy server-side) |
+| `/clone_here <url_hoặc_id>` | Clone ngay vào thư mục đích mặc định |
+| `/sync <nguồn> [đích]` | Tạo watch một chiều realtime (tự dùng đích mặc định nếu bỏ trống) |
+| `/watches` · `/watch_status <id>` | Liệt kê watch · xem backlog, cursor và chính sách |
+| `/watch_pause <id>` · `/watch_resume <id>` | Tạm dừng/tiếp tục áp dụng thay đổi |
+| `/watch_policy <id> <policy>` | Đổi chính sách cập nhật (`versioned_copy` \| `replace_copy` \| `manual_confirmation`) |
+| `/unwatch <id>` | Dừng watch và xóa đăng ký theo dõi |
+| `/set_destination <url_hoặc_id>` · `/destination` · `/clear_destination` | Quản lý thư mục đích mặc định |
+| `/jobs` · `/status [job_id]` | Liệt kê job · xem chi tiết một job |
+| `/pause` · `/resume` · `/cancel` · `/retry` | Điều khiển job (theo job id) |
+| `/last_report` | Nhận báo cáo JSON/CSV của job gần nhất |
+| `/grant <user_id>` · `/revoke <user_id>` | Owner quản lý allowlist operator |
+| `/whoami` | Telegram ID và mức quyền của bạn |
 
-Dự án được phát hành theo giấy phép **GNU General Public License v3.0 (GPL-3.0)**. Chi tiết vui lòng xem tại tập tin [LICENSE](LICENSE).
+Danh sách đầy đủ có sẵn trong bot qua `/help`.
+
+## GUI desktop (Linux)
+
+502Drive đi kèm ứng dụng desktop Tauri v2 (`502drive-gui`, React 19) cho Linux.
+
+- **Dashboard** — thống kê cùng các thẻ account / bot / destination và job gần đây.
+- **Jobs** — tìm kiếm và bộ lọc, pause / resume / cancel.
+- **Settings** — độ song song engine, theme tối/sáng, ngôn ngữ (vi/en), cấu hình bot qua **setup wizard 4 bước** (bao gồm preset 1-chạm cho Google OAuth credentials).
+- **Dev tools** — chẩn đoán doctor và log.
+- **Ưu tiên bàn phím** — `⌘K` mở command palette.
+
+<div align="center">
+<img src="docs/assets/screenshot-dashboard-light.png" alt="Dashboard desktop của 502Drive (giao diện sáng)" width="800">
+</div>
+
+## Bảo mật & quyền riêng tư
+
+- **Không dùng system keyring** — Google refresh token được mã hóa bằng **AES-256-GCM**; khóa lưu trong file `master.key` cục bộ với quyền `0600`.
+- **OAuth** — luồng installed-app loopback với PKCE trên các port 51000–51100; không có redirect endpoint công khai.
+- **Phân quyền Telegram** — allowlist owner/operator; **mọi tin nhắn đến đều được kiểm tra** trước khi lệnh nào được thực thi.
+- **Không có bề mặt tấn công công khai** — Telegram long polling + OAuth loopback nghĩa là không cần mở port inbound nào.
+- Nội dung file không bao giờ đi qua 502Drive (chỉ copy server-side).
+
+Chi tiết: [PRIVACY.md](PRIVACY.md) · [docs/threat-model.md](docs/threat-model.md) · [SECURITY.md](SECURITY.md)
+
+## FAQ
+
+**Xóa file ở nguồn có làm mất file ở đích không?**
+Không. Chính sách xóa mặc định là `preserve_destination` — file ở đích vẫn tồn tại khi nguồn bị xóa, đưa vào thùng rác hoặc mất quyền truy cập. Move-out chỉ ngắt mapping chứ không xóa gì cả.
+
+**Đồng bộ realtime nhanh cỡ nào?**
+Polling thích ứng theo mức độ hoạt động: 10s khi nguồn đang thay đổi liên tục, giảm dần còn 60s và 300s khi rảnh. Trên thực tế, thay đổi được áp dụng trong vòng vài giây đến vài chục giây khi watch đang active.
+
+**Có tốn băng thông máy chủ của tôi không?**
+Gần như không. Clone dùng `files.copy` server-side của Google; dữ liệu file di chuyển bên trong cloud của Google chứ không qua máy của bạn.
+
+**Dữ liệu của tôi nằm ở đâu?**
+Trên máy của bạn: database SQLite cục bộ, token đã mã hóa và `master.key`. Không có gì được lưu trên server bên thứ ba ngoài kênh truyền tin của Telegram.
+
+**Vì sao tôi cần Google OAuth Client ID/Secret riêng (BYOK)?**
+Google giới hạn OAuth app ở chế độ testing tối đa 100 user. 502Drive theo mô hình rclone: dùng Client ID/Secret của chính bạn (xem [docs/oauth-setup.md](docs/oauth-setup.md)), hoặc dùng preset 1-chạm trong setup wizard của GUI.
+
+**Windows có được hỗ trợ không?**
+Bản build Windows và trình cài đặt logon-task qua Task Scheduler (`service-install`) đã có mặt, nhưng việc xác minh đầy đủ vẫn đang tiếp tục — rất hoan nghênh cộng đồng thử nghiệm. Linux và Docker là nền tảng chính.
+
+## Tài liệu
+
+| Tài liệu | Nội dung |
+| :--- | :--- |
+| [docs/install-docker.md](docs/install-docker.md) | Triển khai Docker Compose |
+| [docs/install-windows.md](docs/install-windows.md) | Cài đặt Windows & Task Scheduler |
+| [docs/oauth-setup.md](docs/oauth-setup.md) | Thiết lập Google Cloud OAuth (BYOK) |
+| [docs/sync-semantics.md](docs/sync-semantics.md) | Semantics watch một chiều & chính sách |
+| [docs/architecture.md](docs/architecture.md) | Kiến trúc hệ thống |
+| [docs/architecture.md](docs/architecture.md) | Kiến trúc ADR, recovery & toàn vẹn dữ liệu |
+| [docs/threat-model.md](docs/threat-model.md) | Threat model |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Sự cố thường gặp |
+| [docs/install-linux.md](docs/install-linux.md) | Cài đặt Linux & systemd user service |
+
+## Roadmap
+
+- Đồng bộ hai chiều
+- Drive push webhooks (watch theo sự kiện trên VPS)
+- UI đa tài khoản
+- Folder browser trong GUI
+
+## Đóng góp
+
+Rất hoan nghênh đóng góp — xem [CONTRIBUTING.md](CONTRIBUTING.md). Với vấn đề bảo mật, vui lòng làm theo [SECURITY.md](SECURITY.md) thay vì mở issue công khai.
+
+## Giấy phép
+
+Phát hành theo **GNU GPL-3.0** — xem [LICENSE](LICENSE). Thông báo bên thứ ba: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+**Quyền riêng tư:** 502Drive là local-first — token, database và báo cáo của bạn nằm trên phần cứng của bạn. Xem [PRIVACY.md](PRIVACY.md) để biết những gì được (và không được) truyền đi.
