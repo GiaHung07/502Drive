@@ -389,8 +389,12 @@ class DriveAppWindow(Gtk.Window):
         top_box.set_margin_bottom(18)
         top_box.set_margin_start(4)
         if Path(ICON_APP).exists():
-            icon_img = Gtk.Image.new_from_file(ICON_APP)
-            icon_img.set_pixel_size(36)
+            try:
+                from gi.repository import GdkPixbuf
+                pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(ICON_APP, 36, 36, True)
+                icon_img = Gtk.Image.new_from_pixbuf(pb)
+            except Exception:
+                icon_img = Gtk.Image.new_from_file(ICON_APP)
             top_box.pack_start(icon_img, False, False, 0)
 
         info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

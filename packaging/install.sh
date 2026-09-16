@@ -63,6 +63,10 @@ fi
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 mkdir -p "$ICON_DIR"
 cp "$SCRIPT_DIR/502drive.svg" "$ICON_DIR/502drive.svg"
+if [ -f "$SCRIPT_DIR/502drive.png" ]; then
+    mkdir -p "$HOME/.local/share/pixmaps"
+    cp "$SCRIPT_DIR/502drive.png" "$HOME/.local/share/pixmaps/502drive.png"
+fi
 cp "$SCRIPT_DIR/502drive-symbolic.svg" "$ICON_DIR/502drive-symbolic.svg"
 cp "$SCRIPT_DIR/502drive-inactive-symbolic.svg" "$ICON_DIR/502drive-inactive-symbolic.svg"
 
