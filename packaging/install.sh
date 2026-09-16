@@ -86,7 +86,7 @@ cp "$SCRIPT_DIR/502drive-symbolic.svg" "$ICON_DIR/502drive-symbolic.svg"
 cp "$SCRIPT_DIR/502drive-inactive-symbolic.svg" "$ICON_DIR/502drive-inactive-symbolic.svg"
 
 # Install PNG icons if present
-for s in 16 24 32 48 64 128 256 512; do
+for s in 16 22 24 32 48 64 128 256 512; do
     PNG_DIR="$HOME/.local/share/icons/hicolor/${s}x${s}/apps"
     mkdir -p "$PNG_DIR"
     if [ -f "$SCRIPT_DIR/icons/${s}x${s}/502drive.png" ]; then
