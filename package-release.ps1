@@ -1,6 +1,6 @@
 # ==============================================================================
 # 502Drive Windows Release Packager
-# Generates Windows Portable Zip bundle with checksums
+# Generates Windows Portable Zip bundle with checksums & launcher scripts
 # ==============================================================================
 param(
     [switch]$SkipBuild,
@@ -52,28 +52,65 @@ if (Test-Path -LiteralPath $packageDir) {
 }
 New-Item -ItemType Directory -Path $packageDir | Out-Null
 
+# Copy binary & core assets
 Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $packageDir "502drive.exe") -Force
+Copy-Item -LiteralPath (Join-Path $repo "packaging\502drive.ico") -Destination (Join-Path $packageDir "502drive.ico") -Force
 Copy-Item -LiteralPath (Join-Path $repo "config.sample.toml") -Destination (Join-Path $packageDir "config.sample.toml") -Force
 Copy-Item -LiteralPath (Join-Path $repo "README.md") -Destination (Join-Path $packageDir "README.md") -Force
 Copy-Item -LiteralPath (Join-Path $repo "packaging\windows-task.ps1") -Destination (Join-Path $packageDir "windows-task.ps1") -Force
 
+# Copy Windows 1-click batch and runner scripts
+$winDir = Join-Path $repo "packaging\windows"
+if (Test-Path -LiteralPath $winDir) {
+    Get-ChildItem -LiteralPath $winDir -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $packageDir $_.Name) -Force
+    }
+}
+
 $readmeText = @"
 ================================================================================
-502Drive — Local-first Google Drive Clone & Realtime Sync Bot
+502Drive (v$version) — Windows Portable Release
+Local-first Google Drive Clone & Realtime Sync Bot
 ================================================================================
 
-1. Quick Start:
-   - Copy `config.sample.toml` to `config.toml`
-   - Edit `config.toml` with your Telegram Bot Token and Google Client ID/Secret
-   - Run: `502drive.exe run`
+QUICK START:
+1. Copy `config.sample.toml` to `config.toml` (or just double-click `Start-502Drive.bat`).
+2. Edit `config.toml` with your Telegram Bot Token and Google Client credentials.
+   (Note: `owner_telegram_id` in sample is a placeholder - replace with your real ID).
+3. Double-click `Start-502Drive.bat` (foreground console) or `Start-Hidden.vbs` (silent background).
 
-2. Run as Windows Scheduled Task (starts on boot / login):
-   - Open PowerShell as Administrator
-   - Run: `.\windows-task.ps1`
+FEATURES & UTILITIES:
+- Start-502Drive.bat        : Launch bot in a command prompt window
+- Start-Hidden.vbs          : Launch bot silently in background (no black window)
+- Stop-502Drive.bat         : Stop running 502Drive background process
+- Doctor.bat                : Health check Google Drive and Telegram connection
+- Register-Startup.bat      : Auto-start 502Drive invisibly on Windows logon (Task Scheduler)
+- Unregister-Startup.bat    : Remove Windows auto-start task
 
-Documentation: https://github.com/GiaHung07/502Drive
+CLI USAGE:
+  502drive.exe               (starts the bot directly)
+  502drive.exe doctor        (diagnostics)
+  502drive.exe status        (database status)
+  502drive.exe auth login    (OAuth browser login)
+
+Repository & Issues: https://github.com/GiaHung07/502Drive
 "@
 $readmeText | Set-Content -LiteralPath (Join-Path $packageDir "README-WINDOWS.txt") -Encoding UTF8
+
+$exeHash = (Get-FileHash -LiteralPath (Join-Path $packageDir "502drive.exe") -Algorithm SHA256).Hash
+$manifest = [ordered]@{
+    package = $packageName
+    version = $version
+    built_at = (Get-Date).ToString("s")
+    files = @(
+        [ordered]@{
+            file = "502drive.exe"
+            sha256 = $exeHash
+            bytes = (Get-Item -LiteralPath (Join-Path $packageDir "502drive.exe")).Length
+        }
+    )
+}
+$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $packageDir "release-manifest.json") -Encoding UTF8
 
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force

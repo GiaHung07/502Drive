@@ -172,7 +172,10 @@ Tạo file tại `~/.config/gdclone-bot/config.toml` (hoặc `./config/config.to
 
 ```toml
 [telegram]
+# Token lấy từ @BotFather
 bot_token = "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+# [LƯU Ý] 987654321 là ID MẪU VÍ DỤ!
+# Hãy thay bằng Telegram User ID thực tế của bạn (lấy bằng cách chat với @userinfobot hoặc gõ /whoami)
 owner_telegram_id = 987654321
 progress_edit_min_interval_ms = 3000
 language = "vi" # "vi" hoặc "en"

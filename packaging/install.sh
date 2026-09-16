@@ -34,6 +34,8 @@ elif [ -f "$REPO_DIR/502drive" ]; then
     BIN_PATH="$REPO_DIR/502drive"
 elif [ -f "$SCRIPT_DIR/502drive" ]; then
     BIN_PATH="$SCRIPT_DIR/502drive"
+elif [ -f "$HOME/.local/bin/502drive" ]; then
+    BIN_PATH="$HOME/.local/bin/502drive"
 else
     warn "Binary '502drive' not found in release folder. Building now..."
     cargo build --release --bin 502drive
@@ -42,7 +44,8 @@ fi
 
 # 1. Install binary to ~/.local/bin
 mkdir -p "$HOME/.local/bin"
-cp "$BIN_PATH" "$HOME/.local/bin/502drive"
+cp "$BIN_PATH" "$HOME/.local/bin/502drive.new"
+mv "$HOME/.local/bin/502drive.new" "$HOME/.local/bin/502drive"
 chmod +x "$HOME/.local/bin/502drive"
 ln -sf "$HOME/.local/bin/502drive" "$HOME/.local/bin/gdclone-bot"
 ok "Installed executable to ~/.local/bin/502drive"
@@ -52,20 +55,38 @@ TRAY_SRC="$REPO_DIR/scripts/502drive-tray.py"
 if [ -f "$TRAY_SRC" ]; then
     cp "$TRAY_SRC" "$HOME/.local/bin/502drive-tray"
     chmod +x "$HOME/.local/bin/502drive-tray"
+    ln -sf "$HOME/.local/bin/502drive-tray" "$HOME/.local/bin/drive502-tray"
     ok "Installed System Tray applet to ~/.local/bin/502drive-tray"
 fi
 
-# 3. Install scalable icons
+# 3. Install scalable & colored icons
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 mkdir -p "$ICON_DIR"
+cp "$SCRIPT_DIR/502drive.svg" "$ICON_DIR/502drive.svg"
 cp "$SCRIPT_DIR/502drive-symbolic.svg" "$ICON_DIR/502drive-symbolic.svg"
 cp "$SCRIPT_DIR/502drive-inactive-symbolic.svg" "$ICON_DIR/502drive-inactive-symbolic.svg"
-ok "Installed symbolic icons to ~/.local/share/icons/hicolor/scalable/apps/"
+
+# Install PNG icons if present
+for s in 16 24 32 48 64 128 256 512; do
+    PNG_DIR="$HOME/.local/share/icons/hicolor/${s}x${s}/apps"
+    mkdir -p "$PNG_DIR"
+    if [ -f "$SCRIPT_DIR/icons/${s}x${s}/502drive.png" ]; then
+        cp "$SCRIPT_DIR/icons/${s}x${s}/502drive.png" "$PNG_DIR/502drive.png"
+    fi
+done
+
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" || true
+fi
+ok "Installed icons to ~/.local/share/icons/hicolor/"
 
 # 4. Install desktop entry
 APP_DIR="$HOME/.local/share/applications"
 mkdir -p "$APP_DIR"
 cp "$SCRIPT_DIR/502drive.desktop" "$APP_DIR/502drive.desktop"
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database "$APP_DIR" || true
+fi
 ok "Installed desktop launcher to ~/.local/share/applications/502drive.desktop"
 
 # 5. Install systemd user services

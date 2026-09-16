@@ -1,5 +1,6 @@
 [telegram]
 bot_token = "REPLACE_ME"
+# Your Telegram User ID (from /whoami or @userinfobot)
 owner_telegram_id = 0
 progress_edit_min_interval_ms = 3000
 language = "vi" # vi | en
