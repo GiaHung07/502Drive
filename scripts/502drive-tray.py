@@ -87,7 +87,7 @@ class DriveTray:
 
         # 2. Open Telegram
         tg_item, _, _ = make_menu_item(
-            "Mở Telegram Bot (@Drive502_Bot)", "send-to-symbolic", self.open_telegram
+            "Mở Telegram Bot (@p502Drive_bot)", "send-to-symbolic", self.open_telegram
         )
         self.menu.append(tg_item)
 
@@ -152,7 +152,7 @@ class DriveTray:
         return True
 
     def open_telegram(self, _):
-        subprocess.Popen(["xdg-open", "tg://resolve?domain=Drive502_Bot"])
+        subprocess.Popen(["xdg-open", "tg://resolve?domain=p502Drive_bot"])
 
     def toggle_service(self, _):
         if self.is_service_active():
