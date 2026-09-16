@@ -12,27 +12,32 @@ export interface ButtonProps extends Omit<HTMLMotionProps<'button'>, 'ref' | 'ch
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'primary', size = 'md', isLoading, disabled, children, ...props }, ref) => {
     const baseStyles =
-      'inline-flex items-center justify-center font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-50 disabled:pointer-events-none cursor-pointer'
+      'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-120 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-45 disabled:pointer-events-none cursor-pointer select-none text-xs'
 
     const sizeStyles = {
-      sm: 'h-7 px-2.5 text-xs gap-1.5',
-      md: 'h-8.5 px-3.5 text-sm gap-2',
-      lg: 'h-10 px-5 text-sm gap-2.5',
-      icon: 'h-8 w-8 p-0',
+      sm: 'h-8 px-3 text-xs sm:text-sm gap-1.5',
+      md: 'h-9 px-4 text-xs sm:text-sm gap-2',
+      lg: 'h-10.5 px-5 text-sm sm:text-base gap-2.5',
+      icon: 'h-9 w-9 p-0',
     }
 
     const variantStyles = {
-      primary: 'bg-accent text-bg-base font-semibold hover:bg-accent-hover shadow-sm',
-      secondary: 'bg-bg-elevated border border-border text-text-primary hover:bg-bg-card-hover hover:border-border-strong',
-      ghost: 'text-text-secondary hover:text-text-primary hover:bg-white/5 active:bg-white/10',
-      outline: 'border border-border text-text-primary hover:border-border-strong hover:bg-bg-elevated',
-      danger: 'text-error border border-error/20 bg-error/5 hover:bg-error/15 hover:border-error/40',
+      primary:
+        'bg-accent text-bg-base font-semibold hover:bg-accent-hover active:scale-[0.98] shadow-sm',
+      secondary:
+        'bg-bg-input/70 border border-border/70 text-text-primary hover:bg-bg-input hover:border-border active:scale-[0.98]',
+      ghost:
+        'text-text-secondary hover:text-text-primary hover:bg-bg-input/50 active:bg-bg-input/80',
+      outline:
+        'border border-border/80 text-text-primary hover:border-border hover:bg-bg-input/40',
+      danger:
+        'text-error border border-error/25 bg-transparent hover:bg-error/10 hover:border-error/45 active:scale-[0.98]',
     }
 
     return (
       <motion.button
         ref={ref}
-        whileTap={{ scale: disabled || isLoading ? 1 : 0.97 }}
+        whileTap={{ scale: disabled || isLoading ? 1 : 0.98 }}
         transition={{ duration: 0.08, ease: 'easeOut' }}
         disabled={disabled || isLoading}
         className={cn(baseStyles, sizeStyles[size], variantStyles[variant], className)}

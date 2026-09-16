@@ -4,44 +4,49 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      spacing: {
+        '4.5': '1.125rem',
+        '6.5': '1.625rem',
+        '10.5': '2.625rem',
+      },
       colors: {
         bg: {
-          base: 'var(--color-bg-base)',
-          elevated: 'var(--color-bg-elevated)',
-          card: 'var(--color-bg-card)',
-          'card-hover': 'var(--color-bg-card-hover)',
-          input: 'var(--color-bg-input)',
+          base: 'hsl(var(--color-bg-base) / <alpha-value>)',
+          elevated: 'hsl(var(--color-bg-elevated) / <alpha-value>)',
+          card: 'hsl(var(--color-bg-card) / <alpha-value>)',
+          'card-hover': 'hsl(var(--color-bg-card-hover) / <alpha-value>)',
+          input: 'hsl(var(--color-bg-input) / <alpha-value>)',
         },
         border: {
-          DEFAULT: 'var(--color-border)',
-          strong: 'var(--color-border-strong)',
+          DEFAULT: 'hsl(var(--color-border) / calc(<alpha-value> * 0.08))',
+          strong: 'hsl(var(--color-border-strong) / calc(<alpha-value> * 0.18))',
         },
         text: {
-          primary: 'var(--color-text-primary)',
-          secondary: 'var(--color-text-secondary)',
-          muted: 'var(--color-text-muted)',
-          inverse: 'var(--color-text-inverse)',
+          primary: 'hsl(var(--color-text-primary) / <alpha-value>)',
+          secondary: 'hsl(var(--color-text-secondary) / <alpha-value>)',
+          muted: 'hsl(var(--color-text-muted) / <alpha-value>)',
+          inverse: 'hsl(var(--color-text-inverse) / <alpha-value>)',
         },
         accent: {
-          DEFAULT: 'var(--color-accent)',
-          dim: 'var(--color-accent-dim)',
-          hover: 'var(--color-accent-hover)',
+          DEFAULT: 'hsl(var(--color-accent) / <alpha-value>)',
+          dim: 'hsl(var(--color-accent) / calc(<alpha-value> * 0.12))',
+          hover: 'hsl(var(--color-accent-hover) / <alpha-value>)',
         },
         success: {
-          DEFAULT: 'var(--color-success)',
-          bg: 'var(--color-success-bg)',
+          DEFAULT: 'hsl(var(--color-success) / <alpha-value>)',
+          bg: 'hsl(var(--color-success) / calc(<alpha-value> * 0.13))',
         },
         warning: {
-          DEFAULT: 'var(--color-warning)',
-          bg: 'var(--color-warning-bg)',
+          DEFAULT: 'hsl(var(--color-warning) / <alpha-value>)',
+          bg: 'hsl(var(--color-warning) / calc(<alpha-value> * 0.13))',
         },
         error: {
-          DEFAULT: 'var(--color-error)',
-          bg: 'var(--color-error-bg)',
+          DEFAULT: 'hsl(var(--color-error) / <alpha-value>)',
+          bg: 'hsl(var(--color-error) / calc(<alpha-value> * 0.12))',
         },
         info: {
-          DEFAULT: 'var(--color-info)',
-          bg: 'var(--color-info-bg)',
+          DEFAULT: 'hsl(var(--color-info) / <alpha-value>)',
+          bg: 'hsl(var(--color-info) / calc(<alpha-value> * 0.12))',
         },
       },
       fontFamily: {
@@ -55,9 +60,20 @@ export default {
         xl: 'var(--radius-xl)',
       },
       boxShadow: {
+        xs: '0 1px 2px rgba(0, 0, 0, 0.05)',
         card: 'var(--shadow-sm)',
         float: 'var(--shadow-md)',
         modal: 'var(--shadow-lg)',
+      },
+      backdropBlur: {
+        xs: '2px',
+      },
+      transitionDuration: {
+        120: '120ms',
+      },
+      transitionTimingFunction: {
+        'out-expo': 'cubic-bezier(0.16, 1, 0.3, 1)',
+        smooth: 'cubic-bezier(0.4, 0, 0.2, 1)',
       },
     },
   },

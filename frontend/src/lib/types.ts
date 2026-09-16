@@ -80,10 +80,30 @@ export interface ConfigSummary {
   launch_at_startup: boolean
   language: 'vi' | 'en'
   bot_token_configured: boolean
+  bot_token?: string
   owner_telegram_id: number
+  oauth_client_id?: string
+  oauth_client_secret_configured?: boolean
   db_path: string
   log_dir: string
   report_dir: string
+}
+
+export interface WizardConfigInput {
+  oauth_client_id?: string
+  oauth_client_secret?: string
+  bot_token?: string
+  owner_telegram_id?: number
+  engine_concurrency?: number
+  auto_confirm_clone?: boolean
+}
+
+export interface TelegramBotVerifyResult {
+  ok: boolean
+  username?: string | null
+  first_name?: string | null
+  bot_id?: number | null
+  error?: string | null
 }
 
 export interface DoctorCheckItem {
@@ -104,4 +124,28 @@ export interface ToastMessage {
   description?: string
   variant?: 'default' | 'success' | 'warning' | 'error'
   duration?: number
+}
+
+export interface PreflightStep {
+  id: string
+  title: string
+  status: 'pending' | 'running' | 'passed' | 'warning' | 'failed'
+  message: string
+  auto_fixed?: boolean
+  fix_action?: 'login' | 'start_service' | 'config'
+}
+
+export interface RemoteUpdateInfo {
+  current_version: string
+  latest_version: string
+  update_available: boolean
+  changelog: string
+  download_url?: string
+}
+
+export interface PreflightReport {
+  all_passed: boolean
+  needs_setup: boolean
+  steps: PreflightStep[]
+  remote_update?: RemoteUpdateInfo
 }

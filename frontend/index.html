@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi" class="dark">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,6 +7,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      // Apply the persisted theme before first paint to avoid a wrong-theme flash.
+      try {
+        var t = localStorage.getItem('502drive-theme') || 'system'
+        var dark = t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+      } catch (e) {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
   </head>
   <body class="bg-bg-base text-text-primary antialiased selection:bg-accent/20 selection:text-accent">
     <div id="root"></div>

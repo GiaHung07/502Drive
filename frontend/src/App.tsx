@@ -5,17 +5,22 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Jobs } from '@/pages/Jobs'
 import { Settings } from '@/pages/Settings'
 import { Dev } from '@/pages/Dev'
+import { PreflightSplash } from '@/components/layout/PreflightSplash'
+import { SetupWizardModal } from '@/components/setup/SetupWizardModal'
 import { ToastProvider, useToast } from '@/components/primitives/Toast'
-import { api } from '@/lib/ipc'
+import { ThemeProvider } from '@/hooks/useTheme'
+import { api, getErrorMessage } from '@/lib/ipc'
 import { SystemStatus, JobSummary, WatchSummary, ConfigSummary } from '@/lib/types'
 
 const AppContent: React.FC = () => {
+  const [isPreflightDone, setIsPreflightDone] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
   const [status, setStatus] = useState<SystemStatus | null>(null)
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [watches, setWatches] = useState<WatchSummary[]>([])
   const [config, setConfig] = useState<ConfigSummary | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isWizardOpen, setIsWizardOpen] = useState(false)
 
   const { toast } = useToast()
 
@@ -41,12 +46,30 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     refreshData()
-    // Poll updates every 3 seconds for active jobs & state
     const interval = setInterval(() => {
-      refreshData()
+      // Pause background polling while the wizard owns the screen.
+      if (!isWizardOpen) refreshData()
     }, 3000)
     return () => clearInterval(interval)
-  }, [refreshData])
+  }, [refreshData, isWizardOpen])
+
+  const handleStartService = async () => {
+    try {
+      await api.startService()
+      toast({
+        title: 'Đã kích hoạt service',
+        description: 'Dịch vụ nền gdclone-bot đã được bật.',
+        variant: 'success',
+      })
+      await refreshData()
+    } catch (err) {
+      toast({
+        title: 'Lỗi kích hoạt service',
+        description: getErrorMessage(err),
+        variant: 'error',
+      })
+    }
+  }
 
   const handleRestartService = async () => {
     try {
@@ -60,7 +83,7 @@ const AppContent: React.FC = () => {
     } catch (err) {
       toast({
         title: 'Lỗi khởi động service',
-        description: String(err),
+        description: getErrorMessage(err),
         variant: 'error',
       })
     }
@@ -72,7 +95,7 @@ const AppContent: React.FC = () => {
     } catch (err) {
       toast({
         title: 'Không thể mở Telegram',
-        description: String(err),
+        description: getErrorMessage(err),
         variant: 'error',
       })
     }
@@ -89,7 +112,7 @@ const AppContent: React.FC = () => {
     } catch (err) {
       toast({
         title: 'Lỗi đăng nhập',
-        description: String(err),
+        description: getErrorMessage(err),
         variant: 'error',
       })
     }
@@ -107,7 +130,7 @@ const AppContent: React.FC = () => {
     } catch (err) {
       toast({
         title: 'Lỗi ngắt kết nối',
-        description: String(err),
+        description: getErrorMessage(err),
         variant: 'error',
       })
     }
@@ -123,7 +146,7 @@ const AppContent: React.FC = () => {
       })
       await refreshData()
     } catch (err) {
-      toast({ title: 'Không thể dừng job', description: String(err), variant: 'error' })
+      toast({ title: 'Không thể dừng job', description: getErrorMessage(err), variant: 'error' })
     }
   }
 
@@ -137,7 +160,7 @@ const AppContent: React.FC = () => {
       })
       await refreshData()
     } catch (err) {
-      toast({ title: 'Không thể tiếp tục job', description: String(err), variant: 'error' })
+      toast({ title: 'Không thể tiếp tục job', description: getErrorMessage(err), variant: 'error' })
     }
   }
 
@@ -151,7 +174,7 @@ const AppContent: React.FC = () => {
       })
       await refreshData()
     } catch (err) {
-      toast({ title: 'Không thể hủy job', description: String(err), variant: 'error' })
+      toast({ title: 'Không thể hủy job', description: getErrorMessage(err), variant: 'error' })
     }
   }
 
@@ -161,7 +184,7 @@ const AppContent: React.FC = () => {
       toast({ title: 'Tạm dừng theo dõi', variant: 'default' })
       await refreshData()
     } catch (err) {
-      toast({ title: 'Lỗi', description: String(err), variant: 'error' })
+      toast({ title: 'Lỗi', description: getErrorMessage(err), variant: 'error' })
     }
   }
 
@@ -171,7 +194,7 @@ const AppContent: React.FC = () => {
       toast({ title: 'Tiếp tục theo dõi', variant: 'success' })
       await refreshData()
     } catch (err) {
-      toast({ title: 'Lỗi', description: String(err), variant: 'error' })
+      toast({ title: 'Lỗi', description: getErrorMessage(err), variant: 'error' })
     }
   }
 
@@ -186,80 +209,122 @@ const AppContent: React.FC = () => {
       })
       await refreshData()
     } catch (err) {
-      toast({ title: 'Lỗi lưu cấu hình', description: String(err), variant: 'error' })
+      toast({ title: 'Lỗi lưu cấu hình', description: getErrorMessage(err), variant: 'error' })
+    }
+  }
+
+  const handleCheckRemoteUpdate = async () => {
+    try {
+      const info = await api.checkRemoteUpdate()
+      if (info.update_available) {
+        toast({
+          title: `Bản cập nhật mới ${info.latest_version}`,
+          description: info.changelog,
+          variant: 'success',
+          duration: 6000,
+        })
+      } else {
+        toast({
+          title: 'Đã cập nhật mới nhất',
+          description: `Bạn đang sử dụng phiên bản ${info.current_version}. Hệ thống đã đồng bộ.`,
+          variant: 'default',
+        })
+      }
+    } catch (err) {
+      toast({ title: 'Lỗi kiểm tra cập nhật', description: getErrorMessage(err), variant: 'error' })
     }
   }
 
   return (
-    <Shell
-      activeTab={activeTab}
-      onSelectTab={setActiveTab}
-      status={status}
-      isRefreshing={isRefreshing}
-      onRefresh={refreshData}
-      onRestartService={handleRestartService}
-    >
-      {activeTab === 'dashboard' && (
-        <Dashboard
+    <>
+      {!isPreflightDone ? (
+        <PreflightSplash
+          onComplete={() => setIsPreflightDone(true)}
+          onTriggerLogin={handleTriggerLogin}
+          onStartService={handleStartService}
+        />
+      ) : (
+        <Shell
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
           status={status}
-          recentJobs={jobs}
+          isRefreshing={isRefreshing}
+          onRefresh={refreshData}
+          onRestartService={handleRestartService}
           onOpenBot={handleOpenBot}
           onTriggerLogin={handleTriggerLogin}
-          onTriggerRevoke={handleTriggerRevoke}
-          onRestartService={handleRestartService}
-          onPauseJob={handlePauseJob}
-          onResumeJob={handleResumeJob}
-          onCancelJob={handleCancelJob}
-          onNavigateToJobs={() => setActiveTab('jobs')}
-        />
+        >
+          {activeTab === 'dashboard' && (
+            <Dashboard
+              status={status}
+              recentJobs={jobs}
+              onOpenBot={handleOpenBot}
+              onTriggerLogin={handleTriggerLogin}
+              onTriggerRevoke={handleTriggerRevoke}
+              onRestartService={handleRestartService}
+              onPauseJob={handlePauseJob}
+              onResumeJob={handleResumeJob}
+              onCancelJob={handleCancelJob}
+              onNavigateToJobs={() => setActiveTab('jobs')}
+              onOpenWizard={() => setIsWizardOpen(true)}
+            />
+          )}
+
+          {activeTab === 'jobs' && (
+            <Jobs
+              jobs={jobs}
+              watches={watches}
+              onPauseJob={handlePauseJob}
+              onResumeJob={handleResumeJob}
+              onCancelJob={handleCancelJob}
+              onPauseWatch={handlePauseWatch}
+              onResumeWatch={handleResumeWatch}
+              onRefresh={refreshData}
+              isRefreshing={isRefreshing}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <Settings
+              config={config}
+              status={status}
+              onUpdateConfig={handleUpdateConfig}
+              onTriggerLogin={handleTriggerLogin}
+              onTriggerRevoke={handleTriggerRevoke}
+              onRestartService={handleRestartService}
+              onCheckUpdate={handleCheckRemoteUpdate}
+              onOpenWizard={() => setIsWizardOpen(true)}
+            />
+          )}
+
+          {activeTab === 'dev' && (
+            <Dev
+              onRunDoctor={api.runDoctor}
+              onGetLogs={api.getLogs}
+            />
+          )}
+        </Shell>
       )}
 
-      {activeTab === 'jobs' && (
-        <Jobs
-          jobs={jobs}
-          watches={watches}
-          onPauseJob={handlePauseJob}
-          onResumeJob={handleResumeJob}
-          onCancelJob={handleCancelJob}
-          onPauseWatch={handlePauseWatch}
-          onResumeWatch={handleResumeWatch}
-          onRefresh={refreshData}
-          isRefreshing={isRefreshing}
-        />
-      )}
-
-      {activeTab === 'settings' && (
-        <Settings
-          config={config}
-          status={status}
-          onUpdateConfig={handleUpdateConfig}
-          onTriggerLogin={handleTriggerLogin}
-          onTriggerRevoke={handleTriggerRevoke}
-          onRestartService={handleRestartService}
-          onCheckUpdate={() => {
-            toast({
-              title: 'Cập nhật phiên bản',
-              description: 'Bạn đang ở phiên bản mới nhất v0.1.0.',
-              variant: 'success',
-            })
-          }}
-        />
-      )}
-
-      {activeTab === 'dev' && (
-        <Dev
-          onRunDoctor={api.runDoctor}
-          onGetLogs={api.getLogs}
-        />
-      )}
-    </Shell>
+      <SetupWizardModal
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        config={config}
+        status={status}
+        onTriggerLogin={handleTriggerLogin}
+        onRefreshData={refreshData}
+        onRestartService={handleRestartService}
+      />
+    </>
   )
 }
 
 export default function App() {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
+    </ThemeProvider>
   )
 }
