@@ -3,7 +3,7 @@ Name=502Drive Bot
 GenericName=Telegram Google Drive Clone Bot
 Comment=Local-first Telegram bot for Google Drive cloning and folder sync
 Exec=~/.local/bin/502drive-tray
-Icon=502drive
+Icon=502drive-symbolic
 Terminal=false
 Type=Application
 Categories=Network;Utility;FileTransfer;
@@ -13,7 +13,7 @@ Actions=OpenTelegram;Doctor;RestartService;ViewLogs;
 
 [Desktop Action OpenTelegram]
 Name=Mở Telegram Bot
-Exec=xdg-open tg://resolve?domain=Drive502_Bot
+Exec=xdg-open tg://resolve?domain=p502Drive_bot
 
 [Desktop Action Doctor]
 Name=Kiểm tra hệ thống (Doctor)
