@@ -1,202 +1,236 @@
+<div align="center">
+
 # 502Drive
 
-502Drive is a local-first Telegram bot for cloning Google Drive files and folders, then optionally watching source folders for future changes.
+**High-Performance Local-First Google Drive Cloning & Realtime Sync Engine via Telegram**
 
-It runs on your own machine with Telegram long polling, local Google OAuth, SQLite state, and Google Drive API copy operations. It does not require a VPS, webhook, public domain, Docker, or service-account rotation.
+[![CI](https://github.com/GiaHung07/502Drive/actions/workflows/ci.yml/badge.svg)](https://github.com/GiaHung07/502Drive/actions/workflows/ci.yml)
+[![Release](https://github.com/GiaHung07/502Drive/actions/workflows/release.yml/badge.svg)](https://github.com/GiaHung07/502Drive/actions/workflows/release.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/GiaHung07/502Drive?logo=github&style=flat-square)](https://github.com/GiaHung07/502Drive/releases)
+[![Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20Docker-brightgreen.svg?style=flat-square)](https://github.com/GiaHung07/502Drive/releases)
 
-[Đọc bản tiếng Việt](README.vi.md)
+[Đọc bản tiếng Việt (Vietnamese README)](README.vi.md)
 
-## Features
+</div>
 
-- Clone a Google Drive file or folder from a pasted URL.
-- Browse My Drive and Shared Drives from Telegram.
-- Save and switch default destination folders.
-- Track clone jobs with pause, resume, cancel, retry, and JSON/CSV reports.
-- Open a button-driven Telegram control center with `/menu`.
-- Watch source folders and apply future changes into destination folders.
-- Use Vietnamese or English Telegram UI with `telegram.language = "vi"` or `"en"`.
+---
 
-## Status
+## Overview
 
-Ready for local testing on Linux/CachyOS:
+**502Drive** is a production-grade, local-first Telegram bot written in modern Rust for cloning Google Drive files and folders, managing destinations, and performing continuous realtime folder synchronization.
 
-- OAuth login.
-- One-shot clone.
-- Destination picker.
-- Job controls.
-- Reports.
-- Telegram control center.
-- Linux `systemd --user` service.
+Unlike traditional mirror/leech bots that download massive files to an expensive rented VPS before re-uploading, **502Drive executes server-side Google Drive API copy operations directly within Google's cloud infrastructure**. Transfers complete almost instantaneously, consume zero local network bandwidth, and keep all tokens and state strictly on your own hardware.
 
-Still being hardened before a polished public release:
+```mermaid
+graph LR
+    subgraph Client
+        TG[Telegram App]
+    end
 
-- Full i18n for every Telegram message body and error.
-- Watch reconciliation after long downtime.
-- Windows end-to-end verification.
-- Public release binaries and packaging.
+    subgraph "502Drive Runtime"
+        Bot[Telegram Controller / Long Polling]
+        Engine[Clone & Watch Sync Engine]
+        DB[(SQLite WAL State\nMode 0600)]
+        Sec[AES-GCM Secret Store]
+        Tray[Native Desktop Tray Applet]
+    end
 
-## Why Local-First?
+    subgraph Google Cloud
+        GDAPI[Google Drive API v3]
+        DriveSrc[Source Files / Folders]
+        DriveDst[Destination Drive / Folders]
+    end
 
-Most popular Telegram mirror/leech bots are built for VPS or Docker because they download torrents, direct links, archives, and media, then upload to cloud storage.
-
-502Drive is narrower on purpose. It focuses on Google Drive-to-Google Drive clone/watch through the user's own Google account.
-
-Local-first is the best default because:
-
-- Google OAuth loopback login is simpler and safer on the user's machine.
-- No public webhook, domain, TLS, or reverse proxy is needed.
-- SQLite state and reports stay local.
-- A user service can survive restarts without renting a server.
-
-Docker Compose can be added later for NAS and homelab users, but it should stay optional until OAuth, config, backup, and volume mounting are well documented.
-
-## Similar Projects
-
-502Drive overlaps with existing Telegram Drive tools, but the product shape is different.
-
-Existing public projects usually fall into these groups:
-
-- Mirror/leech bots: download torrents, direct links, YouTube, archives, Telegram files, and Google Drive links, then upload to Google Drive, Telegram, or rclone remotes.
-- Rclone Telegram bots: expose cloud-to-cloud transfers through rclone, usually Docker/VPS-first.
-- Drive uploader bots: upload Telegram files or direct links into Google Drive.
-- Clone bots: often built around Shared Drives and service accounts.
-
-502Drive intentionally chooses a narrower lane:
-
-- Google Drive-to-Google Drive clone/watch.
-- Personal OAuth.
-- Local SQLite durability.
-- Telegram dashboard UX.
-- Vietnamese and English UI.
-- No quota bypass or service-account rotation.
-
-There are many nearby repos but few direct matches because Drive watch/sync needs durable cursors, mapping, idempotency, and reconciliation. The larger Telegram bot community mostly optimizes for broad mirror/leech features and easy VPS/Docker deployment.
-
-## Roadmap By Phase
-
-1. Public baseline: license, contributing guide, issue templates, and CI.
-2. Full i18n: every Telegram message, prompt, button, command, and user-facing error in Vietnamese and English.
-3. UX shell: one editable control-center message, Home/Back/Refresh everywhere, and confirmation screens for destructive actions.
-4. Clone hardening: better doctor checks, restart recovery, report summaries, and backup/restore docs.
-5. Watch stable: reconciliation command, backlog health, manual confirmation workflow, and search/filter.
-6. Packaging: Linux release binaries, Windows verification, and optional Docker Compose for NAS/homelab.
-
-## Quick Start
-
-Copy the sample config:
-
-```bash
-mkdir -p ~/.config/gdclone-bot
-cp config.sample.toml ~/.config/gdclone-bot/config.toml
+    TG <-->|Commands & Inline Buttons| Bot
+    Bot <--> Engine
+    Engine <--> DB
+    Engine <--> Sec
+    Bot <--> Tray
+    Engine -->|Server-Side Copy / Watch API| GDAPI
+    GDAPI -->|Instant Cloud-to-Cloud Copy| DriveDst
+    DriveSrc -.->|Input Stream| DriveDst
 ```
 
-Edit the required values:
+---
+
+## Key Features
+
+- **Instant Cloud-to-Cloud Cloning**: Copies files and entire folder hierarchies server-side via Google Drive API v3.
+- **Realtime Sync (`/sync <source> [destination]`)**: Synchronizes changes from source folders to destination targets using change cursor polling and event dispatchers.
+- **Smart Link Detection**: Paste any Google Drive folder URL in Telegram chat to instantly get an interactive inline menu: `[Clone]`, `[Realtime Sync]`, or `[Change Destination]`.
+- **Interactive Folder Browser**: Browse "My Drive" and "Shared Drives" with paginated inline buttons directly inside Telegram.
+- **Job Control & Resilience**: Pause, resume, retry failed items, inspect live progress, and export JSON/CSV audit reports.
+- **Zero-C Dependency**: Pure Rust TLS (`rustls`) + statically bundled SQLite. Zero external OpenSSL or shared library headaches.
+- **Security Hardened**: SQLite database locked with Unix `0600` permissions; Google OAuth refresh tokens encrypted with authenticated AES-GCM.
+- **Multi-Platform Native UI**:
+  - **Linux**: Systemd user service + native GTK symbolic status tray applet.
+  - **Windows**: Background execution + Scheduled Task registration.
+  - **Docker / VPS / NAS**: 1-Click lightweight multi-stage container.
+
+---
+
+## Telegram Command Reference
+
+| Command | Arguments | Description |
+| :--- | :--- | :--- |
+| `/sync` | `<source> [destination]` | **Realtime Sync**: sync source folder to destination. Auto-uses default destination if omitted. |
+| `/clone` | `<url_or_id>` | Inspect source hierarchy, preview item count/size, and clone. |
+| `/clone_here`| `<url_or_id>` | Clone directly into default destination folder without prompts. |
+| `/menu` | - | Open the interactive Telegram Control Center. |
+| `/destination`| - | View or change saved destination profiles. |
+| `/set_destination` | `<url_or_id>` | Set the default destination folder. |
+| `/clear_destination` | - | Remove the current default destination folder. |
+| `/jobs` | - | List active, paused, and completed jobs. |
+| `/status` | `[job_id]` | View detailed status of a specific job. |
+| `/pause` | `<job_id>` | Pause an ongoing transfer job. |
+| `/resume` | `<job_id>` | Resume a paused transfer job. |
+| `/cancel` | `<job_id>` | Cancel an active job with confirmation modal. |
+| `/retry` | `<job_id>` | Retry failed items within a job. |
+| `/last_report` | - | Receive JSON and CSV report files of the latest job. |
+| `/preview` | - | View realtime transfer speed and active worker status. |
+| `/watches` | - | List active realtime synchronization watches. |
+| `/watch_status` | `<watch_id>` | Inspect sync backlog, cursor, and update policy. |
+| `/watch_pause` | `<watch_id>` | Temporarily pause applying changes to destination. |
+| `/watch_resume` | `<watch_id>` | Resume applying synced changes to destination. |
+| `/watch_policy` | `<id> <policy>` | Change update policy (`versioned_copy` \| `replace_copy` \| `manual_confirmation`). |
+| `/unwatch` | `<watch_id>` | Stop syncing and delete the watch subscription. |
+| `/account` | - | Check Google account status and switch UI language. |
+| `/whoami` | - | View your Telegram ID and authorization level. |
+| `/grant` | `<user_id>` | Grant operator access to a user (*owner only*). |
+| `/revoke` | `<user_id>` | Revoke operator access (*owner only*). |
+
+---
+
+## Installation & Deployment
+
+### Method 1: Pre-Built Binary (GitHub Releases)
+
+Download pre-compiled binaries for your architecture from [Releases](https://github.com/GiaHung07/502Drive/releases):
+
+#### Linux (x86_64 / aarch64)
+```bash
+# Download and extract the bundle
+tar -xzf 502drive-v*-linux-x86_64.tar.gz
+cd 502drive-v*-linux-x86_64
+
+# Run universal installer
+bash packaging/install.sh
+```
+
+#### Windows (x86_64)
+1. Download `502drive-v*-windows-x86_64.zip` and extract to a folder (e.g. `C:\Tools\502Drive`).
+2. Copy `config.sample.toml` to `config.toml` and configure credentials.
+3. Run `502drive.exe run` or register as a startup task via `powershell .\windows-task.ps1`.
+
+---
+
+### Method 2: 1-Click Docker Compose (VPS / NAS / Homelab)
+
+Ideal for Oracle Cloud Free Tier, Hetzner, Synology, Unraid, or TrueNAS.
+
+```bash
+# 1. Clone repository
+git clone https://github.com/GiaHung07/502Drive.git
+cd 502Drive
+
+# 2. Setup config
+mkdir -p config data
+cp config.sample.toml config/config.toml
+# Edit config/config.toml with your credentials
+
+# 3. Launch container
+docker compose up -d
+
+# 4. View live logs
+docker compose logs -f
+```
+
+---
+
+### Method 3: Build from Source
+
+Prerequisites: Rust 1.85+ (Rust 2024 edition).
+
+```bash
+git clone https://github.com/GiaHung07/502Drive.git
+cd 502Drive
+
+# Build optimized binary
+cargo build --release --bin 502drive
+
+# Test installation
+./target/release/502drive --help
+```
+
+---
+
+## Configuration (`config.toml`)
+
+Create `~/.config/gdclone-bot/config.toml` (or `./config/config.toml` when using Docker):
 
 ```toml
 [telegram]
-bot_token = "..."
-owner_telegram_id = 123456789
-language = "vi" # vi | en
+bot_token = "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+owner_telegram_id = 987654321
+progress_edit_min_interval_ms = 3000
+language = "vi" # "vi" or "en"
+
+[destination]
+auto_use_default = true
+auto_confirm_clone = false
+wrap_single_file_in_folder = false
+root_name_policy = "preserve"
+same_name_policy = "keep_both"
 
 [google_oauth]
-client_id = "..."
-client_secret = "..."
+client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
+client_secret = "YOUR_CLIENT_SECRET"
+redirect_port_start = 51000
+redirect_port_end = 51100
+scope = "https://www.googleapis.com/auth/drive"
+
+[engine]
+max_active_jobs = 2
+max_active_jobs_per_user = 1
+initial_write_concurrency = 5
+min_write_concurrency = 1
+max_write_concurrency = 8
+list_concurrency = 2
+max_retry_attempts = 6
+retry_base_delay_ms = 1000
+retry_max_delay_ms = 64000
+request_timeout_seconds = 60
+default_duplicate_policy = "skip_same_source"
+default_shortcut_policy = "preserve"
+
+[watch]
+enabled = true
+active_poll_seconds = 20
+warm_idle_poll_seconds = 60
+cold_idle_poll_seconds = 300
+default_content_update_policy = "versioned_copy"
+default_deletion_policy = "preserve_destination"
+default_move_out_policy = "detach"
+
+[security]
+redact_file_names_in_info_logs = true
+report_retention_days = 30
+allow_operators = false
 ```
 
-Log in and check the setup:
+---
 
-```bash
-cargo run -- auth login
-cargo run -- doctor
-```
+## Security Model
 
-`doctor` reports what is ready and what still needs setup: Telegram, OAuth,
-Google login/token refresh, Drive account, database, reports, and default
-destination.
+1. **Physical Filesystem Protection**: SQLite database files are initialized with `0600` (`rw-------`) permissions and parent directory with `0700` (`rwx------`) on Unix systems, preventing local user snooping.
+2. **Encrypted Token Store**: Refresh tokens and Google credentials are encrypted at rest using AES-256-GCM.
+3. **Owner Isolation**: Only authorized Telegram user IDs can execute bot commands. Strangers messaging the bot are immediately blocked and logged.
+4. **No External Attack Surface**: Because 502Drive operates via Telegram Long Polling and local loopback OAuth, no public ports, domain names, or reverse proxies need to be opened to the internet.
 
-Run the bot:
-
-```bash
-cargo run -- run
-```
-
-In Telegram, send:
-
-```text
-/menu
-```
-
-## Telegram UX
-
-Most daily work should be done by tapping buttons:
-
-- Home: Google account, destination, jobs, and watches.
-- Jobs: list, details, pause, resume, cancel.
-- Destination: recent folders, My Drive browser, Shared Drive browser.
-- Watches: list, details, pause, resume, stop, content update policy.
-
-The bot should prefer one editable control-center message instead of sending a new menu message for every tap. Inline keyboards and message editing keep the chat from being pushed upward by command spam.
-
-Watch policy buttons:
-
-- `Tao ban moi` / `Versioned`: keep the old copy and create a new one.
-- `Thay ban cu` / `Replace`: copy the new version, then trash the old copy.
-- `Xac nhan tay` / `Manual`: stop for manual review.
-
-The live Vietnamese Telegram UI uses proper Vietnamese labels with accents.
-
-## Development
-
-Run:
-
-```bash
-cargo fmt --check
-cargo test
-cargo build --release
-```
-
-Before opening a PR, also check:
-
-- New Telegram text supports Vietnamese and English.
-- New destructive actions have a confirmation step.
-- New Drive writes have durable operation state before the API request.
-- New settings are documented in `config.sample.toml`.
-
-## Safety
-
-502Drive does not bypass Google Drive access rules. It does not scrape, rotate service accounts, bypass download-disabled files, or evade quota limits.
-
-Do not commit:
-
-- `config.toml`
-- OAuth tokens
-- `master.key`
-- `*.db`, `*.db-wal`, `*.db-shm`
-- logs
-- reports
-
-## Authors
-
-- Author: PGH
-- Project/team: LanManTeam
-
-## Docs
-
-- [Vietnamese README](README.vi.md)
-- [Architecture](docs/architecture.md)
-- [Google OAuth setup](docs/google-oauth-setup.md)
-- [CachyOS setup](docs/cachyos-setup.md)
-- [Windows setup](docs/windows-setup.md)
-- [Watch semantics](docs/watch-semantics.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Security](SECURITY.md)
-- [Authors](AUTHORS.md)
-- [Notice](NOTICE.md)
+---
 
 ## License
 
-502Drive is licensed under the GNU General Public License, version 3 only (`GPL-3.0-only`).
-
-Copyright (C) 2026 PGH / LanManTeam.
-
-See [LICENSE](LICENSE) for the full GPLv3 text.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for details.
