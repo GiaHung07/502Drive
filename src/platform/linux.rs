@@ -20,7 +20,7 @@ impl Platform for LinuxPlatform {
         fs::create_dir_all(&unit_dir)?;
         let exe = env::current_exe()?;
         let unit = format!(
-            "[Unit]\nDescription=gdclone-bot\nWants=network-online.target\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={} --config {} run\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=30\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths=%h/.local/share/gdclone-bot\nReadWritePaths=%h/.config/gdclone-bot\n\n[Install]\nWantedBy=default.target\n",
+            "[Unit]\nDescription=502Drive — Local-first Google Drive Telegram Bot\nWants=network-online.target\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={} --config {} run\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=30\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths=%h/.local/share/gdclone-bot\nReadWritePaths=%h/.config/gdclone-bot\n\n[Install]\nWantedBy=default.target\n",
             systemd_quote(&exe),
             systemd_quote(config_path)
         );
