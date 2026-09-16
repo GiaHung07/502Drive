@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Card } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
@@ -49,7 +49,23 @@ export const Settings: React.FC<SettingsProps> = ({
   const [isUpdating, setIsUpdating] = useState(false)
   const [updateChecked, setUpdateChecked] = useState(false)
   const [showOAuthHelp, setShowOAuthHelp] = useState(false)
+  // Slider drafts locally while dragging; persists once on release.
+  const [concurrencyDraft, setConcurrencyDraft] = useState<number | null>(null)
   const { theme, setTheme } = useTheme()
+
+  useEffect(() => {
+    // External refresh (save confirmed) clears any pending draft.
+    if (config) setConcurrencyDraft(null)
+  }, [config?.engine_concurrency])
+
+  const commitConcurrency = () => {
+    if (concurrencyDraft === null) return
+    const value = concurrencyDraft
+    setConcurrencyDraft(null)
+    if (value !== (config?.engine_concurrency ?? 8)) {
+      onUpdateConfig("engine_concurrency", value)
+    }
+  }
 
   const handleCheckUpdate = () => {
     setIsUpdating(true)
@@ -254,12 +270,16 @@ export const Settings: React.FC<SettingsProps> = ({
                 type="range"
                 min="1"
                 max="32"
-                value={config?.engine_concurrency || 8}
-                onChange={(e) => onUpdateConfig("engine_concurrency", parseInt(e.target.value))}
+                value={concurrencyDraft ?? config?.engine_concurrency ?? 8}
+                onChange={(e) => setConcurrencyDraft(parseInt(e.target.value))}
+                onPointerUp={commitConcurrency}
+                onKeyUp={commitConcurrency}
+                onBlur={commitConcurrency}
+                aria-label="Số luồng sao chép song song"
                 className="w-28 accent-accent cursor-pointer"
               />
               <span className="text-xs font-mono font-medium text-text-primary w-5 text-right">
-                {config?.engine_concurrency || 8}
+                {concurrencyDraft ?? config?.engine_concurrency ?? 8}
               </span>
             </div>
           </div>

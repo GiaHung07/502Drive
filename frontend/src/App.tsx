@@ -24,8 +24,8 @@ const AppContent: React.FC = () => {
 
   const { toast } = useToast()
 
-  const refreshData = useCallback(async () => {
-    setIsRefreshing(true)
+  const refreshData = useCallback(async (silent = false) => {
+    if (!silent) setIsRefreshing(true)
     try {
       const [newStatus, newJobs, newWatches, newConfig] = await Promise.all([
         api.getSystemStatus(),
@@ -40,15 +40,15 @@ const AppContent: React.FC = () => {
     } catch (err) {
       console.error('Lỗi tải dữ liệu 502Drive:', err)
     } finally {
-      setIsRefreshing(false)
+      if (!silent) setIsRefreshing(false)
     }
   }, [])
 
   useEffect(() => {
     refreshData()
     const interval = setInterval(() => {
-      // Pause background polling while the wizard owns the screen.
-      if (!isWizardOpen) refreshData()
+      // Background polling is silent — no spinner flicker every 3 seconds.
+      if (!isWizardOpen) refreshData(true)
     }, 3000)
     return () => clearInterval(interval)
   }, [refreshData, isWizardOpen])
