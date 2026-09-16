@@ -26,9 +26,11 @@ SERVICE_NAME = "gdclone-bot"
 APP_NAME = "502Drive"
 APP_ID = "502drive"
 APP_VERSION = "v0.1.0"
-ICON_ACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/502drive-symbolic.svg")
-ICON_INACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/502drive-inactive-symbolic.svg")
+ICON_ACTIVE = "502drive-symbolic"  # icon name (hicolor theme lookup - scales correctly at all sizes)
+ICON_INACTIVE = "502drive-inactive-symbolic"  # icon name
 ICON_APP = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/502drive.svg")
+# Fallback paths for indicator icon theme
+ICON_THEME_PATH = str(Path.home() / ".local/share/icons")
 CONFIG_PATH = Path.home() / ".config" / "gdclone-bot" / "config.toml"
 DB_PATH = Path.home() / ".local" / "share" / "gdclone-bot" / "state.db"
 REPORTS_DIR = Path.home() / ".local" / "share" / "gdclone-bot" / "reports"
@@ -900,6 +902,11 @@ class DriveTray:
             icon,
             AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
+        # Set icon theme path so indicator can resolve icon names from ~/.local/share/icons
+        try:
+            self.indicator.set_icon_theme_path(ICON_THEME_PATH)
+        except Exception:
+            pass
         self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
 
         self.menu = Gtk.Menu()
@@ -1260,8 +1267,12 @@ def main():
 
     tray = DriveTray()
 
-    if show_gui_arg:
-        tray.show_dashboard()
+    # Always open the dashboard window on launch (from app launcher, dock, search)
+    # Only skip if running as background service (--no-window flag)
+    no_window = any(arg in sys.argv[1:] for arg in ["--no-window", "--background", "--service"])
+    if not no_window:
+        # Small delay to ensure GTK is ready before showing window
+        GLib.timeout_add(200, tray.show_dashboard)
 
     Gtk.main()
 
