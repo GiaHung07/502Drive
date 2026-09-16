@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release Tag (e.g. v0.1.0)"
+        description: "Release Tag (e.g. v0.2.0)"
         required: false
         default: ""
 
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-linux-x86_64:
-    name: Build & Package Linux (x86_64)
+    name: Daemon — Linux x86_64
     runs-on: ubuntu-latest
 
     steps:
@@ -32,7 +32,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build Release
-        run: cargo build --release --bin 502drive
+        run: cargo build --release --target x86_64-unknown-linux-gnu --bin 502drive
 
       - name: Package Linux Bundle
         run: |
@@ -46,7 +46,7 @@ jobs:
           path: dist/linux/*
 
   build-linux-arm64:
-    name: Build & Package Linux (aarch64)
+    name: Daemon — Linux aarch64
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -62,7 +62,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build Release
-        run: cargo build --release --bin 502drive
+        run: cargo build --release --target aarch64-unknown-linux-gnu --bin 502drive
 
       - name: Package Linux ARM64 Bundle
         run: |
@@ -76,7 +76,7 @@ jobs:
           path: dist/linux/*
 
   build-windows:
-    name: Build & Package Windows (x86_64)
+    name: Daemon — Windows x86_64
     runs-on: windows-latest
 
     steps:
@@ -91,9 +91,16 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
+      # Build explicitly with the same target the packager expects, then let
+      # the packager only zip prebuilt artifacts (-SkipBuild). This keeps the
+      # failure domain small: a packaging error no longer also hides build
+      # output, and the packager never rebuilds with different flags.
+      - name: Build Release
+        run: cargo build --release --target x86_64-pc-windows-msvc --bin 502drive
+
       - name: Package Windows Bundle
         shell: pwsh
-        run: .\package-release.ps1
+        run: .\package-release.ps1 -SkipBuild
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
@@ -101,67 +108,138 @@ jobs:
           name: windows-release
           path: dist/windows/*
 
-  publish-release:
-    name: Publish GitHub Release
-    needs: [build-linux-x86_64, build-linux-arm64, build-windows]
+  build-gui-linux:
+    name: GUI — Linux (deb + AppImage)
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download Linux x86_64 Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-x86_64-release
-          path: artifacts/linux-x86_64
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Download Linux ARM64 Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-aarch64-release
-          path: artifacts/linux-aarch64
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
 
-      - name: Download Windows Artifacts
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build Tauri bundles (deb, AppImage)
+        run: npx @tauri-apps/cli@^2 build --bundles deb,appimage
+
+      - name: Upload GUI Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-linux-release
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+
+  build-gui-windows:
+    name: GUI — Windows (MSI + NSIS)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build Tauri bundles (msi, nsis)
+        run: npx @tauri-apps/cli@^2 build --bundles msi,nsis
+
+      - name: Upload GUI Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-windows-release
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - build-linux-x86_64
+      - build-linux-arm64
+      - build-windows
+      - build-gui-linux
+      - build-gui-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-release
-          path: artifacts/windows
+          path: artifacts
+
+      - name: Flatten artifact layout
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name "*.tar.gz*" -o -name "*.zip*" \
+            -o -name "*.deb" -o -name "*.AppImage" \
+            -o -name "*.msi" -o -name "*setup.exe" \) \
+            -exec cp {} release-files/ \;
+          ls -lh release-files/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/linux-x86_64/*
-            artifacts/linux-aarch64/*
-            artifacts/windows/*
-          name: "502Drive Release ${{ github.ref_name || inputs.tag_name }}"
+          files: release-files/*
+          name: "502Drive ${{ github.ref_name || inputs.tag_name }}"
           body: |
-            ## 🚀 502Drive Release ${{ github.ref_name || inputs.tag_name }}
+            ## 🚀 502Drive ${{ github.ref_name || inputs.tag_name }}
 
-            Local-first Google Drive Cloning & Realtime Sync Telegram Bot.
+            Local-first Google Drive cloning & one-way realtime sync — Telegram bot daemon + desktop GUI.
 
-            ### 📦 Download Packages
+            ### 📦 Downloads
 
-            #### 🐧 Linux (x86_64 - Standard PC, VPS, Servers)
-            - **Portable Bundle**: `502drive-${{ github.ref_name || inputs.tag_name }}-linux-x86_64.tar.gz`
-            - **Installation**: Extract and run `bash packaging/install.sh`
+            #### 🖥️ Desktop GUI (recommended)
+            - **Linux**: `502Drive_*.deb` (Debian/Ubuntu) · `*.AppImage` (universal)
+            - **Windows**: `*-setup.exe` (NSIS installer) · `*.msi`
 
-            #### 🍓 Linux ARM64 (aarch64 - Raspberry Pi 4/5, Oracle Ampere A1, Apple Silicon VMs)
-            - **Portable Bundle**: `502drive-${{ github.ref_name || inputs.tag_name }}-linux-aarch64.tar.gz`
-            - **Installation**: Extract and run `bash packaging/install.sh`
-
-            #### 🪟 Windows (x86_64 - Windows 10, 11, Windows Server)
-            - **Portable Zip**: `502drive-${{ github.ref_name || inputs.tag_name }}-windows-x86_64.zip`
-            - **Execution**: Extract and run `502drive.exe run` (or use `windows-task.ps1` to register as scheduled task)
+            #### 🤖 Daemon / VPS (headless Telegram bot)
+            - **Linux x86_64**: `502drive-*-linux-x86_64.tar.gz` → extract, `bash packaging/install.sh`
+            - **Linux aarch64**: `502drive-*-linux-aarch64.tar.gz` (Raspberry Pi 4/5, Ampere)
+            - **Windows**: `502drive-*-windows-x86_64.zip` (portable, `windows-task.ps1` for autostart)
 
             #### 🐳 Docker / VPS / NAS
-            - Use `docker-compose.yml`:
-              ```bash
-              git clone https://github.com/GiaHung07/502Drive.git
-              cd 502Drive
-              docker compose up -d
-              ```
+            ```bash
+            git clone https://github.com/GiaHung07/502Drive.git
+            cd 502Drive
+            docker compose up -d
+            ```
+            See [docs/install-docker.md](https://github.com/GiaHung07/502Drive/blob/main/docs/install-docker.md).
 
             ---
-            *All packages include SHA256 checksums (`.sha256`) for cryptographic integrity verification.*
+            *All packages include SHA256 checksums (`.sha256`) for integrity verification.*
           draft: false
           prerelease: false
         env:
