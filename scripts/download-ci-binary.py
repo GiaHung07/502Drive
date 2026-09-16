@@ -26,10 +26,10 @@ def get_token():
 
 def main():
     token = get_token()
-    repo = "GiaHung07/Drive502"
+    repo = "GiaHung07/502Drive"
     headers = {
         "Authorization": f"Bearer {token}",
-        "User-Agent": "Drive502-Installer",
+        "User-Agent": "502Drive-Installer",
         "Accept": "application/vnd.github.v3+json",
     }
 

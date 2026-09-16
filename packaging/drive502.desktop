@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Drive502 Bot
+Name=502Drive Bot
 GenericName=Telegram Google Drive Clone Bot
 Comment=Local-first Telegram bot for Google Drive cloning and folder sync
 Exec=~/.local/bin/drive502-tray
@@ -25,4 +25,4 @@ Exec=systemctl --user restart gdclone-bot
 
 [Desktop Action ViewLogs]
 Name=Xem nhật ký (Logs)
-Exec=ptyxis --title "Drive502 Live Logs" -- journalctl --user -u gdclone-bot -f
+Exec=ptyxis --title "502Drive Live Logs" -- journalctl --user -u gdclone-bot -f

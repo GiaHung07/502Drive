@@ -1,5 +1,5 @@
 [Unit]
-Description=Drive502 Tray Controller
+Description=502Drive Tray Controller
 PartOf=graphical-session.target
 After=graphical-session.target
 

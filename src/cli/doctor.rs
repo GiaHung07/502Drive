@@ -8,7 +8,7 @@ use crate::{
 use teloxide::{Bot, prelude::Requester};
 
 pub async fn run(config: &AppConfig, db: &Database) -> anyhow::Result<()> {
-    println!("Drive502 doctor");
+    println!("502Drive doctor");
     println!("===============");
     print_check("config", true, "loaded");
     println!("  db_path    : {}", config.storage.db_path.display());

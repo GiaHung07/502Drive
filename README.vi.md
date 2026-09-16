@@ -1,12 +1,12 @@
-# Drive502
+# 502Drive
 
-Drive502 là bot Telegram local-first để clone file/thư mục Google Drive và, về sau, theo dõi thư mục nguồn để áp dụng thay đổi sang thư mục đích.
+502Drive là bot Telegram local-first để clone file/thư mục Google Drive và, về sau, theo dõi thư mục nguồn để áp dụng thay đổi sang thư mục đích.
 
 Bot chạy trên máy của bạn bằng Telegram long polling, Google OAuth local, SQLite local và Google Drive API. Không cần VPS, webhook, domain public, Docker hay xoay service account.
 
 [English README](README.md)
 
-![Drive502 Telegram demo](docs/assets/drive502-telegram-demo.vi.gif)
+![502Drive Telegram demo](docs/assets/drive502-telegram-demo.vi.gif)
 
 ## Tính Năng
 
@@ -39,7 +39,7 @@ Bot chạy trên máy của bạn bằng Telegram long polling, Google OAuth loc
 
 ## Vì Sao Local-First?
 
-Nhiều bot Telegram Drive hiện có thiên về mirror/leech: tải torrent, direct link, archive, rồi upload lên cloud. Drive502 đi hẹp hơn: Google Drive-to-Google Drive bằng tài khoản Google cá nhân.
+Nhiều bot Telegram Drive hiện có thiên về mirror/leech: tải torrent, direct link, archive, rồi upload lên cloud. 502Drive đi hẹp hơn: Google Drive-to-Google Drive bằng tài khoản Google cá nhân.
 
 Local-first hợp với hướng này vì:
 
@@ -121,7 +121,7 @@ Khi thêm tính năng:
 
 ## An Toàn
 
-Drive502 không vượt quyền Google Drive, không scrape, không xoay service account, không bypass download-disabled file và không né quota.
+502Drive không vượt quyền Google Drive, không scrape, không xoay service account, không bypass download-disabled file và không né quota.
 
 Không commit:
 
@@ -150,7 +150,7 @@ Không commit:
 
 ## License
 
-Drive502 dùng GNU General Public License version 3 only (`GPL-3.0-only`).
+502Drive dùng GNU General Public License version 3 only (`GPL-3.0-only`).
 
 Copyright (C) 2026 PGH / LanManTeam.
 

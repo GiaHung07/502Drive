@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Drive502 Tray Controller
-A lightweight desktop indicator for controlling Drive502 Telegram Bot service on GNOME/KDE/Linux.
+502Drive Tray Controller
+A lightweight desktop indicator for controlling 502Drive Telegram Bot service on GNOME/KDE/Linux.
 Clean, professional GTK interface without emojis, using native symbolic icons.
 """
 
@@ -17,8 +17,8 @@ gi.require_version("AyatanaAppIndicator3", "0.1")
 from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 
 SERVICE_NAME = "gdclone-bot"
-APP_NAME = "Drive502"
-APP_ID = "drive502"
+APP_NAME = "502Drive"
+APP_ID = "502drive"
 ICON_ACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/drive502-symbolic.svg")
 ICON_INACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/drive502-inactive-symbolic.svg")
 CONFIG_PATH = Path.home() / ".config" / "gdclone-bot" / "config.toml"
@@ -51,7 +51,7 @@ def make_menu_item(label_text, icon_name=None, callback=None):
     return item, lbl, img
 
 
-class Drive502Tray:
+class DriveTray:
     def __init__(self):
         self.indicator = AyatanaAppIndicator3.Indicator.new(
             APP_ID,
@@ -78,7 +78,7 @@ class Drive502Tray:
     def build_menu(self):
         # 1. Header / Status item
         self.status_item, self.status_lbl, self.status_img = make_menu_item(
-            "Drive502: Đang kiểm tra...", "network-idle-symbolic"
+            "502Drive: Đang kiểm tra...", "network-idle-symbolic"
         )
         self.status_item.set_sensitive(False)
         self.menu.append(self.status_item)
@@ -139,13 +139,13 @@ class Drive502Tray:
             self.last_status = active
             if active:
                 self.indicator.set_icon_full(ICON_ACTIVE, "Active")
-                self.status_lbl.set_text("Drive502: Đang hoạt động")
+                self.status_lbl.set_text("502Drive: Đang hoạt động")
                 self.status_img.set_from_icon_name("emblem-default-symbolic", Gtk.IconSize.MENU)
                 self.toggle_lbl.set_text("Tạm dừng dịch vụ")
                 self.toggle_img.set_from_icon_name("media-playback-pause-symbolic", Gtk.IconSize.MENU)
             else:
                 self.indicator.set_icon_full(ICON_INACTIVE, "Inactive")
-                self.status_lbl.set_text("Drive502: Đã dừng")
+                self.status_lbl.set_text("502Drive: Đã dừng")
                 self.status_img.set_from_icon_name("process-stop-symbolic", Gtk.IconSize.MENU)
                 self.toggle_lbl.set_text("Khởi động dịch vụ")
                 self.toggle_img.set_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.MENU)
@@ -157,15 +157,15 @@ class Drive502Tray:
     def toggle_service(self, _):
         if self.is_service_active():
             run_cmd(f"systemctl --user stop {SERVICE_NAME}")
-            notify("Drive502", "Đã dừng dịch vụ bot.", ICON_INACTIVE)
+            notify("502Drive", "Đã dừng dịch vụ bot.", ICON_INACTIVE)
         else:
             run_cmd(f"systemctl --user start {SERVICE_NAME}")
-            notify("Drive502", "Đã khởi động dịch vụ bot.", ICON_ACTIVE)
+            notify("502Drive", "Đã khởi động dịch vụ bot.", ICON_ACTIVE)
         self.update_status()
 
     def restart_service(self, _):
         run_cmd(f"systemctl --user restart {SERVICE_NAME}")
-        notify("Drive502", "Đã khởi động lại dịch vụ bot.", ICON_ACTIVE)
+        notify("502Drive", "Đã khởi động lại dịch vụ bot.", ICON_ACTIVE)
         self.update_status()
 
     def run_doctor(self, _):
@@ -173,7 +173,7 @@ class Drive502Tray:
         msg = out if ok else (err or out or "Lỗi khi kiểm tra doctor")
         subprocess.Popen([
             "zenity", "--info",
-            "--title=Drive502 Doctor Report",
+            "--title=502Drive Doctor Report",
             "--text=" + msg,
             "--width=480", "--height=320"
         ])
@@ -185,19 +185,19 @@ class Drive502Tray:
                 term_cmd = t
                 break
         if term_cmd == "ptyxis":
-            subprocess.Popen(["ptyxis", "--title", "Drive502 Live Logs", "--", "journalctl", "--user", "-u", SERVICE_NAME, "-f"])
+            subprocess.Popen(["ptyxis", "--title", "502Drive Live Logs", "--", "journalctl", "--user", "-u", SERVICE_NAME, "-f"])
         elif term_cmd == "gnome-terminal":
-            subprocess.Popen(["gnome-terminal", "--title", "Drive502 Live Logs", "--", "journalctl", "--user", "-u", SERVICE_NAME, "-f"])
+            subprocess.Popen(["gnome-terminal", "--title", "502Drive Live Logs", "--", "journalctl", "--user", "-u", SERVICE_NAME, "-f"])
         elif term_cmd:
             subprocess.Popen([term_cmd, "-e", f"journalctl --user -u {SERVICE_NAME} -f"])
         else:
-            notify("Drive502 Logs", "Mở terminal và gõ: journalctl --user -u gdclone-bot -f")
+            notify("502Drive Logs", "Mở terminal và gõ: journalctl --user -u gdclone-bot -f")
 
     def edit_config(self, _):
         if CONFIG_PATH.exists():
             subprocess.Popen(["xdg-open", str(CONFIG_PATH)])
         else:
-            notify("Drive502", f"Không tìm thấy file {CONFIG_PATH}")
+            notify("502Drive", f"Không tìm thấy file {CONFIG_PATH}")
 
     def quit_app(self, _):
         Gtk.main_quit()
@@ -205,7 +205,7 @@ class Drive502Tray:
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    _app = Drive502Tray()
+    _app = DriveTray()
     Gtk.main()
 
 

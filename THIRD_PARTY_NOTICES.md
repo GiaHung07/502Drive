@@ -1,13 +1,13 @@
 # Third Party Notices
 
-This file is for third-party material included in the Drive502 source tree or
+This file is for third-party material included in the 502Drive source tree or
 release artifacts.
 
 ## Included Source, Text, And Assets
 
 None.
 
-Drive502 does not vendor, copy, adapt, or substantially translate source code,
+502Drive does not vendor, copy, adapt, or substantially translate source code,
 README text, UI copy, or assets from the reference repositories reviewed during
 design.
 

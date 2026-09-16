@@ -1,6 +1,6 @@
 # Authors
 
-Drive502 is authored and maintained by:
+502Drive is authored and maintained by:
 
 - PGH
 

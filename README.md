@@ -1,6 +1,6 @@
-# Drive502
+# 502Drive
 
-Drive502 is a local-first Telegram bot for cloning Google Drive files and folders, then optionally watching source folders for future changes.
+502Drive is a local-first Telegram bot for cloning Google Drive files and folders, then optionally watching source folders for future changes.
 
 It runs on your own machine with Telegram long polling, local Google OAuth, SQLite state, and Google Drive API copy operations. It does not require a VPS, webhook, public domain, Docker, or service-account rotation.
 
@@ -39,7 +39,7 @@ Still being hardened before a polished public release:
 
 Most popular Telegram mirror/leech bots are built for VPS or Docker because they download torrents, direct links, archives, and media, then upload to cloud storage.
 
-Drive502 is narrower on purpose. It focuses on Google Drive-to-Google Drive clone/watch through the user's own Google account.
+502Drive is narrower on purpose. It focuses on Google Drive-to-Google Drive clone/watch through the user's own Google account.
 
 Local-first is the best default because:
 
@@ -52,7 +52,7 @@ Docker Compose can be added later for NAS and homelab users, but it should stay 
 
 ## Similar Projects
 
-Drive502 overlaps with existing Telegram Drive tools, but the product shape is different.
+502Drive overlaps with existing Telegram Drive tools, but the product shape is different.
 
 Existing public projects usually fall into these groups:
 
@@ -61,7 +61,7 @@ Existing public projects usually fall into these groups:
 - Drive uploader bots: upload Telegram files or direct links into Google Drive.
 - Clone bots: often built around Shared Drives and service accounts.
 
-Drive502 intentionally chooses a narrower lane:
+502Drive intentionally chooses a narrower lane:
 
 - Google Drive-to-Google Drive clone/watch.
 - Personal OAuth.
@@ -164,7 +164,7 @@ Before opening a PR, also check:
 
 ## Safety
 
-Drive502 does not bypass Google Drive access rules. It does not scrape, rotate service accounts, bypass download-disabled files, or evade quota limits.
+502Drive does not bypass Google Drive access rules. It does not scrape, rotate service accounts, bypass download-disabled files, or evade quota limits.
 
 Do not commit:
 
@@ -195,7 +195,7 @@ Do not commit:
 
 ## License
 
-Drive502 is licensed under the GNU General Public License, version 3 only (`GPL-3.0-only`).
+502Drive is licensed under the GNU General Public License, version 3 only (`GPL-3.0-only`).
 
 Copyright (C) 2026 PGH / LanManTeam.
 

@@ -34,7 +34,7 @@ fn copy_if_exists(source: &Path, dest: &Path) -> anyhow::Result<()> {
 }
 
 fn restore_note() -> &'static str {
-    "Drive502 private backup\n\
+    "502Drive private backup\n\
      =======================\n\
      \n\
      Khôi phục trên PC/laptop khác:\n\

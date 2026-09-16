@@ -1,10 +1,10 @@
-# Contributing to Drive502
+# Contributing to 502Drive
 
-Thanks for helping make Drive502 safer and easier to run.
+Thanks for helping make 502Drive safer and easier to run.
 
 ## Ground Rules
 
-- Keep Drive502 local-first and Google Drive focused.
+- Keep 502Drive local-first and Google Drive focused.
 - Keep contributions compatible with `GPL-3.0-only`.
 - Do not add quota bypasses, service-account rotation, scraping, torrent/leech scope, or download-disabled bypasses.
 - Prefer small, reviewable changes.
