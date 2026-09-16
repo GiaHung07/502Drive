@@ -190,6 +190,7 @@ def make_check_item(label, is_active=False, callback=None):
 class DriveTray:
     def __init__(self):
         self.last_status = None
+        self.last_google_email = None
         self.building_menu = False
         self.lang = self.get_config_language()
 
@@ -217,10 +218,10 @@ class DriveTray:
         try:
             conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
             cursor = conn.cursor()
-            cursor.execute("SELECT email, display_name FROM google_accounts WHERE id = 'default'")
+            cursor.execute("SELECT email, label, status FROM google_accounts WHERE id = 'default'")
             row = cursor.fetchone()
             conn.close()
-            if row:
+            if row and row[2] == "connected":
                 return row[0] or row[1] or "Connected"
         except Exception:
             pass
@@ -408,9 +409,11 @@ class DriveTray:
     def update_status(self):
         active = self.is_service_active()
         lang = self.get_config_language()
-        if active != self.last_status or lang != self.lang:
+        google_email = self.get_google_account_email()
+        if active != self.last_status or lang != self.lang or google_email != self.last_google_email:
             self.last_status = active
             self.lang = lang
+            self.last_google_email = google_email
             if active:
                 self.indicator.set_icon_full(ICON_ACTIVE, "Active")
             else:
