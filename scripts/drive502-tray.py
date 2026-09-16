@@ -19,8 +19,8 @@ from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 SERVICE_NAME = "gdclone-bot"
 APP_NAME = "Drive502"
 APP_ID = "drive502"
-ICON_ACTIVE = "drive502-symbolic"
-ICON_INACTIVE = "drive502-inactive-symbolic"
+ICON_ACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/drive502-symbolic.svg")
+ICON_INACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/drive502-inactive-symbolic.svg")
 CONFIG_PATH = Path.home() / ".config" / "gdclone-bot" / "config.toml"
 
 
