@@ -39,10 +39,10 @@ fi
 # ── 2. Config ────────────────────────────────────────────────────────────────
 say "Checking config"
 if [[ ! -f "$CONFIG_PATH" ]]; then
-    if [[ -f "config.example.toml" ]]; then
-        say "Copying example config → $CONFIG_PATH"
+    if [[ -f "config.sample.toml" ]]; then
+        say "Copying sample config → $CONFIG_PATH"
         mkdir -p "$CONFIG_DIR"
-        install -m 600 config.example.toml "$CONFIG_PATH"
+        install -m 600 config.sample.toml "$CONFIG_PATH"
         ok "Edit $CONFIG_PATH and set bot_token and owner_telegram_id"
     else
         fail "Config not found at $CONFIG_PATH — create it first."
