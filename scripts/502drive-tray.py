@@ -471,14 +471,7 @@ class DriveTray:
             notify("502Drive Backup", t("backup_failed", self.lang, err=(err or out)))
 
     def run_doctor(self, _):
-        ok, out, err = run_cmd("502drive doctor")
-        msg = out if ok else (err or out or "Error running doctor")
-        subprocess.Popen([
-            "zenity", "--info",
-            "--title=502Drive Doctor Report",
-            "--text=" + msg,
-            "--width=500", "--height=360"
-        ])
+        open_in_terminal("502Drive Doctor", "502drive doctor", self.lang)
 
     def view_logs(self, _):
         open_in_terminal("502Drive Live Logs", f"journalctl --user -u {SERVICE_NAME} -f", self.lang)

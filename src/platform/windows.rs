@@ -7,21 +7,21 @@ pub struct WindowsPlatform;
 impl Platform for WindowsPlatform {
     fn machine_key_material(&self) -> anyhow::Result<Vec<u8>> {
         Ok(std::env::var("COMPUTERNAME")
-            .unwrap_or_else(|_| "gdclone-windows-fallback".to_string())
+            .unwrap_or_else(|_| "502drive-windows-fallback".to_string())
             .into_bytes())
     }
 
     fn install_service(&self, config_path: &Path) -> anyhow::Result<()> {
         let exe = env::current_exe()?;
         let task_run = format!(
-            "\"{}\" --config \"{}\" run",
+            "\"{}\" --config \"{}\"",
             exe.display(),
             config_path.display()
         );
         run_schtasks(&[
             "/Create",
             "/TN",
-            "gdclone-bot",
+            "502Drive",
             "/TR",
             task_run.as_str(),
             "/SC",
@@ -30,19 +30,19 @@ impl Platform for WindowsPlatform {
             "LIMITED",
             "/F",
         ])?;
-        println!("Installed Windows logon task 'gdclone-bot'.");
-        println!("Run now: schtasks /Run /TN gdclone-bot");
+        println!("Installed Windows logon task '502Drive'.");
+        println!("Run now: schtasks /Run /TN 502Drive");
         println!(
-            "Remove: gdclone-bot --config {} service-uninstall",
+            "Remove: 502drive --config \"{}\" service-uninstall",
             config_path.display()
         );
         Ok(())
     }
 
     fn uninstall_service(&self) -> anyhow::Result<()> {
-        let _ = run_schtasks(&["/End", "/TN", "gdclone-bot"]);
-        run_schtasks(&["/Delete", "/TN", "gdclone-bot", "/F"])?;
-        println!("Removed Windows logon task 'gdclone-bot'.");
+        let _ = run_schtasks(&["/End", "/TN", "502Drive"]);
+        run_schtasks(&["/Delete", "/TN", "502Drive", "/F"])?;
+        println!("Removed Windows logon task '502Drive'.");
         Ok(())
     }
 }
