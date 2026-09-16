@@ -3,6 +3,7 @@
 502Drive Tray Controller
 A polished desktop indicator for managing 502Drive Telegram Bot service on GNOME/Linux.
 Styled with native submenus and symbolic icons, adhering to 502Print design standards (Zero Emojis).
+Fully localized in Vietnamese and English (Dynamic i18n).
 """
 
 import os
@@ -28,6 +29,96 @@ REPORTS_DIR = Path.home() / ".local" / "share" / "gdclone-bot" / "reports"
 AUTOSTART_DESKTOP = Path.home() / ".config" / "autostart" / "502drive.desktop"
 INSTALLED_DESKTOP = Path.home() / ".local" / "share" / "applications" / "502drive.desktop"
 
+# ── Localization Dictionary ──────────────────────────────────────────────────
+I18N = {
+    "vi": {
+        "open_telegram": "Mở Telegram Bot (@Drive502_Bot)",
+        "google_account": "Tài khoản Google",
+        "acc_connected": "Tài khoản: {email}",
+        "acc_disconnected": "Tài khoản: Chưa kết nối",
+        "login_new": "Đăng nhập tài khoản mới...",
+        "disconnect_google": "Ngắt kết nối Google Drive...",
+        "bot_service": "Dịch vụ Bot",
+        "status_running": "Trạng thái: Đang hoạt động",
+        "status_stopped": "Trạng thái: Đang dừng",
+        "start_service": "Khởi động dịch vụ",
+        "stop_service": "Tạm dừng dịch vụ",
+        "restart_service": "Khởi động lại dịch vụ",
+        "admin_data": "Quản trị & Dữ liệu",
+        "doctor": "Kiểm tra hệ thống (Doctor)...",
+        "open_reports": "Mở thư mục Báo cáo (Reports)...",
+        "backup": "Sao lưu dữ liệu (Backup)...",
+        "live_logs": "Xem nhật ký trực tiếp (Live Logs)...",
+        "config_file": "Tệp cấu hình (config.toml)...",
+        "autostart": "Khởi động cùng hệ thống",
+        "enable_autostart": "Bật khởi động cùng hệ thống",
+        "disable_autostart": "Tắt khởi động cùng hệ thống",
+        "language": "Ngôn ngữ / Language",
+        "lang_vi": "Tiếng Việt",
+        "lang_en": "English",
+        "quit": "Thoát 502Drive Tray",
+        "service_started": "Đã khởi động dịch vụ bot.",
+        "service_stopped": "Đã tạm dừng dịch vụ bot.",
+        "service_restarted": "Đã khởi động lại dịch vụ bot.",
+        "account_revoked": "Đã huỷ kết nối tài khoản Google.",
+        "backup_success": "Đã sao lưu thành công vào: {dest}",
+        "backup_failed": "Lỗi sao lưu: {err}",
+        "autostart_on": "Đã bật khởi động cùng hệ thống.",
+        "autostart_off": "Đã tắt khởi động cùng hệ thống.",
+        "lang_switched": "Đã chuyển ngôn ngữ sang: {lang}",
+        "confirm_revoke_title": "502Drive - Xác nhận",
+        "confirm_revoke_text": "Bạn có chắc chắn muốn huỷ kết nối tài khoản Google hiện tại khỏi 502Drive?",
+        "press_enter_to_close": "Nhấn Enter để đóng...",
+    },
+    "en": {
+        "open_telegram": "Open Telegram Bot (@Drive502_Bot)",
+        "google_account": "Google Account",
+        "acc_connected": "Account: {email}",
+        "acc_disconnected": "Account: Not Connected",
+        "login_new": "Log in new account...",
+        "disconnect_google": "Disconnect Google Drive...",
+        "bot_service": "Bot Service",
+        "status_running": "Status: Running",
+        "status_stopped": "Status: Stopped",
+        "start_service": "Start Service",
+        "stop_service": "Stop Service",
+        "restart_service": "Restart Service",
+        "admin_data": "Administration & Data",
+        "doctor": "System Health Check (Doctor)...",
+        "open_reports": "Open Reports Folder...",
+        "backup": "Backup Data...",
+        "live_logs": "Live Logs...",
+        "config_file": "Configuration (config.toml)...",
+        "autostart": "System Autostart",
+        "enable_autostart": "Enable System Autostart",
+        "disable_autostart": "Disable System Autostart",
+        "language": "Language / Ngôn ngữ",
+        "lang_vi": "Tiếng Việt",
+        "lang_en": "English",
+        "quit": "Quit 502Drive Tray",
+        "service_started": "Bot service started.",
+        "service_stopped": "Bot service stopped.",
+        "service_restarted": "Bot service restarted.",
+        "account_revoked": "Google Drive account disconnected.",
+        "backup_success": "Backup successfully created at: {dest}",
+        "backup_failed": "Backup failed: {err}",
+        "autostart_on": "System autostart enabled.",
+        "autostart_off": "System autostart disabled.",
+        "lang_switched": "Language switched to: {lang}",
+        "confirm_revoke_title": "502Drive - Confirmation",
+        "confirm_revoke_text": "Are you sure you want to disconnect the current Google Drive account from 502Drive?",
+        "press_enter_to_close": "Press Enter to close...",
+    },
+}
+
+
+def t(key, lang="vi", **kwargs):
+    texts = I18N.get(lang, I18N["vi"])
+    tmpl = texts.get(key, I18N["vi"].get(key, key))
+    if kwargs:
+        return tmpl.format(**kwargs)
+    return tmpl
+
 
 def run_cmd(cmd):
     try:
@@ -42,22 +133,23 @@ def notify(title, message, icon="502drive-symbolic"):
 
 
 def get_terminal_cmd():
-    for t in ["ptyxis", "gnome-terminal", "kgx", "xterm"]:
-        if subprocess.run(f"which {t}", shell=True, capture_output=True).returncode == 0:
-            return t
+    for term in ["ptyxis", "gnome-terminal", "kgx", "xterm"]:
+        if subprocess.run(f"which {term}", shell=True, capture_output=True).returncode == 0:
+            return term
     return None
 
 
-def open_in_terminal(title, command):
+def open_in_terminal(title, command, lang="vi"):
     term = get_terminal_cmd()
+    prompt = t("press_enter_to_close", lang)
     if term == "ptyxis":
-        subprocess.Popen(["ptyxis", "--title", title, "--", "bash", "-c", f"{command}; echo; read -p 'Nhấn Enter để đóng...'"])
+        subprocess.Popen(["ptyxis", "--title", title, "--", "bash", "-c", f"{command}; echo; read -p '{prompt}'"])
     elif term == "gnome-terminal":
-        subprocess.Popen(["gnome-terminal", "--title", title, "--", "bash", "-c", f"{command}; echo; read -p 'Nhấn Enter để đóng...'"])
+        subprocess.Popen(["gnome-terminal", "--title", title, "--", "bash", "-c", f"{command}; echo; read -p '{prompt}'"])
     elif term:
-        subprocess.Popen([term, "-e", f"bash -c \"{command}; echo; read -p 'Nhấn Enter để đóng...'\""])
+        subprocess.Popen([term, "-e", f"bash -c \"{command}; echo; read -p '{prompt}'\""])
     else:
-        notify(title, f"Chạy lệnh: {command}")
+        notify(title, f"Run: {command}")
 
 
 def make_item(label, icon_name=None, callback=None, sensitive=True):
@@ -97,42 +189,42 @@ def make_check_item(label, is_active=False, callback=None):
 
 class DriveTray:
     def __init__(self):
+        self.last_status = None
+        self.building_menu = False
+        self.lang = self.get_config_language()
+
+        icon = ICON_ACTIVE if self.is_service_active() else ICON_INACTIVE
         self.indicator = AyatanaAppIndicator3.Indicator.new(
             APP_ID,
-            ICON_ACTIVE,
+            icon,
             AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
-        self.indicator.set_title(APP_NAME)
-
-        self.last_status = None
-        self.building_menu = False
 
         self.menu = Gtk.Menu()
-        self.build_menu()
         self.indicator.set_menu(self.menu)
 
-        self.update_status()
+        self.build_menu()
         GLib.timeout_add_seconds(3, self.update_status)
 
     def is_service_active(self):
         ok, out, _ = run_cmd(f"systemctl --user is-active {SERVICE_NAME}")
         return ok and out == "active"
 
-    def get_google_account_info(self):
+    def get_google_account_email(self):
         if not DB_PATH.exists():
-            return None, "Chưa có CSDL"
+            return None
         try:
-            conn = sqlite3.connect(str(DB_PATH))
-            cur = conn.cursor()
-            cur.execute("SELECT email, status FROM google_accounts LIMIT 1")
-            row = cur.fetchone()
+            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            cursor = conn.cursor()
+            cursor.execute("SELECT email, display_name FROM google_accounts WHERE id = 'default'")
+            row = cursor.fetchone()
             conn.close()
-            if row and row[0]:
-                return row[0], row[1]
-            return None, "Chưa đăng nhập"
+            if row:
+                return row[0] or row[1] or "Connected"
         except Exception:
-            return None, "Chưa kết nối"
+            pass
+        return None
 
     def get_config_language(self):
         if CONFIG_PATH.exists():
@@ -156,18 +248,18 @@ class DriveTray:
 
     def build_menu(self):
         self.building_menu = True
-        # Clear old items
         for child in self.menu.get_children():
             self.menu.remove(child)
 
-        is_active = self.is_service_active()
-        google_email, google_status = self.get_google_account_info()
-        current_lang = self.get_config_language()
+        lang = self.get_config_language()
+        self.lang = lang
+        active = self.is_service_active()
+        google_email = self.get_google_account_email()
         autostart_on = self.is_autostart_enabled()
 
         # 1. Primary Action: Open Telegram Bot
         tg_item = make_item(
-            "Mở Telegram Bot (@Drive502_Bot)",
+            t("open_telegram", lang),
             icon_name="send-to-symbolic",
             callback=self.open_telegram,
         )
@@ -176,64 +268,63 @@ class DriveTray:
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # 2. Google Account Submenu
-        google_item, google_sub = make_submenu("Tài khoản Google", icon_name="avatar-default-symbolic")
-        
-        acc_label = f"Tài khoản: {google_email}" if google_email else "Tài khoản: Chưa kết nối"
-        acc_status_item = make_item(acc_label, icon_name="emblem-default-symbolic" if google_email else "dialog-warning-symbolic", sensitive=False)
-        google_sub.append(acc_status_item)
+        google_item, google_sub = make_submenu(t("google_account", lang), icon_name="avatar-default-symbolic")
 
+        if google_email:
+            acc_label = t("acc_connected", lang, email=google_email)
+            icon_status = "emblem-default-symbolic"
+        else:
+            acc_label = t("acc_disconnected", lang)
+            icon_status = "dialog-warning-symbolic"
+
+        acc_status_item = make_item(acc_label, icon_name=icon_status, sensitive=False)
+        google_sub.append(acc_status_item)
         google_sub.append(Gtk.SeparatorMenuItem())
 
         login_item = make_item(
-            "Đăng nhập / Đổi tài khoản...",
-            icon_name="system-switch-user-symbolic",
+            t("login_new", lang),
+            icon_name="document-open-symbolic",
             callback=self.login_google,
         )
         google_sub.append(login_item)
 
-        if google_email:
-            revoke_item = make_item(
-                "Huỷ kết nối tài khoản này",
-                icon_name="user-trash-symbolic",
-                callback=self.revoke_google,
-            )
-            google_sub.append(revoke_item)
-
-        gdrive_web_item = make_item(
-            "Mở Google Drive trên Web...",
-            icon_name="web-browser-symbolic",
-            callback=lambda _: subprocess.Popen(["xdg-open", "https://drive.google.com"]),
+        revoke_item = make_item(
+            t("disconnect_google", lang),
+            icon_name="edit-delete-symbolic",
+            callback=self.revoke_google,
+            sensitive=bool(google_email),
         )
-        google_sub.append(gdrive_web_item)
+        google_sub.append(revoke_item)
 
         self.menu.append(google_item)
 
         # 3. Bot Service Submenu
-        service_item, service_sub = make_submenu("Dịch vụ Bot", icon_name="network-workgroup-symbolic")
+        service_item, service_sub = make_submenu(t("bot_service", lang), icon_name="system-run-symbolic")
 
-        status_text = "Trạng thái: Đang hoạt động" if is_active else "Trạng thái: Đã tạm dừng"
-        status_icon = "emblem-default-symbolic" if is_active else "process-stop-symbolic"
-        svc_status_item = make_item(status_text, icon_name=status_icon, sensitive=False)
-        service_sub.append(svc_status_item)
-
+        status_text = t("status_running", lang) if active else t("status_stopped", lang)
+        status_icon = "emblem-default-symbolic" if active else "action-unavailable-symbolic"
+        status_item = make_item(status_text, icon_name=status_icon, sensitive=False)
+        service_sub.append(status_item)
         service_sub.append(Gtk.SeparatorMenuItem())
 
-        if is_active:
-            toggle_item = make_item(
-                "Tạm dừng dịch vụ",
-                icon_name="media-playback-pause-symbolic",
-                callback=self.stop_service,
-            )
-        else:
-            toggle_item = make_item(
-                "Khởi động dịch vụ",
-                icon_name="media-playback-start-symbolic",
-                callback=self.start_service,
-            )
-        service_sub.append(toggle_item)
+        start_item = make_item(
+            t("start_service", lang),
+            icon_name="media-playback-start-symbolic",
+            callback=self.start_service,
+            sensitive=not active,
+        )
+        service_sub.append(start_item)
+
+        stop_item = make_item(
+            t("stop_service", lang),
+            icon_name="media-playback-stop-symbolic",
+            callback=self.stop_service,
+            sensitive=active,
+        )
+        service_sub.append(stop_item)
 
         restart_item = make_item(
-            "Khởi động lại dịch vụ",
+            t("restart_service", lang),
             icon_name="view-refresh-symbolic",
             callback=self.restart_service,
         )
@@ -242,38 +333,38 @@ class DriveTray:
         self.menu.append(service_item)
 
         # 4. Tools & Data Submenu
-        tools_item, tools_sub = make_submenu("Quản trị & Dữ liệu", icon_name="folder-documents-symbolic")
+        tools_item, tools_sub = make_submenu(t("admin_data", lang), icon_name="folder-documents-symbolic")
 
         doctor_item = make_item(
-            "Kiểm tra hệ thống (Doctor)...",
+            t("doctor", lang),
             icon_name="dialog-information-symbolic",
             callback=self.run_doctor,
         )
         tools_sub.append(doctor_item)
 
         reports_item = make_item(
-            "Mở thư mục Báo cáo (Reports)...",
+            t("open_reports", lang),
             icon_name="folder-symbolic",
             callback=self.open_reports,
         )
         tools_sub.append(reports_item)
 
         backup_item = make_item(
-            "Sao lưu dữ liệu (Backup)...",
+            t("backup", lang),
             icon_name="document-save-symbolic",
             callback=self.run_backup,
         )
         tools_sub.append(backup_item)
 
         logs_item = make_item(
-            "Xem nhật ký trực tiếp (Live Logs)...",
+            t("live_logs", lang),
             icon_name="utilities-terminal-symbolic",
             callback=self.view_logs,
         )
         tools_sub.append(logs_item)
 
         config_item = make_item(
-            "Tệp cấu hình (config.toml)...",
+            t("config_file", lang),
             icon_name="document-properties-symbolic",
             callback=self.edit_config,
         )
@@ -284,19 +375,19 @@ class DriveTray:
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # 5. Autostart Submenu
-        autostart_item, autostart_sub = make_submenu("Khởi động cùng hệ thống", icon_name="system-run-symbolic")
+        autostart_item, autostart_sub = make_submenu(t("autostart", lang), icon_name="system-run-symbolic")
 
-        as_on = make_check_item("Bật khởi động cùng hệ thống", is_active=autostart_on, callback=lambda w: self.set_autostart(w, True))
-        as_off = make_check_item("Tắt khởi động cùng hệ thống", is_active=not autostart_on, callback=lambda w: self.set_autostart(w, False))
+        as_on = make_check_item(t("enable_autostart", lang), is_active=autostart_on, callback=lambda w: self.set_autostart(w, True))
+        as_off = make_check_item(t("disable_autostart", lang), is_active=not autostart_on, callback=lambda w: self.set_autostart(w, False))
         autostart_sub.append(as_on)
         autostart_sub.append(as_off)
         self.menu.append(autostart_item)
 
         # 6. Language Submenu
-        lang_item, lang_sub = make_submenu("Ngôn ngữ / Language", icon_name="preferences-desktop-locale-symbolic")
-        
-        lang_vi = make_check_item("Tiếng Việt", is_active=(current_lang == "vi"), callback=lambda w: self.set_lang(w, "vi"))
-        lang_en = make_check_item("English", is_active=(current_lang == "en"), callback=lambda w: self.set_lang(w, "en"))
+        lang_item, lang_sub = make_submenu(t("language", lang), icon_name="preferences-desktop-locale-symbolic")
+
+        lang_vi = make_check_item(t("lang_vi", lang), is_active=(lang == "vi"), callback=lambda w: self.set_lang(w, "vi"))
+        lang_en = make_check_item(t("lang_en", lang), is_active=(lang == "en"), callback=lambda w: self.set_lang(w, "en"))
         lang_sub.append(lang_vi)
         lang_sub.append(lang_en)
         self.menu.append(lang_item)
@@ -305,7 +396,7 @@ class DriveTray:
 
         # 7. Quit Tray Applet
         quit_item = make_item(
-            "Thoát 502Drive Tray",
+            t("quit", lang),
             icon_name="application-exit-symbolic",
             callback=self.quit_app,
         )
@@ -316,8 +407,10 @@ class DriveTray:
 
     def update_status(self):
         active = self.is_service_active()
-        if active != self.last_status:
+        lang = self.get_config_language()
+        if active != self.last_status or lang != self.lang:
             self.last_status = active
+            self.lang = lang
             if active:
                 self.indicator.set_icon_full(ICON_ACTIVE, "Active")
             else:
@@ -330,33 +423,36 @@ class DriveTray:
 
     def start_service(self, _):
         run_cmd(f"systemctl --user start {SERVICE_NAME}")
-        notify("502Drive", "Đã khởi động dịch vụ bot.", ICON_ACTIVE)
+        notify("502Drive", t("service_started", self.lang), ICON_ACTIVE)
         self.update_status()
 
     def stop_service(self, _):
         run_cmd(f"systemctl --user stop {SERVICE_NAME}")
-        notify("502Drive", "Đã tạm dừng dịch vụ bot.", ICON_INACTIVE)
+        notify("502Drive", t("service_stopped", self.lang), ICON_INACTIVE)
         self.update_status()
 
     def restart_service(self, _):
         run_cmd(f"systemctl --user restart {SERVICE_NAME}")
-        notify("502Drive", "Đã khởi động lại dịch vụ bot.", ICON_ACTIVE)
+        notify("502Drive", t("service_restarted", self.lang), ICON_ACTIVE)
         self.update_status()
 
     def login_google(self, _):
-        open_in_terminal("502Drive - Đăng nhập Google", "502drive auth login")
+        title = "502Drive - " + ("Google Login" if self.lang == "en" else "Đăng nhập Google")
+        open_in_terminal(title, "502drive auth login", self.lang)
 
     def revoke_google(self, _):
+        title = t("confirm_revoke_title", self.lang)
+        prompt = t("confirm_revoke_text", self.lang)
         res = subprocess.run([
             "zenity", "--question",
-            "--title=502Drive - Xác nhận",
-            "--text=Bạn có chắc chắn muốn huỷ kết nối tài khoản Google hiện tại khỏi 502Drive?",
+            f"--title={title}",
+            f"--text={prompt}",
             "--width=360"
         ])
         if res.returncode == 0:
             ok, out, err = run_cmd("502drive auth revoke")
             run_cmd(f"systemctl --user restart {SERVICE_NAME}")
-            notify("502Drive", "Đã huỷ kết nối tài khoản Google.", ICON_INACTIVE)
+            notify("502Drive", t("account_revoked", self.lang), ICON_INACTIVE)
             self.build_menu()
 
     def open_reports(self, _):
@@ -367,13 +463,13 @@ class DriveTray:
         backup_dest = Path.home() / "502drive-backup"
         ok, out, err = run_cmd(f"502drive backup {backup_dest}")
         if ok:
-            notify("502Drive Backup", f"Đã sao lưu thành công vào: {backup_dest}")
+            notify("502Drive Backup", t("backup_success", self.lang, dest=backup_dest))
         else:
-            notify("502Drive Backup", f"Lỗi sao lưu: {err or out}")
+            notify("502Drive Backup", t("backup_failed", self.lang, err=(err or out)))
 
     def run_doctor(self, _):
         ok, out, err = run_cmd("502drive doctor")
-        msg = out if ok else (err or out or "Lỗi khi kiểm tra doctor")
+        msg = out if ok else (err or out or "Error running doctor")
         subprocess.Popen([
             "zenity", "--info",
             "--title=502Drive Doctor Report",
@@ -382,13 +478,13 @@ class DriveTray:
         ])
 
     def view_logs(self, _):
-        open_in_terminal("502Drive Live Logs", f"journalctl --user -u {SERVICE_NAME} -f")
+        open_in_terminal("502Drive Live Logs", f"journalctl --user -u {SERVICE_NAME} -f", self.lang)
 
     def edit_config(self, _):
         if CONFIG_PATH.exists():
             subprocess.Popen(["xdg-open", str(CONFIG_PATH)])
         else:
-            notify("502Drive", f"Không tìm thấy file {CONFIG_PATH}")
+            notify("502Drive", f"Not found: {CONFIG_PATH}")
 
     def set_autostart(self, widget, enable):
         if self.building_menu or not widget.get_active():
@@ -398,12 +494,12 @@ class DriveTray:
             run_cmd(f"systemctl --user enable {SERVICE_NAME}")
             if INSTALLED_DESKTOP.exists():
                 subprocess.run(["cp", str(INSTALLED_DESKTOP), str(AUTOSTART_DESKTOP)])
-            notify("502Drive", "Đã bật khởi động cùng hệ thống.")
+            notify("502Drive", t("autostart_on", self.lang))
         else:
             run_cmd(f"systemctl --user disable {SERVICE_NAME}")
             if AUTOSTART_DESKTOP.exists():
                 AUTOSTART_DESKTOP.unlink(missing_ok=True)
-            notify("502Drive", "Đã tắt khởi động cùng hệ thống.")
+            notify("502Drive", t("autostart_off", self.lang))
         GLib.idle_add(self.build_menu)
 
     def set_lang(self, widget, lang):
@@ -423,10 +519,12 @@ class DriveTray:
                 if not found:
                     lines.append(f'language = "{lang}"')
                 CONFIG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                self.lang = lang
                 run_cmd(f"systemctl --user restart {SERVICE_NAME}")
-                notify("502Drive", f"Đã chuyển ngôn ngữ sang: {'Tiếng Việt' if lang == 'vi' else 'English'}")
+                lang_display = "Tiếng Việt" if lang == "vi" else "English"
+                notify("502Drive", t("lang_switched", lang, lang=lang_display))
             except Exception as e:
-                notify("502Drive", f"Lỗi đổi ngôn ngữ: {e}")
+                notify("502Drive", f"Error updating language: {e}")
         GLib.idle_add(self.build_menu)
 
     def quit_app(self, _):
