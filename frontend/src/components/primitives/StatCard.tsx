@@ -8,7 +8,6 @@ export interface StatCardProps {
   value: string | number
   subtext?: string
   icon?: LucideIcon
-  trend?: string
   className?: string
 }
 
@@ -22,15 +21,15 @@ export const StatCard: React.FC<StatCardProps> = ({
   return (
     <Card className={cn('p-3.5 flex items-center justify-between', className)}>
       <div className="space-y-1">
-        <p className="text-xs font-medium text-text-secondary">{label}</p>
-        <div className="flex items-baseline gap-2">
-          <span className="text-xl font-bold tracking-tight text-text-primary font-mono">{value}</span>
-          {subtext && <span className="text-[11px] text-text-muted">{subtext}</span>}
+        <p className="text-xs font-normal text-text-secondary">{label}</p>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-lg font-semibold tracking-tight text-text-primary font-mono">{value}</span>
+          {subtext && <span className="text-[0.6875rem] text-text-muted">{subtext}</span>}
         </div>
       </div>
       {Icon && (
-        <div className="p-2.5 rounded-md bg-bg-elevated border border-border/50 text-text-secondary">
-          <Icon className="h-4 w-4 stroke-[1.6]" />
+        <div className="p-2 rounded-lg bg-accent/10 text-accent shrink-0">
+          <Icon className="h-4 w-4 stroke-[1.75]" />
         </div>
       )}
     </Card>

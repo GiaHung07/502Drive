@@ -34,8 +34,13 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
 
   return (
     <div
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(clamped)}
+      aria-label="Tiến độ"
       className={cn(
-        'w-full rounded-full bg-bg-elevated border border-border/40 overflow-hidden relative',
+        'w-full rounded-full bg-bg-input overflow-hidden relative',
         heightStyles[height],
         className
       )}
@@ -44,7 +49,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         className={cn('h-full rounded-full', variantStyles[variant], isRunning && 'shimmer-active')}
         initial={{ width: 0 }}
         animate={{ width: `${clamped}%` }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
       />
     </div>
   )
