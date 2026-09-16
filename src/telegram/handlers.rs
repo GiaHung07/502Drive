@@ -208,8 +208,16 @@ pub async fn handle_message(
     }
 
     match parse_drive_reference(&text) {
-        Ok(_) => {
-            handle_clone_request(bot, msg.chat.id, config, db, user_id, text).await?;
+        Ok(reference) => {
+            if matches!(
+                reference.hinted_kind,
+                Some(crate::drive::links::DriveItemKindHint::Folder)
+            ) {
+                handle_folder_link_detected(bot, msg.chat.id, config, db, user_id, text, reference)
+                    .await?;
+            } else {
+                handle_clone_request(bot, msg.chat.id, config, db, user_id, text).await?;
+            }
         }
         Err(err) => {
             bot.send_message(
@@ -611,6 +619,77 @@ pub async fn handle_callback_query(
             let _ =
                 repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "clone_confirm")
                     .await;
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(
+                    chat_id,
+                    message.id(),
+                    clone_request_cancelled(ui_language(&config)),
+                )
+                .await?;
+                return Ok(());
+            }
+            clone_request_cancelled(ui_language(&config)).to_string()
+        }
+        Some(("smart", "clone", state_id)) => {
+            let Some(source) =
+                repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "smart_link")
+                    .await
+                    .unwrap_or(None)
+            else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            };
+            if let Some(message) = query.message.as_ref() {
+                let _ = bot
+                    .edit_message_text(chat_id, message.id(), clone_starting(ui_language(&config)))
+                    .await;
+            }
+            spawn_clone_now(bot.clone(), chat_id, config, db, user_id, source).await?;
+            return Ok(());
+        }
+        Some(("smart", "sync", state_id)) => {
+            let Some(source) =
+                repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "smart_link")
+                    .await
+                    .unwrap_or(None)
+            else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            };
+            let res = start_watch(
+                &bot,
+                &config,
+                &db,
+                chat_id.0,
+                user_id,
+                &source,
+                ui_language(&config),
+            )
+            .await;
+            let msg_text = res.unwrap_or_else(|err| err.to_string());
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), msg_text)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, msg_text).await?;
+            }
+            return Ok(());
+        }
+        Some(("smart", "cancel", state_id)) => {
+            let _ =
+                repo::consume_callback_state(&db, state_id, user_id, chat_id.0, "smart_link").await;
             if let Some(message) = query.message.as_ref() {
                 bot.edit_message_text(
                     chat_id,
@@ -1239,7 +1318,32 @@ async fn handle_command(
             bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
                 .await?;
         }
-        // ── Watch ────────────────────────────────────────────────────────────
+        // ── Sync & Watch ──────────────────────────────────────────────────────
+        Command::Sync(input) => {
+            if input.trim().is_empty() {
+                send_reply_prompt(
+                    &bot,
+                    msg.chat.id,
+                    watch_prompt(ui_language(&config)),
+                    ReplyPrompt::Watch,
+                    ui_language(&config),
+                )
+                .await?;
+                return Ok(());
+            }
+            let text = start_watch(
+                &bot,
+                &config,
+                &db,
+                msg.chat.id.0,
+                user_id,
+                &input,
+                ui_language(&config),
+            )
+            .await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
         Command::Watch(input) => {
             if input.trim().is_empty() {
                 send_reply_prompt(
@@ -1429,7 +1533,8 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
         (keyboards::UiLanguage::Vi, true) => text.push_str(
             "WATCH/SYNC\n\
              ━━━━━━━━━━\n\
-             /watch <nguồn> <đích>        Nguồn là thư mục cần lưu; đích là thư mục nhận bản copy\n\
+             /sync <nguồn> [đích]         Đồng bộ realtime (tự động lấy đích mặc định nếu bỏ qua đích)\n\
+             /watch <nguồn> <đích>        Theo dõi thư mục nguồn sang thư mục đích\n\
              /watches                     Danh sách thư mục đang theo dõi\n\
              /watch_status <id>           Trạng thái đồng bộ, số thay đổi còn chờ, policy\n\
              /watch_pause <id>            Tạm dừng áp thay đổi, vẫn ghi nhận backlog\n\
@@ -1445,6 +1550,7 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
         (keyboards::UiLanguage::En, true) => text.push_str(
             "WATCH/SYNC\n\
              ━━━━━━━━━━\n\
+             /sync <source> [dest]        Realtime sync (uses default destination if dest omitted)\n\
              /watch <source> <dest>       Source is the folder to preserve; destination receives copies\n\
              /watches                     Watched folders\n\
              /watch_status <id>           Sync status, pending changes, policy\n\
@@ -3000,6 +3106,77 @@ async fn spawn_clone_now(
             }
         }
     });
+    Ok(())
+}
+
+async fn handle_folder_link_detected(
+    bot: Bot,
+    chat_id: ChatId,
+    config: AppConfig,
+    db: Database,
+    telegram_user_id: i64,
+    input: String,
+    reference: crate::drive::links::DriveReference,
+) -> ResponseResult<()> {
+    let lang = ui_language(&config);
+    let default_dest = repo::default_destination_profile(&db, "default")
+        .await
+        .ok()
+        .flatten();
+
+    let dest_info = match &default_dest {
+        Some(p) => format!("{} (ID: {})", p.label, p.destination_parent_id),
+        None => match lang {
+            keyboards::UiLanguage::Vi => {
+                "Chưa đặt (dùng /set_destination hoặc nút bên dưới)".to_string()
+            }
+            keyboards::UiLanguage::En => {
+                "Not set (use /set_destination or button below)".to_string()
+            }
+        },
+    };
+
+    let text = match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Phát hiện liên kết thư mục Google Drive:
+• Nguồn: {}
+• Thư mục đích: {}
+
+Chọn tác vụ bạn muốn thực hiện:",
+            reference.file_id, dest_info
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Detected Google Drive folder link:
+• Source: {}
+• Destination: {}
+
+Select an action:",
+            reference.file_id, dest_info
+        ),
+    };
+
+    let _ = repo::delete_expired_callback_states(&db).await;
+    match repo::create_callback_state(
+        &db,
+        repo::NewCallbackState {
+            telegram_user_id,
+            chat_id: chat_id.0,
+            action: "smart_link".to_string(),
+            payload: input,
+            ttl_ms: CALLBACK_STATE_TTL_MS,
+        },
+    )
+    .await
+    {
+        Ok(state_id) => {
+            bot.send_message(chat_id, text)
+                .reply_markup(keyboards::smart_link_action_keyboard(&state_id, lang))
+                .await?;
+        }
+        Err(err) => {
+            bot.send_message(chat_id, err.to_string()).await?;
+        }
+    }
     Ok(())
 }
 
@@ -4785,12 +4962,29 @@ async fn start_watch(
     lang: keyboards::UiLanguage,
 ) -> anyhow::Result<String> {
     ensure_watch_enabled(config.watch.enabled, lang)?;
-    let parts: Vec<&str> = input.splitn(2, char::is_whitespace).collect();
-    if parts.len() < 2 {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.is_empty() {
         anyhow::bail!(watch_usage_text(lang));
     }
     let source_ref = parse_drive_reference(parts[0])?;
-    let dest_ref = parse_drive_reference(parts[1])?;
+    let dest_ref = if parts.len() >= 2 {
+        parse_drive_reference(parts[1])?
+    } else {
+        match repo::default_destination_profile(db, "default").await? {
+            Some(profile) => parse_drive_reference(&profile.destination_parent_id)?,
+            None => {
+                let msg = match lang {
+                    keyboards::UiLanguage::Vi => {
+                        "Chưa cấu hình thư mục đích mặc định.\nVui lòng chỉ định: /sync <nguồn> <đích>\nHoặc cài đặt thư mục đích trước bằng lệnh /set_destination <link_đích>."
+                    }
+                    keyboards::UiLanguage::En => {
+                        "No default destination configured.\nPlease provide: /sync <source> <destination>\nOr set a default destination first using /set_destination <dest_link>."
+                    }
+                };
+                anyhow::bail!(msg);
+            }
+        }
+    };
 
     let token_manager = TokenManager::new(config.clone(), db.clone());
     let access_token = token_manager.access_token("default").await?;
@@ -5598,16 +5792,16 @@ fn watch_disabled_text(lang: keyboards::UiLanguage) -> &'static str {
 fn watch_usage_text(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => {
-            "Cú pháp: /watch <nguồn> <đích>\n\
-             • Nguồn: link/ID thư mục Drive cần lưu và theo dõi.\n\
-             • Đích: link/ID thư mục Drive sẽ nhận bản copy.\n\
-             Ví dụ: /watch https://drive.google.com/drive/folders/NGUON https://drive.google.com/drive/folders/DICH"
+            "Cú pháp: /sync <nguồn> [đích] (hoặc /watch <nguồn> [đích])\n\
+             • Nguồn: link/ID thư mục Drive cần theo dõi và đồng bộ.\n\
+             • Đích: (tuỳ chọn nếu đã có đích mặc định) link/ID thư mục nhận bản copy.\n\
+             Ví dụ: /sync https://drive.google.com/drive/folders/NGUON https://drive.google.com/drive/folders/DICH"
         }
         keyboards::UiLanguage::En => {
-            "Usage: /watch <source> <destination>\n\
-             • Source: Drive folder link/ID to preserve and watch.\n\
-             • Destination: Drive folder link/ID that receives copies.\n\
-             Example: /watch https://drive.google.com/drive/folders/SOURCE https://drive.google.com/drive/folders/DEST"
+            "Usage: /sync <source> [destination] (or /watch <source> [destination])\n\
+             • Source: Drive folder link/ID to watch and sync.\n\
+             • Destination: (optional if default set) Drive folder link/ID that receives copies.\n\
+             Example: /sync https://drive.google.com/drive/folders/SOURCE https://drive.google.com/drive/folders/DEST"
         }
     }
 }

@@ -38,12 +38,24 @@ impl Database {
             tokio::fs::create_dir_all(parent)
                 .await
                 .with_context(|| format!("create db dir {}", parent.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            }
         }
         let conn = Connection::open(path)
             .await
             .with_context(|| format!("open sqlite db {}", path.display()))?;
         let db = Self { conn };
         db.configure().await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if path.exists() {
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
         Ok(db)
     }
 
@@ -129,4 +141,22 @@ pub fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time before unix epoch")
         .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn enforces_0600_permissions_on_db_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = std::env::temp_dir().join(format!("502drive_test_{}", now_ms()));
+        let db_path = temp_dir.join("test_state.db");
+        let _db = Database::open(&db_path).await.expect("open db");
+        let meta = std::fs::metadata(&db_path).expect("metadata");
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

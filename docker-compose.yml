@@ -1,0 +1,17 @@
+services:
+  502drive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 502drive:latest
+    container_name: 502drive-bot
+    restart: unless-stopped
+    environment:
+      - RUST_LOG=info
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - ./config:/config
+      - ./data:/data
+    # Required for Google OAuth local redirection (ports 51000-51010)
+    ports:
+      - "51000-51010:51000-51010"
