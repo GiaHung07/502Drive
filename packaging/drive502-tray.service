@@ -1,0 +1,15 @@
+[Unit]
+Description=Drive502 Tray Controller
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=~/.local/bin/drive502-tray
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target

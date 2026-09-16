@@ -1,0 +1,28 @@
+[Desktop Entry]
+Name=Drive502 Bot
+GenericName=Telegram Google Drive Clone Bot
+Comment=Local-first Telegram bot for Google Drive cloning and folder sync
+Exec=~/.local/bin/drive502-tray
+Icon=drive502
+Terminal=false
+Type=Application
+Categories=Network;Utility;FileTransfer;
+StartupNotify=false
+Keywords=Google;Drive;Telegram;Clone;Sync;Bot;
+Actions=OpenTelegram;Doctor;RestartService;ViewLogs;
+
+[Desktop Action OpenTelegram]
+Name=Mở Telegram Bot
+Exec=xdg-open tg://resolve?domain=Drive502_Bot
+
+[Desktop Action Doctor]
+Name=Kiểm tra hệ thống (Doctor)
+Exec=~/.local/bin/gdclone-bot doctor
+
+[Desktop Action RestartService]
+Name=Khởi động lại Bot
+Exec=systemctl --user restart gdclone-bot
+
+[Desktop Action ViewLogs]
+Name=Xem nhật ký (Logs)
+Exec=ptyxis --title "Drive502 Live Logs" -- journalctl --user -u gdclone-bot -f
