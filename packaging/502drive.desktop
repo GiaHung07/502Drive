@@ -2,8 +2,8 @@
 Name=502Drive Bot
 GenericName=Telegram Google Drive Clone Bot
 Comment=Local-first Telegram bot for Google Drive cloning and folder sync
-Exec=~/.local/bin/drive502-tray
-Icon=drive502
+Exec=~/.local/bin/502drive-tray
+Icon=502drive
 Terminal=false
 Type=Application
 Categories=Network;Utility;FileTransfer;
