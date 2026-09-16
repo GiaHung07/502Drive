@@ -150,6 +150,7 @@ async fn resumable_jobs_preserve_source_metadata() {
             destination_parent_id: "dest-parent".to_string(),
             destination_drive_id: Some("dest-drive".to_string()),
             progress_message_id: None,
+            duplicate_policy: "skip_same_source".to_string(),
         },
     )
     .await

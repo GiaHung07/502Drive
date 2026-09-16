@@ -27,12 +27,74 @@ use crate::{
     },
 };
 
+/// Maximum length (in characters) accepted for `CloneRequest::name_override`.
+pub const MAX_NAME_OVERRIDE_LEN: usize = 255;
+
+/// Duplicate policies accepted on `CloneRequest` (mirrors the CHECK constraint
+/// on `jobs.duplicate_policy`).
+pub const DUPLICATE_POLICIES: &[&str] = &["keep_both", "skip_same_source", "replace_safe"];
+
 #[derive(Debug, Clone)]
 pub struct CloneRequest {
     pub chat_id: i64,
     pub telegram_user_id: i64,
     pub source: DriveReference,
     pub progress_message_id: Option<i32>,
+    /// Destination root folder/file name override. `None` keeps the source
+    /// item's own name.
+    pub name_override: Option<String>,
+    /// Explicit destination parent (a Drive folder id). `None` resolves the
+    /// configured default destination profile.
+    pub destination_parent_id: Option<String>,
+    /// Per-job duplicate policy. `None` falls back to
+    /// `engine.default_duplicate_policy`.
+    pub duplicate_policy: Option<String>,
+}
+
+/// Validate the optional overrides on a [`CloneRequest`] before any Drive I/O.
+pub fn validate_clone_request(request: &CloneRequest) -> anyhow::Result<()> {
+    if let Some(name) = request.name_override.as_deref().map(str::trim) {
+        if name.is_empty() {
+            bail!("Tên đích (name_override) không được để trống");
+        }
+        if name.chars().count() > MAX_NAME_OVERRIDE_LEN {
+            bail!("Tên đích quá dài (tối đa {} ký tự)", MAX_NAME_OVERRIDE_LEN);
+        }
+    }
+    if let Some(dest) = request.destination_parent_id.as_deref().map(str::trim) {
+        if dest.is_empty() {
+            bail!("destination_parent_id không được để trống");
+        }
+    }
+    if let Some(policy) = request.duplicate_policy.as_deref().map(str::trim) {
+        if !DUPLICATE_POLICIES.contains(&policy) {
+            bail!(
+                "duplicate_policy không hợp lệ: '{}'. Các giá trị hợp lệ: {}",
+                policy,
+                DUPLICATE_POLICIES.join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Validate a destination folder fetched from Drive before planning a job.
+fn validate_destination_for_clone(destination: &DriveFile) -> anyhow::Result<()> {
+    if destination.trashed == Some(true) {
+        bail!("Thư mục đích đang nằm trong thùng rác");
+    }
+    if !destination.is_folder() {
+        bail!("Đích chỉ định không phải là thư mục Drive");
+    }
+    if destination
+        .capabilities
+        .as_ref()
+        .and_then(|cap| cap.can_add_children)
+        != Some(true)
+    {
+        bail!("Tài khoản Google hiện tại không có quyền ghi vào thư mục đích");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +140,8 @@ impl CloneService {
     }
 
     pub async fn start_one_shot(&self, request: CloneRequest) -> anyhow::Result<CloneOutcome> {
+        validate_clone_request(&request)?;
+
         let active_jobs = repo::active_job_count(&self.db).await?;
         if active_jobs >= self.config.engine.max_active_jobs as i64 {
             bail!(
@@ -93,11 +157,35 @@ impl CloneService {
             );
         }
 
-        let destination = repo::default_destination_profile(&self.db, "default")
-            .await?
-            .context("No default destination configured. Use /set_destination first")?;
         let source = self.get_reference_retry(&request.source).await?;
         validate_source_for_clone(&source)?;
+
+        // Destination: an explicit override is validated (folder + writable)
+        // before planning; otherwise fall back to the default profile.
+        let (destination_parent_id, destination_drive_id) = if let Some(dest_id) = request
+            .destination_parent_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            let destination = self
+                .get_reference_retry(&DriveReference {
+                    file_id: dest_id.to_string(),
+                    resource_key: None,
+                    hinted_kind: None,
+                })
+                .await?;
+            validate_destination_for_clone(&destination)?;
+            (destination.id.clone(), destination.drive_id.clone())
+        } else {
+            let profile = repo::default_destination_profile(&self.db, "default")
+                .await?
+                .context("No default destination configured. Use /set_destination first")?;
+            (
+                profile.destination_parent_id.clone(),
+                profile.destination_drive_id.clone(),
+            )
+        };
 
         let job_id = repo::create_job_with_metadata(
             &self.db,
@@ -112,27 +200,41 @@ impl CloneService {
                     .clone()
                     .or(source.resource_key.clone()),
                 source_drive_id: source.drive_id.clone(),
-                destination_parent_id: destination.destination_parent_id.clone(),
-                destination_drive_id: destination.destination_drive_id.clone(),
+                destination_parent_id: destination_parent_id.clone(),
+                destination_drive_id,
                 progress_message_id: request.progress_message_id,
+                duplicate_policy: request
+                    .duplicate_policy
+                    .clone()
+                    .unwrap_or_else(|| self.config.engine.default_duplicate_policy.clone()),
             },
         )
         .await?;
+
+        let root_name = request
+            .name_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(source.name.as_str())
+            .to_string();
 
         let result = if source.is_folder() {
             self.create_folder_root(
                 &job_id,
                 &source,
-                &destination.destination_parent_id,
+                &destination_parent_id,
                 &request.source,
+                &root_name,
             )
             .await
         } else {
             self.copy_single_file(
                 &job_id,
                 &source,
-                &destination.destination_parent_id,
+                &destination_parent_id,
                 &request.source,
+                &root_name,
             )
             .await
         };
@@ -196,16 +298,29 @@ impl CloneService {
                 destination_parent_id: destination_parent_id.clone(),
                 destination_drive_id,
                 progress_message_id: request.progress_message_id,
+                duplicate_policy: self.config.engine.default_duplicate_policy.clone(),
             },
         )
         .await?;
 
         let result = if source.is_folder() {
-            self.create_folder_root(&job_id, &source, &destination_parent_id, &request.source)
-                .await
+            self.create_folder_root(
+                &job_id,
+                &source,
+                &destination_parent_id,
+                &request.source,
+                &source.name,
+            )
+            .await
         } else {
-            self.copy_single_file(&job_id, &source, &destination_parent_id, &request.source)
-                .await
+            self.copy_single_file(
+                &job_id,
+                &source,
+                &destination_parent_id,
+                &request.source,
+                &source.name,
+            )
+            .await
         };
 
         match result {
@@ -268,6 +383,7 @@ impl CloneService {
                     &source,
                     &job.destination_parent_id,
                     &source_reference,
+                    &source.name,
                 )
                 .await?
             }
@@ -291,6 +407,7 @@ impl CloneService {
                 &source,
                 &job.destination_parent_id,
                 &source_reference,
+                &source.name,
             )
             .await?
         };
@@ -302,12 +419,15 @@ impl CloneService {
         })
     }
 
+    /// `root_name` is the name used for the destination root item. It equals
+    /// the source name unless `CloneRequest::name_override` was provided.
     async fn create_folder_root(
         &self,
         job_id: &str,
         source: &DriveFile,
         destination_parent_id: &str,
         source_reference: &DriveReference,
+        root_name: &str,
     ) -> anyhow::Result<String> {
         repo::update_job_status(&self.db, job_id, JobStatusValue::Running, None).await?;
         self.check_job_control(job_id).await?;
@@ -324,17 +444,13 @@ impl CloneService {
                 source_item_id: Some(source.id.clone()),
                 destination_parent_id: Some(destination_parent_id.to_string()),
                 destination_item_id: None,
-                request_json: create_folder_request_json(
-                    &source.name,
-                    destination_parent_id,
-                    &props,
-                ),
+                request_json: create_folder_request_json(root_name, destination_parent_id, &props),
             },
         )
         .await?;
 
         let destination = self
-            .create_folder_idempotent(&source.name, destination_parent_id, &props)
+            .create_folder_idempotent(root_name, destination_parent_id, &props)
             .await?;
         record_mapping(
             &self.db,
@@ -396,6 +512,7 @@ impl CloneService {
         source: &DriveFile,
         destination_parent_id: &str,
         source_reference: &DriveReference,
+        root_name: &str,
     ) -> anyhow::Result<String> {
         repo::update_job_status(&self.db, job_id, JobStatusValue::Running, None).await?;
         self.check_job_control(job_id).await?;
@@ -426,14 +543,14 @@ impl CloneService {
                 .as_ref()
                 .context("shortcut is missing shortcutDetails")?;
             create_shortcut_request_json(
-                &source.name,
+                root_name,
                 destination_parent_id,
                 &details.target_id,
                 details.target_resource_key.as_deref(),
                 &props,
             )
         } else {
-            copy_file_request_json(&source.name, destination_parent_id, &props)
+            copy_file_request_json(root_name, destination_parent_id, &props)
         };
         repo::plan_operation_intent(
             &self.db,
@@ -451,16 +568,11 @@ impl CloneService {
         .await?;
 
         let copied = if source.is_shortcut() {
-            self.create_shortcut_idempotent(source, destination_parent_id, &props)
+            self.create_shortcut_idempotent(source, destination_parent_id, root_name, &props)
                 .await?
         } else {
-            self.copy_file_idempotent(
-                source_reference,
-                &source.name,
-                destination_parent_id,
-                &props,
-            )
-            .await?
+            self.copy_file_idempotent(source_reference, root_name, destination_parent_id, &props)
+                .await?
         };
         repo::mark_item_done(&self.db, job_id, &source.id, &copied.id).await?;
         record_mapping(
@@ -736,8 +848,13 @@ impl CloneService {
         .await?;
 
         let copied = if source.is_shortcut() {
-            self.create_shortcut_idempotent(source, &parent.destination_folder_id, &props)
-                .await?
+            self.create_shortcut_idempotent(
+                source,
+                &parent.destination_folder_id,
+                &source.name,
+                &props,
+            )
+            .await?
         } else {
             self.copy_file_idempotent(
                 &source_reference,
@@ -816,6 +933,7 @@ impl CloneService {
         &self,
         source: &DriveFile,
         destination_parent_id: &str,
+        name: &str,
         props: &AppProperties,
     ) -> anyhow::Result<DriveFile> {
         if let Some(existing) = self
@@ -832,7 +950,7 @@ impl CloneService {
         let shortcut = self
             .copy_limiter
             .run(self.create_shortcut_retry(
-                &source.name,
+                name,
                 destination_parent_id,
                 &details.target_id,
                 details.target_resource_key.as_deref(),
@@ -1193,5 +1311,75 @@ fn item_kind(source: &DriveFile) -> &'static str {
         "shortcut"
     } else {
         "binary"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CloneRequest, DUPLICATE_POLICIES, DriveReference, MAX_NAME_OVERRIDE_LEN,
+        validate_clone_request,
+    };
+
+    fn base_request() -> CloneRequest {
+        CloneRequest {
+            chat_id: 1,
+            telegram_user_id: 1,
+            source: DriveReference {
+                file_id: "src".into(),
+                resource_key: None,
+                hinted_kind: None,
+            },
+            progress_message_id: None,
+            name_override: None,
+            destination_parent_id: None,
+            duplicate_policy: None,
+        }
+    }
+
+    #[test]
+    fn accepts_defaults_and_valid_overrides() {
+        assert!(validate_clone_request(&base_request()).is_ok());
+
+        let mut request = base_request();
+        request.name_override = Some("  Bản sao đích  ".into());
+        request.destination_parent_id = Some(" folder-abc ".into());
+        request.duplicate_policy = Some("replace_safe".into());
+        assert!(validate_clone_request(&request).is_ok());
+    }
+
+    #[test]
+    fn rejects_blank_name_override() {
+        let mut request = base_request();
+        request.name_override = Some("   ".into());
+        assert!(validate_clone_request(&request).is_err());
+    }
+
+    #[test]
+    fn rejects_too_long_name_override() {
+        let mut request = base_request();
+        request.name_override = Some("x".repeat(MAX_NAME_OVERRIDE_LEN + 1));
+        assert!(validate_clone_request(&request).is_err());
+        request.name_override = Some("x".repeat(MAX_NAME_OVERRIDE_LEN));
+        assert!(validate_clone_request(&request).is_ok());
+    }
+
+    #[test]
+    fn rejects_blank_destination_parent() {
+        let mut request = base_request();
+        request.destination_parent_id = Some("  ".into());
+        assert!(validate_clone_request(&request).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_duplicate_policy() {
+        let mut request = base_request();
+        request.duplicate_policy = Some("overwrite_everything".into());
+        assert!(validate_clone_request(&request).is_err());
+
+        for policy in DUPLICATE_POLICIES {
+            request.duplicate_policy = Some((*policy).to_string());
+            assert!(validate_clone_request(&request).is_ok());
+        }
     }
 }

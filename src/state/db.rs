@@ -25,6 +25,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0006_telegram_preferences",
         include_str!("../../migrations/0006_telegram_preferences.sql"),
     ),
+    (
+        "0007_watch_filters",
+        include_str!("../../migrations/0007_watch_filters.sql"),
+    ),
 ];
 
 #[derive(Clone)]

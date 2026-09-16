@@ -64,6 +64,12 @@ pub enum Command {
     /// policy hợp lệ: versioned_copy | replace_copy | manual_confirmation
     #[command(description = "đổi cách xử lý khi file nguồn thay đổi")]
     WatchPolicy(String),
+    /// Cú pháp: "<id_watch> list|add <glob>|remove <glob>|clear"
+    /// Ví dụ: "abc123 add *.tmp"
+    #[command(
+        description = "quản lý glob loại trừ file của watch: /watch_filter <id> list|add <glob>|remove <glob>|clear"
+    )]
+    WatchFilter(String),
     #[command(description = "dừng theo dõi thư mục")]
     Unwatch(String),
 }

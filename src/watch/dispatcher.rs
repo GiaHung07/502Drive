@@ -28,8 +28,14 @@ use crate::{
 };
 
 use super::classifier::{Classification, ItemFingerprint, classify};
+use super::errors::format_anyhow_error;
 
 const DISPATCH_BATCH: usize = 200;
+
+/// Minimum interval between user-facing watch notifications (activity summary
+/// or dispatch error) per watch. Best-effort spam guard: extra notifications
+/// within the window are dropped.
+const NOTIFY_COOLDOWN: Duration = Duration::from_secs(60);
 
 /// In-memory gating state for `scan_missing_children`: the fallback source
 /// scan is expensive (a full paginated `list_children` of every mapped
@@ -39,6 +45,7 @@ const DISPATCH_BATCH: usize = 200;
 #[derive(Default)]
 pub struct DispatchState {
     last_scan: HashMap<String, Instant>,
+    last_notify: HashMap<String, Instant>,
 }
 
 impl DispatchState {
@@ -65,9 +72,66 @@ pub async fn dispatch_pending(
                 error = %err,
                 "dispatch error for watch (will retry next cycle)"
             );
+            // Surface the failure once per cooldown window instead of spamming
+            // every dispatch cycle; Drive API errors are rendered through the
+            // shared friendly formatter.
+            if notify_allowed(state, &watch.id) {
+                let lang = crate::telegram::i18n::UiLanguage::from_code(&config.telegram.language);
+                let msg = format!(
+                    "❌ Watch `{}`: lỗi áp thay đổi: {}",
+                    short_watch_id(&watch.id),
+                    format_anyhow_error(&err, lang)
+                );
+                let _ = notify_tx.try_send((watch.chat_id, msg));
+            }
         }
     }
     Ok(())
+}
+
+/// Whether a user-facing notification for `watch_id` may be sent right now.
+/// Records the attempt when allowed so callers are rate-limited to one
+/// notification per `NOTIFY_COOLDOWN`.
+fn notify_allowed(state: &mut DispatchState, watch_id: &str) -> bool {
+    let now = Instant::now();
+    match state.last_notify.get(watch_id) {
+        Some(last) if now.duration_since(*last) < NOTIFY_COOLDOWN => false,
+        _ => {
+            state.last_notify.insert(watch_id.to_string(), now);
+            true
+        }
+    }
+}
+
+fn short_watch_id(watch_id: &str) -> &str {
+    watch_id.get(..8).unwrap_or(watch_id)
+}
+
+/// Applied-change counters for one dispatch batch per watch.
+#[derive(Default)]
+struct BatchCounts {
+    new_items: usize,
+    updated_items: usize,
+    deleted_items: usize,
+}
+
+impl BatchCounts {
+    fn total(&self) -> usize {
+        self.new_items + self.updated_items + self.deleted_items
+    }
+
+    /// One summary message per burst of applied changes
+    /// ("Watch <name>: 3 tệp mới, 1 cập nhật, 0 xóa — <watch_id>").
+    fn summary_message(&self, watch: &WatchSubscription) -> String {
+        format!(
+            "📦 Watch `{}`: {} tệp mới, {} cập nhật, {} xóa — {}",
+            short_watch_id(&watch.id),
+            self.new_items,
+            self.updated_items,
+            self.deleted_items,
+            watch.id
+        )
+    }
 }
 
 async fn dispatch_one(
@@ -146,6 +210,7 @@ async fn dispatch_one(
     }
 
     let mut last_consumed = watch.last_consumed_sequence;
+    let mut counts = BatchCounts::default();
 
     for (event, file) in events.iter().zip(files.iter()) {
         // Determine membership of this file_id in the watch tree, from the
@@ -169,6 +234,7 @@ async fn dispatch_one(
             file.as_ref(),
             event.removed,
         );
+
         if classification == Classification::Ambiguous {
             repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
             final_rows.push((
@@ -209,6 +275,7 @@ async fn dispatch_one(
         )
         .await;
 
+        let applied = apply_result.is_ok();
         let final_status = match apply_result {
             Ok(()) => "applied",
             Err(ref err) => {
@@ -228,6 +295,14 @@ async fn dispatch_one(
         } else {
             final_status
         };
+        if applied && stored_status == "applied" {
+            match classification {
+                Classification::NewItem => counts.new_items += 1,
+                Classification::ContentChanged => counts.updated_items += 1,
+                Classification::TrashedOrRemoved => counts.deleted_items += 1,
+                _ => {}
+            }
+        }
         final_rows.push((
             event.sequence,
             classification.as_str().into(),
@@ -263,6 +338,13 @@ async fn dispatch_one(
         advance_watch_consumed_sequence(db, &watch.id, last_consumed).await?;
     }
     finish_catch_up_if_current(db, watch, last_consumed).await?;
+
+    // One batched activity notification per burst, rate-limited per watch;
+    // zero-change cycles stay silent.
+    if counts.total() > 0 && notify_allowed(state, &watch.id) {
+        let _ = notify_tx.try_send((watch.chat_id, counts.summary_message(watch)));
+    }
+
     maybe_scan_missing_children(config, db, drive, &token_manager, watch, notify_tx, state).await?;
 
     Ok(())
@@ -505,13 +587,8 @@ async fn apply_classification(
                         watch_id = watch.id,
                         file_id, "source removed — destination preserved"
                     );
-                    // Notify once (spec: notify one time, not repeatedly).
-                    let msg = format!(
-                        "⚠️ Watch `{}`: source item `{}` removed/trashed. Destination preserved.",
-                        &watch.id[..8.min(watch.id.len())],
-                        file_id
-                    );
-                    let _ = notify_tx.try_send((watch.chat_id, msg));
+                    // User-facing notice is folded into the batched activity
+                    // summary (see BatchCounts) to avoid per-event spam.
                 }
                 "manual_confirmation" => {
                     repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;

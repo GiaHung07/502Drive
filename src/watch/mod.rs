@@ -1,5 +1,7 @@
 pub mod classifier;
 pub mod dispatcher;
+pub mod errors;
+pub mod glob;
 pub mod initializer;
 pub mod poller;
 pub mod retention;

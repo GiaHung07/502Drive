@@ -785,6 +785,7 @@ pub async fn create_job(
             destination_parent_id: destination_parent_id.to_string(),
             destination_drive_id: None,
             progress_message_id: None,
+            duplicate_policy: "skip_same_source".to_string(),
         },
     )
     .await
@@ -801,6 +802,7 @@ pub struct NewJob {
     pub destination_parent_id: String,
     pub destination_drive_id: Option<String>,
     pub progress_message_id: Option<i32>,
+    pub duplicate_policy: String,
 }
 
 pub async fn create_job_with_metadata(db: &Database, job: NewJob) -> anyhow::Result<String> {
@@ -819,7 +821,7 @@ pub async fn create_job_with_metadata(db: &Database, job: NewJob) -> anyhow::Res
                     ?1, 'one_shot', ?2, ?3, ?4,
                     ?5, ?6, ?7,
                     ?8, ?9, 'queued',
-                    'skip_same_source', 'preserve', ?10, ?11, ?11
+                    ?10, 'preserve', ?11, ?12, ?12
                  )",
                 params![
                     id_for_db,
@@ -831,6 +833,7 @@ pub async fn create_job_with_metadata(db: &Database, job: NewJob) -> anyhow::Res
                     job.source_drive_id,
                     job.destination_parent_id,
                     job.destination_drive_id,
+                    job.duplicate_policy,
                     job.progress_message_id,
                     now,
                 ],
@@ -2109,6 +2112,8 @@ pub struct WatchSubscription {
     pub content_update_policy: String,
     pub deletion_policy: String,
     pub move_out_policy: String,
+    /// JSON string array of exclude globs, e.g. `["*.tmp", "~$*"]`.
+    pub exclude_globs: String,
     pub baseline_sequence: i64,
     pub last_consumed_sequence: i64,
     pub created_at_ms: i64,
@@ -2195,10 +2200,11 @@ fn row_to_watch(row: &rusqlite::Row<'_>) -> rusqlite::Result<WatchSubscription> 
         content_update_policy: row.get(11)?,
         deletion_policy: row.get(12)?,
         move_out_policy: row.get(13)?,
-        baseline_sequence: row.get(14)?,
-        last_consumed_sequence: row.get(15)?,
-        created_at_ms: row.get(16)?,
-        updated_at_ms: row.get(17)?,
+        exclude_globs: row.get(14)?,
+        baseline_sequence: row.get(15)?,
+        last_consumed_sequence: row.get(16)?,
+        created_at_ms: row.get(17)?,
+        updated_at_ms: row.get(18)?,
     })
 }
 
@@ -2206,7 +2212,7 @@ const WATCH_COLS: &str = "id, google_account_id, cursor_id, telegram_user_id, ch
     source_root_id, source_resource_key, source_drive_id,
     destination_root_id, destination_drive_id, status,
     content_update_policy, deletion_policy, move_out_policy,
-    baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms";
+    exclude_globs, baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms";
 
 pub async fn list_watches_for_user(
     db: &Database,
@@ -2520,6 +2526,29 @@ pub async fn set_watch_content_update_policy(
                  SET content_update_policy = ?1, updated_at_ms = ?2
                  WHERE telegram_user_id = ?3 AND id = ?4",
                 params![policy, now_ms(), telegram_user_id, watch_id],
+            )?;
+            Ok::<bool, rusqlite::Error>(changed > 0)
+        })
+        .await?)
+}
+
+/// Replace the exclude-glob list (a JSON string array) of a user-owned watch.
+pub async fn set_watch_exclude_globs(
+    db: &Database,
+    telegram_user_id: i64,
+    watch_id: &str,
+    exclude_globs: &str,
+) -> anyhow::Result<bool> {
+    let watch_id = watch_id.to_string();
+    let exclude_globs = exclude_globs.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let changed = conn.execute(
+                "UPDATE watch_subscriptions
+                 SET exclude_globs = ?1, updated_at_ms = ?2
+                 WHERE telegram_user_id = ?3 AND id = ?4",
+                params![exclude_globs, now_ms(), telegram_user_id, watch_id],
             )?;
             Ok::<bool, rusqlite::Error>(changed > 0)
         })

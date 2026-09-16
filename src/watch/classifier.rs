@@ -131,7 +131,22 @@ pub fn classify(
         return Classification::Irrelevant;
     }
 
-    // 3. Root itself changed — always relevant if it's our source root.
+    // 3. Watch-level exclude filters: any event whose file name matches one
+    // of the subscription's `exclude_globs` is irrelevant, no matter where it
+    // sits. (Hard removal/trash signals above still win so an already-mapped
+    // item can be cleaned up.)
+    let globs = crate::watch::glob::parse_glob_list(&watch.exclude_globs);
+    if !globs.is_empty() && crate::watch::glob::matches_any(&globs, &file.name) {
+        debug!(
+            watch_id = watch.id,
+            file_id,
+            name = file.name,
+            "file matches exclude_globs — irrelevant"
+        );
+        return Classification::Irrelevant;
+    }
+
+    // 4. Root itself changed — always relevant if it's our source root.
     let is_root = file_id == watch.source_root_id;
     let any_parent_in_tree = parents_in_tree.iter().any(|&b| b);
 
@@ -226,6 +241,7 @@ mod tests {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".into(),
             baseline_sequence: 0,
             last_consumed_sequence: 0,
             created_at_ms: 0,
@@ -323,5 +339,44 @@ mod tests {
         // in_tree=true (we have a mapping), but parents_in_tree all false
         let c = classify(&w, "f1", true, &[false], Some(&prior), Some(&f), false);
         assert_eq!(c, Classification::MovedOutside);
+    }
+
+    #[test]
+    fn exclude_globs_classify_as_irrelevant() {
+        let mut w = fake_watch("root");
+        w.exclude_globs = r#"["*.tmp", "~$*"]"#.into();
+
+        // A brand-new excluded file under a tracked parent is ignored.
+        let mut f = base_file("f1", &["parent-in-tree"]);
+        f.name = "cache.tmp".into();
+        let c = classify(&w, "f1", false, &[true], None, Some(&f), false);
+        assert_eq!(c, Classification::Irrelevant);
+
+        // A previously mapped file that now matches a new filter is ignored.
+        let prior = ItemFingerprint {
+            parents: vec!["p1".into()],
+            name: Some("report.docx".into()),
+            md5: Some("abc123".into()),
+            version: Some("1".into()),
+            trashed: false,
+        };
+        let mut f = base_file("f1", &["p1"]);
+        f.name = "~$report.docx".into();
+        let c = classify(&w, "f1", true, &[true], Some(&prior), Some(&f), false);
+        assert_eq!(c, Classification::Irrelevant);
+
+        // Non-matching names still classify normally.
+        let mut f = base_file("f2", &["parent-in-tree"]);
+        f.name = "keep-me.txt".into();
+        let c = classify(&w, "f2", false, &[true], None, Some(&f), false);
+        assert_eq!(c, Classification::NewItem);
+    }
+
+    #[test]
+    fn empty_exclude_globs_never_filter() {
+        let w = fake_watch("root");
+        let f = base_file("f1", &["parent-in-tree"]);
+        let c = classify(&w, "f1", false, &[true], None, Some(&f), false);
+        assert_eq!(c, Classification::NewItem);
     }
 }

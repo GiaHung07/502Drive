@@ -16,7 +16,7 @@ use crate::{
     config::AppConfig,
     drive::{
         auth as oauth,
-        client::{DriveApiError, DriveClient},
+        client::DriveClient,
         links::{DriveReference, parse_drive_reference},
         token_manager::TokenManager,
         types::DriveFile,
@@ -36,7 +36,7 @@ use crate::{
         keyboards,
         progress::{estimate_eta_secs, format_duration_secs, render_progress},
     },
-    watch::run_initial_clone,
+    watch::{glob, run_initial_clone},
 };
 
 const CALLBACK_STATE_TTL_MS: i64 = 15 * 60 * 1000;
@@ -1500,6 +1500,16 @@ async fn handle_command(
             bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
                 .await?;
         }
+        Command::WatchFilter(input) => {
+            if input.trim().is_empty() {
+                bot.send_message(msg.chat.id, watch_filter_usage_text(ui_language(&config)))
+                    .await?;
+                return Ok(());
+            }
+            let text = manage_watch_filter(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
         Command::Unwatch(watch_id) => {
             if watch_id.trim().is_empty() {
                 spawn_watch_panel(
@@ -1527,6 +1537,7 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
         keyboards::UiLanguage::Vi => {
             "LỆNH CHÍNH\n\
              ━━━━━━━━━\n\
+             /start, /menu         Mở bảng điều khiển chính\n\
              /clone <url>           Kiểm tra nguồn, xem kế hoạch, rồi clone\n\
              /clone_here <url>      Clone ngay vào thư mục đích mặc định\n\
              /destination           Xem/đổi thư mục đích đã lưu\n\
@@ -1540,12 +1551,16 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
              /retry <job_id>        Làm lại phần lỗi\n\
              /last_report           Gửi lại report job gần nhất\n\
              /preview               Bảng tổng quan realtime\n\
+             /connect               Hướng dẫn đăng nhập Google\n\
              /account               Tài khoản Google\n\
+             /disconnect            Ngắt kết nối Google Drive\n\
+             /whoami                Telegram ID và quyền của bạn\n\
              \n"
         }
         keyboards::UiLanguage::En => {
             "MAIN COMMANDS\n\
              ━━━━━━━━━\n\
+             /start, /menu         Open the main dashboard\n\
              /clone <url>           Check source, preview plan, then clone\n\
              /clone_here <url>      Clone to the default destination now\n\
              /destination           View/change saved destination\n\
@@ -1559,14 +1574,17 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
              /retry <job_id>        Retry failed items\n\
              /last_report           Send the latest job JSON/CSV report\n\
              /preview               Realtime overview\n\
+             /connect               Google sign-in guide\n\
              /account               Google account\n\
+             /disconnect            Disconnect Google Drive\n\
+             /whoami                Your Telegram ID and role\n\
              \n"
         }
     }
     .to_string();
 
-    match (lang, watch_enabled) {
-        (keyboards::UiLanguage::Vi, true) => text.push_str(
+    text.push_str(&match (lang, watch_enabled) {
+        (keyboards::UiLanguage::Vi, _) => {
             "WATCH/SYNC\n\
              ━━━━━━━━━━\n\
              /sync <nguồn> [đích]         Đồng bộ realtime (tự động lấy đích mặc định nếu bỏ qua đích)\n\
@@ -1579,11 +1597,13 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
                                           versioned_copy: tạo bản copy mới\n\
                                           replace_copy: copy mới rồi đưa bản cũ vào thùng rác\n\
                                           manual_confirmation: dừng để xác nhận thủ công\n\
+             /watch_filter <id> list|add <glob>|remove <glob>|clear\n\
+                                          Loại trừ file khớp glob khỏi đồng bộ (vd: *.tmp)\n\
              /unwatch <id>                Dừng theo dõi\n\
-             \n",
-        ),
-        (keyboards::UiLanguage::Vi, false) => text.push_str("Watch đang tắt trong config.\n\n"),
-        (keyboards::UiLanguage::En, true) => text.push_str(
+             \n"
+                .to_string()
+        }
+        (keyboards::UiLanguage::En, _) => {
             "WATCH/SYNC\n\
              ━━━━━━━━━━\n\
              /sync <source> [dest]        Realtime sync (uses default destination if dest omitted)\n\
@@ -1596,17 +1616,32 @@ fn render_help_text(lang: keyboards::UiLanguage, watch_enabled: bool) -> String 
                                           versioned_copy: create a new copy\n\
                                           replace_copy: copy new, then trash old copy\n\
                                           manual_confirmation: stop for manual confirmation\n\
+             /watch_filter <id> list|add <glob>|remove <glob>|clear\n\
+                                          Exclude files matching a glob from sync (e.g. *.tmp)\n\
              /unwatch <id>                Stop watching\n\
-             \n",
-        ),
-        (keyboards::UiLanguage::En, false) => {
-            text.push_str("Watch is disabled in config.\n\n");
+             \n"
+                .to_string()
         }
+    });
+
+    if !watch_enabled {
+        text.push_str(&match lang {
+            keyboards::UiLanguage::Vi => {
+                "⚠️ Watch đang TẮT trong config: các lệnh WATCH/SYNC ở trên chỉ hoạt động sau khi bật watch.\n\n"
+            }
+            keyboards::UiLanguage::En => {
+                "⚠️ Watch is DISABLED in config: the WATCH/SYNC commands above only work once watch is enabled.\n\n"
+            }
+        });
     }
 
     match lang {
-        keyboards::UiLanguage::Vi => text.push_str("Quản trị: /whoami /grant /revoke /disconnect"),
-        keyboards::UiLanguage::En => text.push_str("Admin: /whoami /grant /revoke /disconnect"),
+        keyboards::UiLanguage::Vi => {
+            text.push_str("Quản trị: /whoami /grant <user_id> /revoke <user_id> /disconnect")
+        }
+        keyboards::UiLanguage::En => {
+            text.push_str("Admin: /whoami /grant <user_id> /revoke <user_id> /disconnect")
+        }
     }
     text
 }
@@ -4753,125 +4788,7 @@ fn first_line(text: &str) -> &str {
 }
 
 fn format_error_for_user(err: &anyhow::Error, lang: keyboards::UiLanguage) -> String {
-    if let Some(drive) = err.downcast_ref::<DriveApiError>() {
-        return format_drive_error(drive, lang);
-    }
-    err.to_string()
-}
-
-fn format_drive_error(err: &DriveApiError, lang: keyboards::UiLanguage) -> String {
-    match err {
-        DriveApiError::Api {
-            status,
-            reason,
-            message,
-            ..
-        } => {
-            let friendly = drive_error_friendly(lang, status.as_u16(), reason.as_deref());
-            format!(
-                "{friendly}\n• HTTP: {}\n• Reason: {}\n• {}: {}",
-                status.as_u16(),
-                reason
-                    .as_deref()
-                    .unwrap_or(drive_error_unknown_reason(lang)),
-                drive_error_detail_field(lang),
-                message
-            )
-        }
-        DriveApiError::Transport(err) => {
-            format!(
-                "{}\n• {}: {err}",
-                drive_error_transport(lang),
-                drive_error_detail_field(lang)
-            )
-        }
-    }
-}
-
-fn drive_error_friendly(
-    lang: keyboards::UiLanguage,
-    status: u16,
-    reason: Option<&str>,
-) -> &'static str {
-    match (lang, status, reason) {
-        (keyboards::UiLanguage::Vi, 401, _) => {
-            "Phiên Google hết hạn. Chạy `502drive auth login` trên máy bot."
-        }
-        (keyboards::UiLanguage::En, 401, _) => {
-            "Google session expired. Run `502drive auth login` on the bot machine."
-        }
-        (keyboards::UiLanguage::Vi, 403, Some("insufficientPermissions")) => {
-            "Tài khoản Google hiện tại không đủ quyền với file/folder này."
-        }
-        (keyboards::UiLanguage::En, 403, Some("insufficientPermissions")) => {
-            "The current Google account does not have access to this file/folder."
-        }
-        (keyboards::UiLanguage::Vi, 403, Some("copyRequiresWriterPermission")) => {
-            "Nguồn yêu cầu quyền ghi mới được copy."
-        }
-        (keyboards::UiLanguage::En, 403, Some("copyRequiresWriterPermission")) => {
-            "This source requires writer permission before it can be copied."
-        }
-        (
-            keyboards::UiLanguage::Vi,
-            403,
-            Some("storageQuotaExceeded" | "teamDriveFileLimitExceeded"),
-        ) => "Google Drive báo hết quota hoặc chạm giới hạn lưu trữ.",
-        (
-            keyboards::UiLanguage::En,
-            403,
-            Some("storageQuotaExceeded" | "teamDriveFileLimitExceeded"),
-        ) => "Google Drive quota or storage limit was reached.",
-        (keyboards::UiLanguage::Vi, 403, Some("userRateLimitExceeded" | "rateLimitExceeded"))
-        | (keyboards::UiLanguage::Vi, 429, _) => {
-            "Google đang giới hạn tốc độ. Bot sẽ retry nếu lỗi xảy ra trong job."
-        }
-        (keyboards::UiLanguage::En, 403, Some("userRateLimitExceeded" | "rateLimitExceeded"))
-        | (keyboards::UiLanguage::En, 429, _) => {
-            "Google is rate limiting requests. The bot will retry inside jobs."
-        }
-        (keyboards::UiLanguage::Vi, 404, _) => {
-            "Không tìm thấy file/folder, không có quyền truy cập, hoặc link thiếu resource key."
-        }
-        (keyboards::UiLanguage::En, 404, _) => {
-            "File/folder not found, access is missing, or the link needs a resource key."
-        }
-        (keyboards::UiLanguage::Vi, 400, _) => {
-            "Request Drive không hợp lệ. Kiểm tra lại link nguồn/đích."
-        }
-        (keyboards::UiLanguage::En, 400, _) => {
-            "Invalid Drive request. Check the source/destination link."
-        }
-        (keyboards::UiLanguage::Vi, 500..=599, _) => {
-            "Google Drive đang lỗi tạm thời. Thử lại sau ít phút."
-        }
-        (keyboards::UiLanguage::En, 500..=599, _) => {
-            "Google Drive has a temporary error. Try again in a few minutes."
-        }
-        (keyboards::UiLanguage::Vi, _, _) => "Google Drive trả về lỗi.",
-        (keyboards::UiLanguage::En, _, _) => "Google Drive returned an error.",
-    }
-}
-
-fn drive_error_unknown_reason(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "không rõ",
-        keyboards::UiLanguage::En => "unknown",
-    }
-}
-
-fn drive_error_detail_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Chi tiết",
-        keyboards::UiLanguage::En => "Details",
-    }
-}
-
-fn drive_error_transport(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Không gọi được Google Drive API.",
-        keyboards::UiLanguage::En => "Could not call the Google Drive API.",
-    }
+    crate::watch::errors::format_anyhow_error(err, lang)
 }
 
 #[derive(Debug, Default)]
@@ -5022,6 +4939,9 @@ async fn start_clone_reference(
             telegram_user_id,
             source,
             progress_message_id,
+            name_override: None,
+            destination_parent_id: None,
+            duplicate_policy: None,
         })
         .await
 }
@@ -5703,6 +5623,207 @@ async fn set_watch_policy(
     }
 }
 
+async fn ensure_owner_or_operator(db: &Database, actor_user_id: i64) -> anyhow::Result<()> {
+    let role = repo::authorized_user(db, actor_user_id)
+        .await?
+        .filter(|user| user.enabled)
+        .map(|user| user.role)
+        .unwrap_or_default();
+    if matches!(role.as_str(), "owner" | "operator") {
+        Ok(())
+    } else {
+        anyhow::bail!("Chỉ owner/operator mới có thể quản lý bộ lọc watch")
+    }
+}
+
+async fn manage_watch_filter(
+    db: &Database,
+    telegram_user_id: i64,
+    input: &str,
+    lang: keyboards::UiLanguage,
+) -> anyhow::Result<String> {
+    ensure_owner_or_operator(db, telegram_user_id).await?;
+    let parts: Vec<&str> = input.trim().splitn(3, char::is_whitespace).collect();
+    let watch_id = parts.first().copied().unwrap_or_default();
+
+    match (parts.first(), parts.get(1).copied()) {
+        (_, Some("list")) if !watch_id.is_empty() => {
+            let watch = resolve_watch_for_user(db, telegram_user_id, watch_id, lang).await?;
+            Ok(render_watch_filter_list(lang, &watch))
+        }
+        (_, Some("clear")) if !watch_id.is_empty() => {
+            let watch_id = resolve_watch_id_for_user(db, telegram_user_id, watch_id, lang).await?;
+            repo::set_watch_exclude_globs(db, telegram_user_id, &watch_id, "[]").await?;
+            Ok(watch_filter_cleared_text(lang, &watch_id))
+        }
+        (_, Some(action @ ("add" | "remove"))) if !watch_id.is_empty() => {
+            let Some(raw_glob) = parts.get(2) else {
+                anyhow::bail!(watch_filter_usage_text(lang));
+            };
+            let glob = glob::normalize_glob(raw_glob).map_err(anyhow::Error::msg)?;
+            let watch = resolve_watch_for_user(db, telegram_user_id, watch_id, lang).await?;
+            let mut globs = glob::parse_glob_list(&watch.exclude_globs);
+
+            if action == "add" {
+                if globs.len() >= glob::MAX_GLOBS_PER_WATCH {
+                    anyhow::bail!(
+                        "Tối đa {} glob cho mỗi watch. Dùng remove hoặc clear trước.",
+                        glob::MAX_GLOBS_PER_WATCH
+                    );
+                }
+                if globs.iter().any(|existing| *existing == glob) {
+                    return Ok(watch_filter_exists_text(lang, &glob, &watch.id));
+                }
+                globs.push(glob.clone());
+                repo::set_watch_exclude_globs(
+                    db,
+                    telegram_user_id,
+                    &watch.id,
+                    &glob::serialize_glob_list(&globs),
+                )
+                .await?;
+                Ok(watch_filter_added_text(lang, &glob, &watch.id))
+            } else {
+                let before = globs.len();
+                globs.retain(|existing| *existing != glob);
+                if globs.len() == before {
+                    return Ok(watch_filter_missing_text(lang, &glob, &watch.id));
+                }
+                repo::set_watch_exclude_globs(
+                    db,
+                    telegram_user_id,
+                    &watch.id,
+                    &glob::serialize_glob_list(&globs),
+                )
+                .await?;
+                Ok(watch_filter_removed_text(lang, &glob, &watch.id))
+            }
+        }
+        _ => anyhow::bail!(watch_filter_usage_text(lang)),
+    }
+}
+
+fn render_watch_filter_list(
+    lang: keyboards::UiLanguage,
+    watch: &repo::WatchSubscription,
+) -> String {
+    let globs = glob::parse_glob_list(&watch.exclude_globs);
+    if globs.is_empty() {
+        return match lang {
+            keyboards::UiLanguage::Vi => format!(
+                "Watch `{short}` chưa có glob loại trừ.\nDùng /watch_filter {short} add <glob> để thêm.",
+                short = short_id(&watch.id)
+            ),
+            keyboards::UiLanguage::En => format!(
+                "Watch `{short}` has no exclude globs yet.\nUse /watch_filter {short} add <glob> to add one.",
+                short = short_id(&watch.id)
+            ),
+        };
+    }
+    let mut text = match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "GLOB LOẠI TRỪ — watch `{}`\n━━━━━━━━━━\n",
+            short_id(&watch.id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "EXCLUDE GLOBS — watch `{}`\n━━━━━━━━━━\n",
+            short_id(&watch.id)
+        ),
+    };
+    for glob in &globs {
+        text.push_str(&format!("• {glob}\n"));
+    }
+    text
+}
+
+fn watch_filter_usage_text(lang: keyboards::UiLanguage) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => "Cú pháp: /watch_filter <id_watch> <lệnh>\n\
+             \n\
+             • list — xem các glob hiện có\n\
+             • add <glob> — thêm glob loại trừ (vd: *.tmp, ~$*)\n\
+             • remove <glob> — xóa một glob\n\
+             • clear — xóa tất cả\n\
+             \n\
+             File trùng glob sẽ bị bỏ qua khi đồng bộ. Dùng /watches để chọn watch."
+            .to_string(),
+        keyboards::UiLanguage::En => "Syntax: /watch_filter <watch_id> <action>\n\
+             \n\
+             • list — show current globs\n\
+             • add <glob> — add an exclude glob (e.g. *.tmp, ~$*)\n\
+             • remove <glob> — remove one glob\n\
+             • clear — remove all\n\
+             \n\
+             Files matching a glob are skipped during sync. Use /watches to pick a watch."
+            .to_string(),
+    }
+}
+
+fn watch_filter_added_text(lang: keyboards::UiLanguage, glob: &str, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Đã thêm glob `{glob}` vào watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Added glob `{glob}` to watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+fn watch_filter_removed_text(lang: keyboards::UiLanguage, glob: &str, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Đã xóa glob `{glob}` khỏi watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Removed glob `{glob}` from watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+fn watch_filter_cleared_text(lang: keyboards::UiLanguage, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Đã xóa toàn bộ glob của watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Cleared all globs of watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+fn watch_filter_exists_text(lang: keyboards::UiLanguage, glob: &str, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Glob `{glob}` đã có trong watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Glob `{glob}` is already on watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+fn watch_filter_missing_text(lang: keyboards::UiLanguage, glob: &str, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Glob `{glob}` không có trong watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Glob `{glob}` is not on watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn short_job_id(job_id: &str) -> &str {
@@ -6087,7 +6208,9 @@ fn watch_policy_changed_text(lang: keyboards::UiLanguage, watch_id: &str, policy
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drive::client::DriveApiError;
     use crate::drive::types::DriveFile;
+    use crate::watch::errors::format_drive_error;
     use reqwest::StatusCode;
 
     fn file(id: &str, mime_type: &str, size: Option<&str>) -> DriveFile {
@@ -6304,6 +6427,7 @@ mod tests {
             content_update_policy: "versioned_copy".to_string(),
             deletion_policy: "preserve_destination".to_string(),
             move_out_policy: "detach".to_string(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 3,
             last_consumed_sequence: 4,
             created_at_ms: 0,
@@ -6369,13 +6493,17 @@ mod tests {
     fn help_text_follows_language_and_watch_config() {
         let en = render_help_text(keyboards::UiLanguage::En, false);
         assert!(en.contains("MAIN COMMANDS"));
-        assert!(en.contains("Watch is disabled in config."));
+        assert!(en.contains("/connect"));
+        assert!(en.contains("/clone_here"));
+        assert!(en.contains("/watch_filter"));
+        assert!(en.contains("Watch is DISABLED in config"));
         assert!(en.contains("Admin: /whoami"));
         assert!(!en.contains("LỆNH CHÍNH"));
 
         let vi = render_help_text(keyboards::UiLanguage::Vi, true);
         assert!(vi.contains("LỆNH CHÍNH"));
         assert!(vi.contains("/watch <nguồn> <đích>"));
+        assert!(vi.contains("/watch_filter"));
         assert!(vi.contains("Quản trị: /whoami"));
     }
 

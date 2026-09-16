@@ -471,3 +471,95 @@ async fn list_watches_user_isolation() {
     let watches = repo::list_watches_for_user(&db, 10).await.unwrap();
     assert_eq!(watches.len(), 1);
 }
+
+// ── exclude_globs round-trip ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn exclude_globs_round_trip() {
+    let (db, cursor_id) = test_db_with_cursor().await;
+
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id,
+            telegram_user_id: 7,
+            chat_id: 7,
+            source_root_id: "s".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "d".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Fresh subscriptions default to an empty glob list.
+    let watch = repo::watch_for_user(&db, 7, &watch_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(watch.exclude_globs, "[]");
+
+    // Set a list and read it back through the full-row watch queries.
+    let globs =
+        gdclone_bot::watch::glob::serialize_glob_list(&["*.tmp".to_string(), "~$*".to_string()]);
+    assert!(
+        repo::set_watch_exclude_globs(&db, 7, &watch_id, &globs)
+            .await
+            .unwrap()
+    );
+
+    // Activate the watch so active_watches() also picks it up.
+    repo::update_watch_status(&db, &watch_id, "active")
+        .await
+        .unwrap();
+
+    let views = vec![
+        repo::watch_for_user(&db, 7, &watch_id)
+            .await
+            .unwrap()
+            .unwrap(),
+        repo::active_watches(&db).await.unwrap()[0].clone(),
+        repo::list_watches_for_user(&db, 7).await.unwrap()[0].clone(),
+        repo::watch_for_user_unchecked(&db, &watch_id)
+            .await
+            .unwrap()
+            .unwrap(),
+    ];
+    for fetched in views {
+        assert_eq!(fetched.id, watch_id);
+        assert_eq!(fetched.exclude_globs, globs);
+        let parsed = gdclone_bot::watch::glob::parse_glob_list(&fetched.exclude_globs);
+        assert_eq!(parsed, vec!["*.tmp".to_string(), "~$*".to_string()]);
+    }
+
+    // Other users cannot mutate the watch's filters.
+    assert!(
+        !repo::set_watch_exclude_globs(&db, 99, &watch_id, "[]")
+            .await
+            .unwrap()
+    );
+
+    // Clearing works and unknown ids report false.
+    assert!(
+        repo::set_watch_exclude_globs(&db, 7, &watch_id, "[]")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !repo::set_watch_exclude_globs(&db, 7, "no-such-watch", "[]")
+            .await
+            .unwrap()
+    );
+    let watch = repo::watch_for_user(&db, 7, &watch_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(watch.exclude_globs, "[]");
+}
