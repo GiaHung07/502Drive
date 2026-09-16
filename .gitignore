@@ -27,3 +27,4 @@ dist/
 .trash/
 .video_agent/
 *.tsbuildinfo
+.local-notes/
