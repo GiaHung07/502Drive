@@ -107,7 +107,7 @@ impl AppConfig {
             toml::from_str(&raw).with_context(|| format!("parse config {}", path.display()))?;
 
         apply_env_overrides(&mut config)?;
-        config.resolve_paths()?;
+        config.resolve_paths(path)?;
         config.validate_shape()?;
 
         Ok(config)
@@ -228,9 +228,21 @@ impl AppConfig {
         Ok(())
     }
 
-    fn resolve_paths(&mut self) -> anyhow::Result<()> {
+    fn resolve_paths(&mut self, config_path: &Path) -> anyhow::Result<()> {
+        // The secret-store directory follows the config file's parent: for the
+        // default desktop path this equals the ProjectDirs config dir, and for
+        // container deployments (--config /config/config.toml) it keeps
+        // master.key on the mounted volume instead of the ephemeral container
+        // home. Fall back to ProjectDirs for bare relative filenames.
+        let explicit_parent = config_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.to_path_buf());
+        self.storage.config_dir = match explicit_parent {
+            Some(parent) => parent,
+            None => project_dirs()?.config_dir().to_path_buf(),
+        };
         let dirs = project_dirs()?;
-        self.storage.config_dir = dirs.config_dir().to_path_buf();
 
         if self.storage.db_path.as_os_str().is_empty() {
             self.storage.db_path = dirs.data_dir().join("state.db");

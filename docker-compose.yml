@@ -9,9 +9,16 @@ services:
     environment:
       - RUST_LOG=info
       - TZ=Asia/Ho_Chi_Minh
+      # Headless setup: configure entirely via env overrides, or edit
+      # ./config/config.toml on the host instead. See docs/install-docker.md.
+      # - GDCLONE__TELEGRAM__BOT_TOKEN=123456789:AAExample...
+      # - GDCLONE__TELEGRAM__OWNER_TELEGRAM_ID=123456789
+      # - GDCLONE__GOOGLE_OAUTH__CLIENT_ID=xxx.apps.googleusercontent.com
+      # - GDCLONE__GOOGLE_OAUTH__CLIENT_SECRET=GOCSPX-...
     volumes:
       - ./config:/config
       - ./data:/data
-    # Required for Google OAuth local redirection (ports 51000-51010)
+    # Google OAuth loopback redirect range (config: redirect_port_start/end,
+    # defaults 51000-51100). Only needed while running `auth login` in-container.
     ports:
-      - "51000-51010:51000-51010"
+      - "51000-51100:51000-51100"

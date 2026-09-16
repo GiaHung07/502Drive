@@ -8,7 +8,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-VERSION="${GITHUB_REF_NAME:-v0.1.0}"
+VERSION="${GITHUB_REF_NAME:-v0.2.0}"
 VERSION="${VERSION#v}"
 DIST_DIR="$REPO_DIR/dist"
 ARCH="${ARCH:-x86_64}"

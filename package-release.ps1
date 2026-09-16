@@ -24,7 +24,7 @@ if (-not (Test-Path -LiteralPath $releaseExe)) {
 
 $version = $env:GITHUB_REF_NAME
 if ([string]::IsNullOrWhiteSpace($version)) {
-    $version = "v0.1.0"
+    $version = "v0.2.0"
 }
 
 $packageName = "502drive-$version-windows-x86_64"
