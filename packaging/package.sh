@@ -36,6 +36,11 @@ rm -rf "$TAR_DIR"
 mkdir -p "$TAR_DIR/packaging" "$TAR_DIR/scripts"
 
 cp "$TARGET_BIN" "$TAR_DIR/502drive"
+if [ -f "target/release/502drive-gui" ]; then
+    cp target/release/502drive-gui "$TAR_DIR/502drive-gui"
+elif [ -f "target/release/drive502-gui" ]; then
+    cp target/release/drive502-gui "$TAR_DIR/502drive-gui"
+fi
 cp config.sample.toml "$TAR_DIR/"
 cp README.md README.vi.md "$TAR_DIR/"
 cp packaging/install.sh "$TAR_DIR/packaging/"

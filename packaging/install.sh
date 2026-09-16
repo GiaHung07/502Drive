@@ -48,6 +48,21 @@ cp "$BIN_PATH" "$HOME/.local/bin/502drive.new"
 mv "$HOME/.local/bin/502drive.new" "$HOME/.local/bin/502drive"
 chmod +x "$HOME/.local/bin/502drive"
 ln -sf "$HOME/.local/bin/502drive" "$HOME/.local/bin/gdclone-bot"
+
+# 1b. Install GUI binary if present
+GUI_PATH=""
+if [ -f "$REPO_DIR/target/release/502drive-gui" ]; then
+    GUI_PATH="$REPO_DIR/target/release/502drive-gui"
+elif [ -f "$REPO_DIR/target/release/drive502-gui" ]; then
+    GUI_PATH="$REPO_DIR/target/release/drive502-gui"
+fi
+if [ -n "$GUI_PATH" ]; then
+    cp "$GUI_PATH" "$HOME/.local/bin/502drive-gui.new"
+    mv "$HOME/.local/bin/502drive-gui.new" "$HOME/.local/bin/502drive-gui"
+    chmod +x "$HOME/.local/bin/502drive-gui"
+    ln -sf "$HOME/.local/bin/502drive-gui" "$HOME/.local/bin/drive502-gui"
+    ok "Installed desktop GUI to ~/.local/bin/502drive-gui"
+fi
 ok "Installed executable to ~/.local/bin/502drive"
 
 # 2. Install tray applet

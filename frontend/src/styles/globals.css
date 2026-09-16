@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* ── Surfaces (elevation model) ─────────────────── */
+  --color-bg-base:       hsl(222 20% 7%);    /* #0B0D12 — window background */
+  --color-bg-elevated:   hsl(222 18% 10%);   /* #141821 — sidebar */
+  --color-bg-card:       hsl(222 17% 14%);   /* #1C2130 — card surface */
+  --color-bg-card-hover: hsl(222 17% 17%);   /* hover state */
+  --color-bg-input:      hsl(222 18% 12%);   /* input fields */
+
+  /* ── Borders ─────────────────────────────────────── */
+  --color-border:        hsl(222 16% 22% / 0.7);
+  --color-border-strong: hsl(222 16% 30% / 0.9);
+
+  /* ── Text ────────────────────────────────────────── */
+  --color-text-primary:  hsl(214 32% 91%);   /* #E4E6EB */
+  --color-text-secondary:hsl(218 14% 57%);   /* #8B92A3 */
+  --color-text-muted:    hsl(218 12% 40%);
+  --color-text-inverse:  hsl(222 20% 7%);
+
+  /* ── Accent (1 muted green, zero neon) ──────────── */
+  --color-accent:        hsl(152 60% 53%);   /* #3DDC84 — soft green */
+  --color-accent-dim:    hsl(152 60% 53% / 0.12); /* glow/bg nhạt */
+  --color-accent-hover:  hsl(152 60% 60%);
+
+  /* ── Semantic ────────────────────────────────────── */
+  --color-success:       hsl(152 52% 47%);
+  --color-success-bg:    hsl(152 52% 12% / 0.6);
+  --color-warning:       hsl(35 85% 55%);
+  --color-warning-bg:    hsl(35 85% 12% / 0.6);
+  --color-error:         hsl(3 72% 60%);
+  --color-error-bg:      hsl(3 72% 12% / 0.6);
+  --color-info:          hsl(213 80% 58%);
+  --color-info-bg:       hsl(213 80% 12% / 0.6);
+
+  /* ── Radius ──────────────────────────────────────── */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  14px;
+  --radius-xl:  20px;
+
+  /* ── Shadow (elevation không dùng màu chói) ─────── */
+  --shadow-sm:  0 1px 3px hsl(222 30% 5% / 0.5);
+  --shadow-md:  0 4px 16px hsl(222 30% 5% / 0.6);
+  --shadow-lg:  0 8px 32px hsl(222 30% 5% / 0.7);
+
+  /* ── Typography scale ────────────────────────────── */
+  --font-sans:  'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
+
+  /* ── Timing ──────────────────────────────────────── */
+  --duration-fast:   100ms;
+  --duration-normal: 180ms;
+  --duration-slow:   300ms;
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(222 16% 24%);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(222 16% 32%);
+}
+
+/* Shimmer animation for progress bars */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.shimmer-active {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(0 0% 100% / 0.15) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.8s infinite;
+}
+
+/* prefers-reduced-motion: tắt toàn bộ animation theo quy chuẩn */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
