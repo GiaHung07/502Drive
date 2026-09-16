@@ -1,6 +1,6 @@
+use crate::commands::get_log_path;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use crate::commands::get_log_path;
 
 #[tauri::command]
 pub async fn get_recent_logs(lines: Option<usize>) -> Result<Vec<String>, String> {

@@ -1,7 +1,7 @@
-use serde::Serialize;
+use crate::commands::get_db_path;
 use rusqlite::{Connection, OpenFlags};
+use serde::Serialize;
 use std::process::Command;
-use crate::commands::{get_db_path};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SystemStats {
@@ -69,7 +69,7 @@ pub async fn get_system_status() -> Result<SystemStatus, String> {
 
             // Google account
             if let Ok(mut stmt) = conn.prepare(
-                "SELECT email, status FROM google_accounts ORDER BY updated_at_ms DESC LIMIT 1;"
+                "SELECT email, status FROM google_accounts ORDER BY updated_at_ms DESC LIMIT 1;",
             ) {
                 if let Ok(row) = stmt.query_row([], |r| {
                     Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?))
@@ -100,18 +100,20 @@ pub async fn get_system_status() -> Result<SystemStatus, String> {
             ) {
                 active_jobs = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
             }
-            if let Ok(mut stmt) = conn.prepare(
-                "SELECT COUNT(*) FROM jobs WHERE status = 'completed';"
-            ) {
+            if let Ok(mut stmt) =
+                conn.prepare("SELECT COUNT(*) FROM jobs WHERE status = 'completed';")
+            {
                 completed_jobs = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
             }
 
             // File & bytes stats
-            if let Ok(mut stmt) = conn.prepare("SELECT COALESCE(SUM(completed_items), 0) FROM jobs;") {
+            if let Ok(mut stmt) =
+                conn.prepare("SELECT COALESCE(SUM(completed_items), 0) FROM jobs;")
+            {
                 total_cloned_files = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
             }
             if let Ok(mut stmt) = conn.prepare(
-                "SELECT COALESCE(SUM(size_bytes), 0) FROM job_items WHERE status = 'done';"
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM job_items WHERE status = 'done';",
             ) {
                 total_cloned_bytes = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
             }

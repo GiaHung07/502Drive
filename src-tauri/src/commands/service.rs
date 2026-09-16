@@ -1,6 +1,28 @@
 use std::process::Command;
 
 #[tauri::command]
+pub async fn start_service() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let output = Command::new("systemctl")
+            .args(["--user", "start", "gdclone-bot"])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("systemctl start failed: {stderr}"));
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(())
+    }
+}
+
+#[tauri::command]
 pub async fn restart_service() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
@@ -30,11 +52,30 @@ pub async fn open_telegram_bot() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn trigger_auth_login() -> Result<(), String> {
-    // Try launching 502drive auth login
-    Command::new("502drive")
-        .args(["auth", "login"])
-        .spawn()
-        .map_err(|e| format!("Failed to launch 502drive auth login: {e}"))?;
+    let title = "502Drive - Đăng nhập Google";
+    let cmd = "502drive auth login; echo; read -p 'Nhấn Enter để đóng...' -r";
+
+    if std::path::Path::new("/usr/bin/ptyxis").exists() {
+        Command::new("ptyxis")
+            .args(["--title", title, "--", "bash", "-c", cmd])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn ptyxis: {e}"))?;
+    } else if std::path::Path::new("/usr/bin/gnome-terminal").exists() {
+        Command::new("gnome-terminal")
+            .args(["--title", title, "--", "bash", "-c", cmd])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn gnome-terminal: {e}"))?;
+    } else if std::path::Path::new("/usr/bin/xterm").exists() {
+        Command::new("xterm")
+            .args(["-title", title, "-e", "bash", "-c", cmd])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn xterm: {e}"))?;
+    } else {
+        Command::new("502drive")
+            .args(["auth", "login"])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn 502drive auth login: {e}"))?;
+    }
 
     Ok(())
 }

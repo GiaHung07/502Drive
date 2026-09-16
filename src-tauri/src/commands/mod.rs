@@ -1,10 +1,10 @@
-pub mod status;
-pub mod jobs;
-pub mod watches;
 pub mod config;
-pub mod service;
 pub mod doctor;
+pub mod jobs;
 pub mod logs;
+pub mod service;
+pub mod status;
+pub mod watches;
 
 use directories::ProjectDirs;
 use std::path::PathBuf;

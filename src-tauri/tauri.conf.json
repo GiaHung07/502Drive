@@ -2,11 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "502Drive",
   "version": "0.1.0",
-  "identifier": "dev.drive502.app",
+  "identifier": "dev.drive502.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ../frontend",
-    "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build --prefix ../frontend",
+    "beforeBuildCommand": "npm run build --prefix frontend",
     "frontendDist": "../frontend/dist"
   },
   "app": {
@@ -23,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
