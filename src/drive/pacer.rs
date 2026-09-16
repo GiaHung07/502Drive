@@ -183,9 +183,11 @@ impl Pacer {
 
 impl Default for Pacer {
     fn default() -> Self {
-        // Drive API: 1 000 queries/user/second (sustained); 200 burst.
-        // Circuit trips after 5 consecutive errors; opens for 60 s.
-        Self::new(1_000.0, 200.0, 5, Duration::from_secs(60))
+        // Drive per-user quota is ~12k queries/60s (≈200/s burst allowed, but
+        // sustained ceilings bite much earlier). Stay safely under it: 90
+        // req/s sustained, 200 burst. Circuit trips after 5 consecutive
+        // errors and opens for 60 s.
+        Self::new(90.0, 200.0, 5, Duration::from_secs(60))
     }
 }
 

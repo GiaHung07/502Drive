@@ -4757,6 +4757,7 @@ fn format_drive_error(err: &DriveApiError, lang: keyboards::UiLanguage) -> Strin
             status,
             reason,
             message,
+            ..
         } => {
             let friendly = drive_error_friendly(lang, status.as_u16(), reason.as_deref());
             format!(
@@ -6572,6 +6573,7 @@ mod tests {
             status: StatusCode::FORBIDDEN,
             reason: Some("insufficientPermissions".to_string()),
             message: "The user does not have sufficient permissions".to_string(),
+            retry_after: None,
         };
         let text = format_drive_error(&permission, keyboards::UiLanguage::Vi);
         assert!(text.contains("không đủ quyền"));
@@ -6581,6 +6583,7 @@ mod tests {
             status: StatusCode::NOT_FOUND,
             reason: Some("notFound".to_string()),
             message: "File not found".to_string(),
+            retry_after: None,
         };
         let text = format_drive_error(&not_found, keyboards::UiLanguage::Vi);
         assert!(text.contains("resource key"));
@@ -6594,6 +6597,7 @@ mod tests {
             status: StatusCode::TOO_MANY_REQUESTS,
             reason: Some("rateLimitExceeded".to_string()),
             message: "slow down".to_string(),
+            retry_after: None,
         };
         assert!(format_drive_error(&rate, keyboards::UiLanguage::En).contains("rate limiting"));
     }

@@ -62,7 +62,9 @@ pub struct CloneService {
 impl CloneService {
     pub fn new(config: AppConfig, db: Database) -> Self {
         let token_manager = TokenManager::new(config.clone(), db.clone());
-        let initial_write_concurrency = config.engine.initial_write_concurrency;
+        // The effective write concurrency: the GUI writes max_write_concurrency,
+        // so it (not initial_write_concurrency) is the knob users actually set.
+        let write_concurrency = config.engine.max_write_concurrency;
         Self {
             drive: DriveClient::with_timeout(Duration::from_secs(
                 config.engine.request_timeout_seconds,
@@ -70,7 +72,7 @@ impl CloneService {
             config,
             db,
             token_manager,
-            copy_limiter: CopyLimiter::new(initial_write_concurrency),
+            copy_limiter: CopyLimiter::new(write_concurrency),
         }
     }
 
@@ -1074,12 +1076,22 @@ impl CloneService {
                 Ok(())
             }
             RetryDecision::Retry if attempt < self.config.engine.max_retry_attempts => {
-                tokio::time::sleep(backoff_delay(
+                let backoff = backoff_delay(
                     attempt,
                     Duration::from_millis(self.config.engine.retry_base_delay_ms),
                     Duration::from_millis(self.config.engine.retry_max_delay_ms),
-                ))
-                .await;
+                );
+                // Honor the server's Retry-After when present: pause every
+                // worker through the shared pacer and wait at least that long
+                // ourselves instead of blindly re-hitting the quota.
+                let delay = match err.retry_after() {
+                    Some(retry_after) => {
+                        self.drive.pacer().force_open(retry_after);
+                        retry_after.max(backoff)
+                    }
+                    None => backoff,
+                };
+                tokio::time::sleep(delay).await;
                 Ok(())
             }
             _ => Err(err.into()),
