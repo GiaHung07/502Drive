@@ -20,6 +20,10 @@ fn parses_snake_case_commands_used_in_help_text() {
         Command::Preview
     ));
     assert!(matches!(
+        Command::parse("/menu", "gdclone_bot").unwrap(),
+        Command::Menu
+    ));
+    assert!(matches!(
         Command::parse("/last_report", "gdclone_bot").unwrap(),
         Command::LastReport
     ));

@@ -2,6 +2,8 @@
 name = "gdclone-bot"
 version = "0.1.0"
 edition = "2024"
+authors = ["PGH"]
+license = "GPL-3.0-only"
 
 [dependencies]
 aes-gcm = "0.10"

@@ -22,3 +22,13 @@ fn parses_docs_url() {
             .unwrap();
     assert_eq!(parsed.hinted_kind, Some(DriveItemKindHint::GoogleDocument));
 }
+
+#[test]
+fn parses_bare_drive_folder_url() {
+    let parsed = parse_drive_reference(
+        "drive.google.com/drive/u/6/folders/1ECfxZCXFzI6ylHoyYaFWS2dVNSIoyFw8",
+    )
+    .unwrap();
+    assert_eq!(parsed.file_id, "1ECfxZCXFzI6ylHoyYaFWS2dVNSIoyFw8");
+    assert_eq!(parsed.hinted_kind, Some(DriveItemKindHint::Folder));
+}

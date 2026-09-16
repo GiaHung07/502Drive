@@ -9,6 +9,7 @@ use super::{
     links::DriveReference,
     types::{
         DriveAbout, DriveFile, FOLDER_MIME_TYPE, FileList, GoogleErrorEnvelope, SHORTCUT_MIME_TYPE,
+        SharedDriveList,
     },
 };
 use crate::engine::operation::AppProperties;
@@ -16,6 +17,7 @@ use crate::engine::operation::AppProperties;
 const DRIVE_FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_ABOUT_URL: &str = "https://www.googleapis.com/drive/v3/about";
 const DRIVE_CHANGES_URL: &str = "https://www.googleapis.com/drive/v3/changes";
+const DRIVE_DRIVES_URL: &str = "https://www.googleapis.com/drive/v3/drives";
 pub const FILE_FIELDS: &str = concat!(
     "id,name,mimeType,size,parents,driveId,resourceKey,",
     "shortcutDetails(targetId,targetMimeType,targetResourceKey),",
@@ -96,18 +98,87 @@ impl DriveClient {
         parent_resource_key: Option<&str>,
         page_token: Option<&str>,
     ) -> Result<FileList, DriveApiError> {
-        let query = format!("'{parent_id}' in parents and trashed=false");
+        self.list_children_page_size(
+            access_token,
+            parent_id,
+            parent_resource_key,
+            page_token,
+            1000,
+        )
+        .await
+    }
+
+    pub async fn list_children_page_size(
+        &self,
+        access_token: &str,
+        parent_id: &str,
+        parent_resource_key: Option<&str>,
+        page_token: Option<&str>,
+        page_size: usize,
+    ) -> Result<FileList, DriveApiError> {
+        self.list_children_query(
+            access_token,
+            parent_id,
+            parent_resource_key,
+            page_token,
+            page_size,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub async fn list_child_folders_page_size(
+        &self,
+        access_token: &str,
+        parent_id: &str,
+        parent_resource_key: Option<&str>,
+        page_token: Option<&str>,
+        page_size: usize,
+        drive_id: Option<&str>,
+    ) -> Result<FileList, DriveApiError> {
+        self.list_children_query(
+            access_token,
+            parent_id,
+            parent_resource_key,
+            page_token,
+            page_size,
+            Some(FOLDER_MIME_TYPE),
+            drive_id,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn list_children_query(
+        &self,
+        access_token: &str,
+        parent_id: &str,
+        parent_resource_key: Option<&str>,
+        page_token: Option<&str>,
+        page_size: usize,
+        mime_type: Option<&str>,
+        drive_id: Option<&str>,
+    ) -> Result<FileList, DriveApiError> {
+        let mut query = format!("'{parent_id}' in parents and trashed=false");
+        if let Some(mime_type) = mime_type {
+            query.push_str(&format!(" and mimeType='{mime_type}'"));
+        }
+        let page_size = page_size.clamp(1, 1000).to_string();
         let mut request = self
             .http
             .get(DRIVE_FILES_URL)
             .bearer_auth(access_token)
             .query(&[
                 ("q", query.as_str()),
-                ("pageSize", "1000"),
+                ("pageSize", page_size.as_str()),
                 ("fields", &format!("nextPageToken,files({FILE_FIELDS})")),
                 ("supportsAllDrives", "true"),
                 ("includeItemsFromAllDrives", "true"),
             ]);
+        if let Some(drive_id) = drive_id {
+            request = request.query(&[("corpora", "drive"), ("driveId", drive_id)]);
+        }
         if let Some(resource_key) = parent_resource_key {
             request = request.header(
                 "X-Goog-Drive-Resource-Keys",
@@ -119,6 +190,27 @@ impl DriveClient {
         }
 
         decode_response(request.send().await.context("send files.list")?).await
+    }
+
+    pub async fn list_shared_drives_page_size(
+        &self,
+        access_token: &str,
+        page_token: Option<&str>,
+        page_size: usize,
+    ) -> Result<SharedDriveList, DriveApiError> {
+        let page_size = page_size.clamp(1, 100).to_string();
+        let mut request = self
+            .http
+            .get(DRIVE_DRIVES_URL)
+            .bearer_auth(access_token)
+            .query(&[
+                ("pageSize", page_size.as_str()),
+                ("fields", "nextPageToken,drives(id,name)"),
+            ]);
+        if let Some(token) = page_token {
+            request = request.query(&[("pageToken", token)]);
+        }
+        decode_response(request.send().await.context("send drives.list")?).await
     }
 
     pub async fn find_by_copy_key(

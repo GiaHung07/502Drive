@@ -83,6 +83,22 @@ pub struct FileList {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SharedDriveList {
+    #[serde(default)]
+    pub next_page_token: Option<String>,
+    #[serde(default)]
+    pub drives: Vec<SharedDrive>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDrive {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DriveAbout {
     #[serde(default)]
     pub user: Option<DriveUser>,

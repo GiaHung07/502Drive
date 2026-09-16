@@ -24,6 +24,8 @@ pub struct TelegramConfig {
     pub bot_token: String,
     pub owner_telegram_id: i64,
     pub progress_edit_min_interval_ms: u64,
+    #[serde(default = "default_telegram_language")]
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -152,6 +154,7 @@ impl AppConfig {
         if self.telegram.progress_edit_min_interval_ms == 0 {
             bail!("telegram.progress_edit_min_interval_ms must be > 0");
         }
+        validate_choice("telegram.language", &self.telegram.language, &["vi", "en"])?;
         validate_choice(
             "destination.root_name_policy",
             &self.destination.root_name_policy,
@@ -269,6 +272,7 @@ fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {
         "GDCLONE__TELEGRAM__PROGRESS_EDIT_MIN_INTERVAL_MS",
         &mut config.telegram.progress_edit_min_interval_ms,
     )?;
+    env_string("GDCLONE__TELEGRAM__LANGUAGE", &mut config.telegram.language);
     env_parse(
         "GDCLONE__DESTINATION__AUTO_CONFIRM_CLONE",
         &mut config.destination.auto_confirm_clone,
@@ -326,6 +330,10 @@ fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn default_telegram_language() -> String {
+    "vi".to_string()
+}
+
 fn env_string(key: &str, target: &mut String) {
     if let Ok(value) = env::var(key) {
         *target = value;
@@ -351,6 +359,10 @@ fn env_path(key: &str, target: &mut PathBuf) {
 
 pub fn default_data_dir() -> anyhow::Result<PathBuf> {
     Ok(project_dirs()?.data_dir().to_path_buf())
+}
+
+pub fn default_config_path() -> anyhow::Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().join("config.toml"))
 }
 
 pub fn project_dirs() -> anyhow::Result<ProjectDirs> {

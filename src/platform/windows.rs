@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{env, path::Path, process::Command};
 
 use super::Platform;
 
@@ -11,11 +11,56 @@ impl Platform for WindowsPlatform {
             .into_bytes())
     }
 
-    fn install_service(&self, _config_path: &Path) -> anyhow::Result<()> {
-        anyhow::bail!("windows service install wiring is scheduled for Phase 4")
+    fn install_service(&self, config_path: &Path) -> anyhow::Result<()> {
+        let exe = env::current_exe()?;
+        let task_run = format!(
+            "\"{}\" --config \"{}\" run",
+            exe.display(),
+            config_path.display()
+        );
+        run_schtasks(&[
+            "/Create",
+            "/TN",
+            "gdclone-bot",
+            "/TR",
+            task_run.as_str(),
+            "/SC",
+            "ONLOGON",
+            "/RL",
+            "LIMITED",
+            "/F",
+        ])?;
+        println!("Installed Windows logon task 'gdclone-bot'.");
+        println!("Run now: schtasks /Run /TN gdclone-bot");
+        println!(
+            "Remove: gdclone-bot --config {} service-uninstall",
+            config_path.display()
+        );
+        Ok(())
     }
 
     fn uninstall_service(&self) -> anyhow::Result<()> {
-        anyhow::bail!("windows service uninstall wiring is scheduled for Phase 4")
+        let _ = run_schtasks(&["/End", "/TN", "gdclone-bot"]);
+        run_schtasks(&["/Delete", "/TN", "gdclone-bot", "/F"])?;
+        println!("Removed Windows logon task 'gdclone-bot'.");
+        Ok(())
     }
+}
+
+fn run_schtasks(args: &[&str]) -> anyhow::Result<()> {
+    let output = Command::new("schtasks").args(args).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    anyhow::bail!(
+        "schtasks failed: {}{}",
+        stderr.trim(),
+        if stdout.trim().is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", stdout.trim())
+        }
+    )
 }

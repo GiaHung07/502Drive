@@ -21,6 +21,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0005_adaptive_poll",
         include_str!("../../migrations/0005_adaptive_poll.sql"),
     ),
+    (
+        "0006_telegram_preferences",
+        include_str!("../../migrations/0006_telegram_preferences.sql"),
+    ),
 ];
 
 #[derive(Clone)]

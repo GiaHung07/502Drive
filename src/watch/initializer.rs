@@ -201,10 +201,12 @@ async fn promote_job_mappings_to_watch(
                 "INSERT INTO source_mappings (
                      scope_type, scope_id, source_item_id, destination_item_id,
                      source_parent_id, destination_parent_id, mime_type, source_name,
+                     source_version, source_modified_time, source_md5_checksum,
                      mapping_state, updated_at_ms
                  )
                  SELECT 'watch', ?2, source_item_id, destination_item_id,
                         source_parent_id, destination_parent_id, mime_type, source_name,
+                        source_version, source_modified_time, source_md5_checksum,
                         mapping_state, updated_at_ms
                  FROM source_mappings
                  WHERE scope_type = 'job' AND scope_id = ?1
@@ -214,6 +216,9 @@ async fn promote_job_mappings_to_watch(
                      destination_parent_id = excluded.destination_parent_id,
                      mime_type           = excluded.mime_type,
                      source_name         = excluded.source_name,
+                     source_version      = excluded.source_version,
+                     source_modified_time = excluded.source_modified_time,
+                     source_md5_checksum = excluded.source_md5_checksum,
                      mapping_state       = excluded.mapping_state,
                      updated_at_ms       = excluded.updated_at_ms",
                 rusqlite::params![job_id_owned, watch_id_owned],

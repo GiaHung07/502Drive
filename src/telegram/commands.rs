@@ -5,6 +5,8 @@ use teloxide::utils::command::BotCommands;
 pub enum Command {
     #[command(description = "khởi động bot và xem hướng dẫn")]
     Start,
+    #[command(description = "mở bảng điều khiển chính")]
+    Menu,
     #[command(description = "hướng dẫn đăng nhập Google trên máy chạy bot")]
     Connect,
     #[command(description = "xem trạng thái tài khoản Google")]
@@ -46,20 +48,20 @@ pub enum Command {
     #[command(description = "thu hồi quyền dùng bot của user id")]
     Revoke(String),
     // ── Watch commands ────────────────────────────────────────────────────────
-    #[command(description = "theo dõi folder Drive: /watch <nguồn> <đích>")]
+    #[command(description = "theo dõi thư mục nguồn sang thư mục đích")]
     Watch(String),
-    #[command(description = "liệt kê watch subscription")]
+    #[command(description = "liệt kê thư mục đang theo dõi")]
     Watches,
-    #[command(description = "xem chi tiết watch subscription")]
+    #[command(description = "xem chi tiết đồng bộ")]
     WatchStatus(String),
-    #[command(description = "tạm dừng watch subscription")]
+    #[command(description = "tạm dừng đồng bộ")]
     WatchPause(String),
-    #[command(description = "tiếp tục watch subscription")]
+    #[command(description = "tiếp tục đồng bộ")]
     WatchResume(String),
-    /// Policy string: "<watch_id> <content_update_policy>"
-    /// valid policies: versioned_copy | replace_copy | manual_confirmation
-    #[command(description = "đặt policy cập nhật nội dung cho watch")]
+    /// Cú pháp: "<id_watch> <policy>"
+    /// policy hợp lệ: versioned_copy | replace_copy | manual_confirmation
+    #[command(description = "đổi cách xử lý khi file nguồn thay đổi")]
     WatchPolicy(String),
-    #[command(description = "dừng và xóa watch subscription")]
+    #[command(description = "dừng theo dõi thư mục")]
     Unwatch(String),
 }

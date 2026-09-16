@@ -86,6 +86,9 @@ async fn job_report_contains_items_and_folder_mappings() {
             destination_parent_id: Some("dest-parent".to_string()),
             mime_type: FOLDER_MIME_TYPE.to_string(),
             source_name: "folder".to_string(),
+            source_version: None,
+            source_modified_time: None,
+            source_md5_checksum: None,
         },
     )
     .await

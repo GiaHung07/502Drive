@@ -18,4 +18,3 @@ Rotate credentials:
 3. Remove old local credential material only after backup.
 4. Run `gdclone-bot auth login`.
 5. Run `gdclone-bot doctor`.
-

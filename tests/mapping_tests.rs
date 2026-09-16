@@ -40,6 +40,9 @@ async fn stores_and_reads_source_mapping() {
             destination_parent_id: Some("dest".to_string()),
             mime_type: "application/vnd.google-apps.folder".to_string(),
             source_name: "Folder".to_string(),
+            source_version: None,
+            source_modified_time: None,
+            source_md5_checksum: None,
         },
     )
     .await
@@ -88,6 +91,9 @@ async fn marks_item_done_and_mapping_supports_resume_idempotency() {
             destination_parent_id: Some("dest".to_string()),
             mime_type: "application/octet-stream".to_string(),
             source_name: "name".to_string(),
+            source_version: None,
+            source_modified_time: None,
+            source_md5_checksum: None,
         },
     )
     .await
@@ -99,4 +105,101 @@ async fn marks_item_done_and_mapping_supports_resume_idempotency() {
             .unwrap(),
         Some("dst-file".to_string())
     );
+}
+
+#[tokio::test]
+async fn watch_active_destination_ignores_detached_mapping() {
+    let db = test_db().await;
+    record_mapping(
+        &db,
+        MappingRecord {
+            scope_type: "watch".to_string(),
+            scope_id: "watch-1".to_string(),
+            source_item_id: "src-folder".to_string(),
+            destination_item_id: "dst-folder".to_string(),
+            source_parent_id: None,
+            destination_parent_id: Some("dst-root".to_string()),
+            mime_type: "application/vnd.google-apps.folder".to_string(),
+            source_name: "Folder".to_string(),
+            source_version: Some("7".to_string()),
+            source_modified_time: Some("2026-07-04T00:00:00Z".to_string()),
+            source_md5_checksum: Some("abc".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+    repo::mark_watch_mapping_detached(&db, "watch-1", "src-folder")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repo::watch_mapping_destination(&db, "watch-1", "src-folder")
+            .await
+            .unwrap(),
+        Some("dst-folder".to_string())
+    );
+    assert_eq!(
+        repo::active_watch_mapping_destination(&db, "watch-1", "src-folder")
+            .await
+            .unwrap(),
+        None
+    );
+    let fingerprint = repo::watch_mapping_fingerprint(&db, "watch-1", "src-folder")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fingerprint.name.as_deref(), Some("Folder"));
+    assert_eq!(fingerprint.version.as_deref(), Some("7"));
+    assert_eq!(fingerprint.md5_checksum.as_deref(), Some("abc"));
+}
+
+#[tokio::test]
+async fn watch_folder_scan_lists_only_active_folders() {
+    let db = test_db().await;
+    for (source, dest, mime, state) in [
+        (
+            "src-folder",
+            "dst-folder",
+            "application/vnd.google-apps.folder",
+            "active",
+        ),
+        ("src-file", "dst-file", "application/pdf", "active"),
+        (
+            "old-folder",
+            "old-dst",
+            "application/vnd.google-apps.folder",
+            "detached",
+        ),
+    ] {
+        record_mapping(
+            &db,
+            MappingRecord {
+                scope_type: "watch".to_string(),
+                scope_id: "watch-1".to_string(),
+                source_item_id: source.to_string(),
+                destination_item_id: dest.to_string(),
+                source_parent_id: None,
+                destination_parent_id: None,
+                mime_type: mime.to_string(),
+                source_name: source.to_string(),
+                source_version: None,
+                source_modified_time: None,
+                source_md5_checksum: None,
+            },
+        )
+        .await
+        .unwrap();
+        if state != "active" {
+            repo::mark_watch_mapping_detached(&db, "watch-1", source)
+                .await
+                .unwrap();
+        }
+    }
+
+    let folders = repo::active_watch_folder_mappings(&db, "watch-1")
+        .await
+        .unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].source_item_id, "src-folder");
+    assert_eq!(folders[0].destination_item_id, "dst-folder");
 }

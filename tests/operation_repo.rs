@@ -124,6 +124,29 @@ async fn default_destination_profile_is_single_per_account() {
         .unwrap();
     assert_eq!(profile.destination_parent_id, "folder-b");
 
+    let first_b = profile.id.clone();
+    let second_b = repo::upsert_destination_profile(
+        &db,
+        NewDestinationProfile {
+            google_account_id: "default".to_string(),
+            label: "folder-b renamed".to_string(),
+            destination_parent_id: "folder-b".to_string(),
+            destination_drive_id: None,
+            destination_resource_key: None,
+            is_default: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(second_b, first_b);
+
+    let recent = repo::list_recent_destinations(&db, "default", 5)
+        .await
+        .unwrap();
+    assert_eq!(recent.len(), 2);
+    assert_eq!(recent[0].destination_parent_id, "folder-b");
+    assert_eq!(recent[0].label, "folder-b renamed");
+
     assert_eq!(
         repo::clear_default_destination(&db, "default")
             .await
@@ -171,4 +194,31 @@ async fn callback_state_is_scoped_and_one_time() {
         .await
         .unwrap();
     assert!(replay.is_none());
+}
+
+#[tokio::test]
+async fn telegram_language_preference_round_trips() {
+    let db = test_db().await;
+    assert!(
+        repo::telegram_language_preference(&db, 42)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    repo::set_telegram_language_preference(&db, 42, "en")
+        .await
+        .unwrap();
+    assert_eq!(
+        repo::telegram_language_preference(&db, 42).await.unwrap(),
+        Some("en".to_string())
+    );
+
+    repo::set_telegram_language_preference(&db, 42, "vi")
+        .await
+        .unwrap();
+    assert_eq!(
+        repo::telegram_language_preference(&db, 42).await.unwrap(),
+        Some("vi".to_string())
+    );
 }

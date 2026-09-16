@@ -53,7 +53,16 @@ pub fn parse_drive_reference(input: &str) -> Result<DriveReference, DriveLinkErr
         });
     }
 
-    let url = Url::parse(input).map_err(|_| DriveLinkError::Invalid)?;
+    let bare_google_url = input.starts_with("drive.google.com/")
+        || input.starts_with("docs.google.com/")
+        || input.starts_with("drive.usercontent.google.com/")
+        || input.starts_with("lh3.googleusercontent.com/");
+    let normalized = if bare_google_url {
+        format!("https://{input}")
+    } else {
+        input.to_string()
+    };
+    let url = Url::parse(&normalized).map_err(|_| DriveLinkError::Invalid)?;
     let host = url.host_str().unwrap_or_default();
     if !is_supported_host(host) {
         return Err(DriveLinkError::Invalid);

@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible Drive502 problem.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact commands or Telegram actions.
+      placeholder: |
+        1. Run ...
+        2. Send /menu
+        3. Tap ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Drive502 version/commit:
+        Install method:
+        telegram.language:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact tokens, emails, private file names, and IDs if needed.
+      render: text

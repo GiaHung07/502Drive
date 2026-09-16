@@ -52,6 +52,64 @@ async fn create_and_list_watch() {
     assert_eq!(watches[0].status, "initializing");
 }
 
+#[tokio::test]
+async fn watch_prefix_lookup_is_user_scoped() {
+    let (db, cursor_id) = test_db_with_cursor().await;
+
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor_id.clone(),
+            telegram_user_id: 42,
+            chat_id: 100,
+            source_root_id: "src-root".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "dst-root".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+    repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id,
+            telegram_user_id: 99,
+            chat_id: 100,
+            source_root_id: "other-src".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "other-dst".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    let short = &watch_id[..8];
+    let matches = repo::watches_for_user_prefix(&db, 42, short, 2)
+        .await
+        .unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].id, watch_id);
+
+    let matches = repo::watches_for_user_prefix(&db, 99, short, 2)
+        .await
+        .unwrap();
+    assert!(matches.is_empty());
+}
+
 // ── pause / resume state machine ──────────────────────────────────────────────
 
 #[tokio::test]
@@ -94,12 +152,151 @@ async fn watch_pause_and_resume() {
     assert_eq!(watches[0].status, "paused");
 
     // Resume from paused → catching_up.
-    let resumed = repo::resume_watch_for_user(&db, 1, &watch_id)
+    let resumed = repo::resume_watch_for_user(&db, 1, &watch_id, 100)
         .await
         .unwrap();
-    assert!(resumed);
+    assert_eq!(resumed, repo::WatchResumeResult::Resumed);
     let watches = repo::list_watches_for_user(&db, 1).await.unwrap();
     assert_eq!(watches[0].status, "catching_up");
+}
+
+#[tokio::test]
+async fn watch_resume_over_backlog_limit_needs_reconcile() {
+    let (db, cursor_id) = test_db_with_cursor().await;
+
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor_id.clone(),
+            telegram_user_id: 1,
+            chat_id: 1,
+            source_root_id: "src".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "dst".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    repo::commit_change_page(
+        &db,
+        &cursor_id,
+        vec![
+            repo::NewChangeEventRow {
+                cursor_id: cursor_id.clone(),
+                request_page_token: "tok".into(),
+                ordinal_in_page: 0,
+                file_id: "a".into(),
+                removed: false,
+                file_json: None,
+            },
+            repo::NewChangeEventRow {
+                cursor_id: cursor_id.clone(),
+                request_page_token: "tok".into(),
+                ordinal_in_page: 1,
+                file_id: "b".into(),
+                removed: false,
+                file_json: None,
+            },
+        ],
+        None,
+        Some("tok2"),
+        0,
+    )
+    .await
+    .unwrap();
+
+    repo::update_watch_status(&db, &watch_id, "active")
+        .await
+        .unwrap();
+    assert!(repo::pause_watch_for_user(&db, 1, &watch_id).await.unwrap());
+
+    let resumed = repo::resume_watch_for_user(&db, 1, &watch_id, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed,
+        repo::WatchResumeResult::NeedsReconcile { pending_events: 2 }
+    );
+    let watches = repo::list_watches_for_user(&db, 1).await.unwrap();
+    assert_eq!(watches[0].status, "needs_reconcile");
+}
+
+#[tokio::test]
+async fn paused_watch_over_backlog_limit_needs_reconcile() {
+    let (db, cursor_id) = test_db_with_cursor().await;
+
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor_id.clone(),
+            telegram_user_id: 1,
+            chat_id: 1,
+            source_root_id: "src".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "dst".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+    repo::update_watch_status(&db, &watch_id, "active")
+        .await
+        .unwrap();
+    assert!(repo::pause_watch_for_user(&db, 1, &watch_id).await.unwrap());
+
+    repo::commit_change_page(
+        &db,
+        &cursor_id,
+        vec![
+            repo::NewChangeEventRow {
+                cursor_id: cursor_id.clone(),
+                request_page_token: "tok".into(),
+                ordinal_in_page: 0,
+                file_id: "a".into(),
+                removed: false,
+                file_json: None,
+            },
+            repo::NewChangeEventRow {
+                cursor_id: cursor_id.clone(),
+                request_page_token: "tok".into(),
+                ordinal_in_page: 1,
+                file_id: "b".into(),
+                removed: false,
+                file_json: None,
+            },
+        ],
+        None,
+        Some("tok2"),
+        0,
+    )
+    .await
+    .unwrap();
+
+    let changed = repo::mark_paused_watches_over_backlog_limit(&db, &cursor_id, 2)
+        .await
+        .unwrap();
+    assert_eq!(changed, 0);
+
+    let changed = repo::mark_paused_watches_over_backlog_limit(&db, &cursor_id, 1)
+        .await
+        .unwrap();
+    assert_eq!(changed, 1);
+    let watches = repo::list_watches_for_user(&db, 1).await.unwrap();
+    assert_eq!(watches[0].status, "needs_reconcile");
 }
 
 // ── stop ─────────────────────────────────────────────────────────────────────
@@ -173,6 +370,69 @@ async fn advance_consumed_sequence() {
 
     let watches = repo::list_watches_for_user(&db, 9).await.unwrap();
     assert_eq!(watches[0].last_consumed_sequence, 42);
+}
+
+#[tokio::test]
+async fn watch_backlog_tracks_cursor_gap() {
+    let (db, cursor_id) = test_db_with_cursor().await;
+
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor_id.clone(),
+            telegram_user_id: 9,
+            chat_id: 9,
+            source_root_id: "s".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "d".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    repo::commit_change_page(
+        &db,
+        &cursor_id,
+        vec![
+            repo::NewChangeEventRow {
+                cursor_id: cursor_id.clone(),
+                request_page_token: "tok".into(),
+                ordinal_in_page: 0,
+                file_id: "a".into(),
+                removed: false,
+                file_json: None,
+            },
+            repo::NewChangeEventRow {
+                cursor_id: cursor_id.clone(),
+                request_page_token: "tok".into(),
+                ordinal_in_page: 1,
+                file_id: "b".into(),
+                removed: false,
+                file_json: None,
+            },
+        ],
+        None,
+        Some("tok2"),
+        0,
+    )
+    .await
+    .unwrap();
+
+    let backlog = repo::watch_backlog(&db, &watch_id).await.unwrap().unwrap();
+    assert_eq!(backlog.pending_events, 2);
+
+    repo::advance_watch_consumed_sequence(&db, &watch_id, 1)
+        .await
+        .unwrap();
+    let backlog = repo::watch_backlog(&db, &watch_id).await.unwrap().unwrap();
+    assert_eq!(backlog.pending_events, 1);
 }
 
 // ── per-user isolation ────────────────────────────────────────────────────────

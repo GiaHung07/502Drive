@@ -157,6 +157,48 @@ pub async fn consume_callback_state(
         .await?)
 }
 
+pub async fn telegram_language_preference(
+    db: &Database,
+    telegram_user_id: i64,
+) -> anyhow::Result<Option<String>> {
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT language
+                 FROM telegram_user_preferences
+                 WHERE telegram_user_id = ?1",
+                params![telegram_user_id],
+                |row| row.get(0),
+            )
+            .optional()
+        })
+        .await?)
+}
+
+pub async fn set_telegram_language_preference(
+    db: &Database,
+    telegram_user_id: i64,
+    language: &str,
+) -> anyhow::Result<()> {
+    let language = language.to_string();
+    db.conn()
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO telegram_user_preferences
+                    (telegram_user_id, language, updated_at_ms)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(telegram_user_id) DO UPDATE SET
+                    language = excluded.language,
+                    updated_at_ms = excluded.updated_at_ms",
+                params![telegram_user_id, language, now_ms()],
+            )?;
+            Ok::<(), rusqlite::Error>(())
+        })
+        .await?;
+    Ok(())
+}
+
 pub async fn delete_expired_callback_states(db: &Database) -> anyhow::Result<usize> {
     Ok(db
         .conn()
@@ -1486,12 +1528,30 @@ pub async fn upsert_destination_profile(
     db: &Database,
     profile: NewDestinationProfile,
 ) -> anyhow::Result<String> {
-    let id = Uuid::new_v4().to_string();
-    let id_for_db = id.clone();
-    db.conn()
+    Ok(db
+        .conn()
         .call(move |conn| {
             let now = now_ms();
             let tx = conn.transaction()?;
+            let existing_id = tx
+                .query_row(
+                    "SELECT id
+                     FROM destination_profiles
+                     WHERE google_account_id = ?1
+                       AND destination_parent_id = ?2
+                       AND destination_drive_id IS ?3
+                       AND destination_resource_key IS ?4
+                     ORDER BY is_default DESC, updated_at_ms DESC
+                     LIMIT 1",
+                    params![
+                        profile.google_account_id,
+                        profile.destination_parent_id,
+                        profile.destination_drive_id,
+                        profile.destination_resource_key,
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
             if profile.is_default {
                 tx.execute(
                     "UPDATE destination_profiles
@@ -1500,28 +1560,45 @@ pub async fn upsert_destination_profile(
                     params![profile.google_account_id, now],
                 )?;
             }
-            tx.execute(
-                "INSERT INTO destination_profiles (
-                    id, google_account_id, label, destination_parent_id,
-                    destination_drive_id, destination_resource_key, is_default,
-                    last_validated_at_ms, created_at_ms, updated_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?8)",
-                params![
-                    id_for_db,
-                    profile.google_account_id,
-                    profile.label,
-                    profile.destination_parent_id,
-                    profile.destination_drive_id,
-                    profile.destination_resource_key,
-                    i64::from(profile.is_default),
-                    now,
-                ],
-            )?;
+            let id = match existing_id {
+                Some(id) => {
+                    tx.execute(
+                        "UPDATE destination_profiles
+                         SET label = ?1,
+                             is_default = ?2,
+                             last_validated_at_ms = ?3,
+                             updated_at_ms = ?3
+                         WHERE id = ?4",
+                        params![profile.label, i64::from(profile.is_default), now, id],
+                    )?;
+                    id
+                }
+                None => {
+                    let id = Uuid::new_v4().to_string();
+                    tx.execute(
+                        "INSERT INTO destination_profiles (
+                            id, google_account_id, label, destination_parent_id,
+                            destination_drive_id, destination_resource_key, is_default,
+                            last_validated_at_ms, created_at_ms, updated_at_ms
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?8)",
+                        params![
+                            id,
+                            profile.google_account_id,
+                            profile.label,
+                            profile.destination_parent_id,
+                            profile.destination_drive_id,
+                            profile.destination_resource_key,
+                            i64::from(profile.is_default),
+                            now,
+                        ],
+                    )?;
+                    id
+                }
+            };
             tx.commit()?;
-            Ok::<(), rusqlite::Error>(())
+            Ok::<String, rusqlite::Error>(id)
         })
-        .await?;
-    Ok(id)
+        .await?)
 }
 
 pub async fn default_destination_profile(
@@ -1581,7 +1658,7 @@ pub async fn list_recent_destinations(
     limit: usize,
 ) -> anyhow::Result<Vec<DestinationProfile>> {
     let google_account_id = google_account_id.to_string();
-    let limit = limit as i64;
+    let fetch_limit = (limit.saturating_mul(5).max(limit)) as i64;
     Ok(db
         .conn()
         .call(move |conn| {
@@ -1594,7 +1671,7 @@ pub async fn list_recent_destinations(
                  LIMIT ?2",
             )?;
             let rows = stmt
-                .query_map(params![google_account_id, limit], |row| {
+                .query_map(params![google_account_id, fetch_limit], |row| {
                     Ok(DestinationProfile {
                         id: row.get(0)?,
                         google_account_id: row.get(1)?,
@@ -1606,7 +1683,21 @@ pub async fn list_recent_destinations(
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok::<Vec<DestinationProfile>, rusqlite::Error>(rows)
+            let mut deduped = Vec::new();
+            for row in rows {
+                if deduped.iter().any(|existing: &DestinationProfile| {
+                    existing.destination_parent_id == row.destination_parent_id
+                        && existing.destination_drive_id == row.destination_drive_id
+                        && existing.destination_resource_key == row.destination_resource_key
+                }) {
+                    continue;
+                }
+                deduped.push(row);
+                if deduped.len() >= limit {
+                    break;
+                }
+            }
+            Ok::<Vec<DestinationProfile>, rusqlite::Error>(deduped)
         })
         .await?)
 }
@@ -2163,6 +2254,35 @@ pub async fn watch_for_user(
         .await?)
 }
 
+pub async fn watches_for_user_prefix(
+    db: &Database,
+    telegram_user_id: i64,
+    watch_id_prefix: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<WatchSubscription>> {
+    let prefix = format!("{}%", watch_id_prefix.trim());
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let sql = format!(
+                "SELECT {WATCH_COLS}
+                 FROM watch_subscriptions
+                 WHERE telegram_user_id = ?1 AND id LIKE ?2
+                 ORDER BY updated_at_ms DESC, id
+                 LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(
+                    params![telegram_user_id, prefix, limit as i64],
+                    row_to_watch,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok::<Vec<WatchSubscription>, rusqlite::Error>(rows)
+        })
+        .await?)
+}
+
 /// All active watches — used by the dispatcher.
 pub async fn active_watches(db: &Database) -> anyhow::Result<Vec<WatchSubscription>> {
     Ok(db
@@ -2200,6 +2320,67 @@ pub async fn update_watch_status(
         })
         .await?;
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchBacklog {
+    pub cursor_last_event_sequence: i64,
+    pub last_consumed_sequence: i64,
+    pub pending_events: i64,
+}
+
+pub async fn watch_backlog(db: &Database, watch_id: &str) -> anyhow::Result<Option<WatchBacklog>> {
+    let watch_id = watch_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT c.last_event_sequence, w.last_consumed_sequence
+                 FROM watch_subscriptions w
+                 JOIN change_cursors c ON c.id = w.cursor_id
+                 WHERE w.id = ?1",
+                params![watch_id],
+                |row| {
+                    let cursor_last_event_sequence: i64 = row.get(0)?;
+                    let last_consumed_sequence: i64 = row.get(1)?;
+                    Ok(WatchBacklog {
+                        cursor_last_event_sequence,
+                        last_consumed_sequence,
+                        pending_events: (cursor_last_event_sequence - last_consumed_sequence)
+                            .max(0),
+                    })
+                },
+            )
+            .optional()
+        })
+        .await?)
+}
+
+pub async fn mark_paused_watches_over_backlog_limit(
+    db: &Database,
+    cursor_id: &str,
+    max_backlog_events_per_watch: u64,
+) -> anyhow::Result<usize> {
+    let cursor_id = cursor_id.to_string();
+    let backlog_limit = i64::try_from(max_backlog_events_per_watch).unwrap_or(i64::MAX);
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let changed = conn.execute(
+                "UPDATE watch_subscriptions
+                 SET status = 'needs_reconcile', updated_at_ms = ?1
+                 WHERE cursor_id = ?2
+                   AND status = 'paused'
+                   AND (
+                       SELECT last_event_sequence
+                       FROM change_cursors
+                       WHERE id = ?2
+                   ) - last_consumed_sequence > ?3",
+                params![now_ms(), cursor_id, backlog_limit],
+            )?;
+            Ok::<usize, rusqlite::Error>(changed)
+        })
+        .await?)
 }
 
 pub async fn advance_watch_consumed_sequence(
@@ -2243,22 +2424,65 @@ pub async fn pause_watch_for_user(
         .await?)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchResumeResult {
+    Resumed,
+    NeedsReconcile { pending_events: i64 },
+    NotResumable,
+}
+
 pub async fn resume_watch_for_user(
     db: &Database,
     telegram_user_id: i64,
     watch_id: &str,
-) -> anyhow::Result<bool> {
+    max_backlog_events_per_watch: u64,
+) -> anyhow::Result<WatchResumeResult> {
     let watch_id = watch_id.to_string();
+    let backlog_limit = i64::try_from(max_backlog_events_per_watch).unwrap_or(i64::MAX);
     Ok(db
         .conn()
         .call(move |conn| {
-            let changed = conn.execute(
+            let Some((status, cursor_last, consumed)) = conn
+                .query_row(
+                    "SELECT w.status, c.last_event_sequence, w.last_consumed_sequence
+                     FROM watch_subscriptions w
+                     JOIN change_cursors c ON c.id = w.cursor_id
+                     WHERE w.telegram_user_id = ?1 AND w.id = ?2",
+                    params![telegram_user_id, watch_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+            else {
+                return Ok::<WatchResumeResult, rusqlite::Error>(WatchResumeResult::NotResumable);
+            };
+            if status != "paused" {
+                return Ok(WatchResumeResult::NotResumable);
+            }
+
+            let pending_events = (cursor_last - consumed).max(0);
+            let next_status = if pending_events > backlog_limit {
+                "needs_reconcile"
+            } else {
+                "catching_up"
+            };
+            conn.execute(
                 "UPDATE watch_subscriptions
-                 SET status = 'catching_up', updated_at_ms = ?1
-                 WHERE telegram_user_id = ?2 AND id = ?3 AND status = 'paused'",
-                params![now_ms(), telegram_user_id, watch_id],
+                 SET status = ?1, updated_at_ms = ?2
+                 WHERE telegram_user_id = ?3 AND id = ?4 AND status = 'paused'",
+                params![next_status, now_ms(), telegram_user_id, watch_id],
             )?;
-            Ok::<bool, rusqlite::Error>(changed > 0)
+
+            if next_status == "needs_reconcile" {
+                Ok(WatchResumeResult::NeedsReconcile { pending_events })
+            } else {
+                Ok(WatchResumeResult::Resumed)
+            }
         })
         .await?)
 }
@@ -2442,6 +2666,102 @@ pub async fn watch_mapping_destination(
         .await?)
 }
 
+pub async fn active_watch_mapping_destination(
+    db: &Database,
+    watch_id: &str,
+    source_item_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let watch_id = watch_id.to_string();
+    let source_item_id = source_item_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT destination_item_id FROM source_mappings
+                 WHERE scope_type = 'watch'
+                   AND scope_id = ?1
+                   AND source_item_id = ?2
+                   AND mapping_state = 'active'",
+                params![watch_id, source_item_id],
+                |row| row.get(0),
+            )
+            .optional()
+        })
+        .await?)
+}
+
+#[derive(Debug, Clone)]
+pub struct ActiveWatchFolderMapping {
+    pub source_item_id: String,
+    pub destination_item_id: String,
+}
+
+pub async fn active_watch_folder_mappings(
+    db: &Database,
+    watch_id: &str,
+) -> anyhow::Result<Vec<ActiveWatchFolderMapping>> {
+    let watch_id = watch_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT source_item_id, destination_item_id
+                 FROM source_mappings
+                 WHERE scope_type = 'watch'
+                   AND scope_id = ?1
+                   AND mime_type = 'application/vnd.google-apps.folder'
+                   AND mapping_state = 'active'
+                 ORDER BY updated_at_ms ASC",
+            )?;
+            stmt.query_map(params![watch_id], |row| {
+                Ok(ActiveWatchFolderMapping {
+                    source_item_id: row.get(0)?,
+                    destination_item_id: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await?)
+}
+
+#[derive(Debug, Clone)]
+pub struct WatchMappingFingerprint {
+    pub parents: Vec<String>,
+    pub name: Option<String>,
+    pub md5_checksum: Option<String>,
+    pub version: Option<String>,
+}
+
+pub async fn watch_mapping_fingerprint(
+    db: &Database,
+    watch_id: &str,
+    source_item_id: &str,
+) -> anyhow::Result<Option<WatchMappingFingerprint>> {
+    let watch_id = watch_id.to_string();
+    let source_item_id = source_item_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT source_parent_id, source_name, source_md5_checksum, source_version
+                 FROM source_mappings
+                 WHERE scope_type = 'watch' AND scope_id = ?1 AND source_item_id = ?2",
+                params![watch_id, source_item_id],
+                |row| {
+                    let parent: Option<String> = row.get(0)?;
+                    Ok(WatchMappingFingerprint {
+                        parents: parent.into_iter().collect(),
+                        name: row.get(1)?,
+                        md5_checksum: row.get(2)?,
+                        version: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+        })
+        .await?)
+}
+
 /// Check if a source_parent_id is mapped in this watch (i.e. is a tracked folder).
 pub async fn is_parent_in_watch_tree(
     db: &Database,
@@ -2538,7 +2858,8 @@ pub async fn mark_watch_mapping_active(
 /// Delete raw change_events that:
 ///  1. Are older than `retention_days` days; AND
 ///  2. Every still-active watch associated with the cursor has already
-///     consumed past that sequence (last_consumed_sequence >= event.sequence).
+///     consumed past that sequence, or the watcher has been forced to
+///     `needs_reconcile`.
 ///
 /// Returns the number of deleted rows.
 pub async fn prune_consumed_events(db: &Database, retention_days: u64) -> anyhow::Result<usize> {
@@ -2550,12 +2871,12 @@ pub async fn prune_consumed_events(db: &Database, retention_days: u64) -> anyhow
                 "DELETE FROM change_events
                  WHERE received_at_ms < ?1
                    AND sequence <= (
-                       -- minimum last_consumed across all non-stopped watches
+                       -- minimum last_consumed across watches that still block pruning
                        -- for the same cursor
                        SELECT COALESCE(MIN(ws.last_consumed_sequence), sequence)
                        FROM change_cursors cc
                        JOIN watch_subscriptions ws ON ws.cursor_id = cc.id
-                          AND ws.status NOT IN ('stopped')
+                          AND ws.status NOT IN ('stopped', 'needs_reconcile')
                        WHERE cc.id = change_events.cursor_id
                    )",
                 params![cutoff_ms],

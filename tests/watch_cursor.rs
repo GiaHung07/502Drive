@@ -124,6 +124,129 @@ async fn commit_page_dedupe_on_replay() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn failed_event_application_stays_pending() {
+    let db = test_db().await;
+
+    let cursor = repo::upsert_change_cursor(&db, "default", "user", None, "tok")
+        .await
+        .unwrap();
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor.id.clone(),
+            telegram_user_id: 1,
+            chat_id: 1,
+            source_root_id: "src".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "dst".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+    let seq = repo::commit_change_page(
+        &db,
+        &cursor.id,
+        vec![repo::NewChangeEventRow {
+            cursor_id: cursor.id.clone(),
+            request_page_token: "tok".into(),
+            ordinal_in_page: 0,
+            file_id: "file-x".into(),
+            removed: false,
+            file_json: None,
+        }],
+        None,
+        Some("tok-2"),
+        0,
+    )
+    .await
+    .unwrap();
+
+    repo::upsert_event_application(&db, &watch_id, seq, "new_item", "failed")
+        .await
+        .unwrap();
+    let pending = repo::pending_events_for_watch(&db, &watch_id, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].sequence, seq);
+
+    repo::upsert_event_application(&db, &watch_id, seq, "new_item", "applied")
+        .await
+        .unwrap();
+    let pending = repo::pending_events_for_watch(&db, &watch_id, 0, 10)
+        .await
+        .unwrap();
+    assert!(pending.is_empty());
+
+    repo::upsert_event_application(&db, &watch_id, seq, "new_item", "ignored")
+        .await
+        .unwrap();
+    let pending = repo::pending_events_for_watch(&db, &watch_id, 0, 10)
+        .await
+        .unwrap();
+    assert!(pending.is_empty());
+}
+
+#[tokio::test]
+async fn needs_reconcile_watch_does_not_block_event_prune() {
+    let db = test_db().await;
+
+    let cursor = repo::upsert_change_cursor(&db, "default", "user", None, "tok")
+        .await
+        .unwrap();
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor.id.clone(),
+            telegram_user_id: 1,
+            chat_id: 1,
+            source_root_id: "src".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_root_id: "dst".into(),
+            destination_drive_id: None,
+            content_update_policy: "versioned_copy".into(),
+            deletion_policy: "preserve_destination".into(),
+            move_out_policy: "detach".into(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+    repo::commit_change_page(
+        &db,
+        &cursor.id,
+        vec![repo::NewChangeEventRow {
+            cursor_id: cursor.id.clone(),
+            request_page_token: "tok".into(),
+            ordinal_in_page: 0,
+            file_id: "file-x".into(),
+            removed: false,
+            file_json: None,
+        }],
+        None,
+        Some("tok-2"),
+        0,
+    )
+    .await
+    .unwrap();
+    repo::update_watch_status(&db, &watch_id, "needs_reconcile")
+        .await
+        .unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    assert_eq!(repo::prune_consumed_events(&db, 0).await.unwrap(), 1);
+}
+
 // ── error counter increments on record_cursor_error ───────────────────────────
 
 #[tokio::test]

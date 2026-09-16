@@ -4,7 +4,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use gdclone_bot::config::AppConfig;
+use gdclone_bot::config::{AppConfig, default_config_path};
 use uuid::Uuid;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -12,6 +12,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "GDCLONE__TELEGRAM__BOT_TOKEN",
     "GDCLONE__TELEGRAM__OWNER_TELEGRAM_ID",
     "GDCLONE__TELEGRAM__PROGRESS_EDIT_MIN_INTERVAL_MS",
+    "GDCLONE__TELEGRAM__LANGUAGE",
     "GDCLONE__DESTINATION__AUTO_CONFIRM_CLONE",
     "GDCLONE__DESTINATION__WRAP_SINGLE_FILE_IN_FOLDER",
     "GDCLONE__GOOGLE_OAUTH__CLIENT_ID",
@@ -56,14 +57,26 @@ fn sample_config_shape_loads() {
 
     let config = AppConfig::load(&path).unwrap();
     assert_eq!(config.engine.default_duplicate_policy, "skip_same_source");
+    assert_eq!(config.telegram.language, "vi");
 
     let _ = fs::remove_file(path);
+}
+
+#[test]
+fn default_config_path_uses_project_config_dir() {
+    let path = default_config_path().unwrap();
+    assert_eq!(
+        path.file_name().and_then(|v| v.to_str()),
+        Some("config.toml")
+    );
+    assert!(path.components().any(|c| c.as_os_str() == "gdclone-bot"));
 }
 
 #[test]
 fn env_overrides_operational_fields() {
     let _guard = EnvGuard::new(&[
         ("GDCLONE__TELEGRAM__PROGRESS_EDIT_MIN_INTERVAL_MS", "1500"),
+        ("GDCLONE__TELEGRAM__LANGUAGE", "en"),
         ("GDCLONE__DESTINATION__AUTO_CONFIRM_CLONE", "true"),
         ("GDCLONE__ENGINE__INITIAL_WRITE_CONCURRENCY", "3"),
         ("GDCLONE__ENGINE__MAX_RETRY_ATTEMPTS", "4"),
@@ -74,6 +87,7 @@ fn env_overrides_operational_fields() {
 
     let config = AppConfig::load(&path).unwrap();
     assert_eq!(config.telegram.progress_edit_min_interval_ms, 1500);
+    assert_eq!(config.telegram.language, "en");
     assert!(config.destination.auto_confirm_clone);
     assert_eq!(config.engine.initial_write_concurrency, 3);
     assert_eq!(config.engine.max_retry_attempts, 4);

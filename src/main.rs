@@ -16,8 +16,8 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 #[derive(Debug, Parser)]
 #[command(name = "gdclone-bot")]
 struct Cli {
-    #[arg(short, long, default_value = "config.toml")]
-    config: PathBuf,
+    #[arg(short, long)]
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -28,6 +28,9 @@ enum Command {
     Run,
     Doctor,
     Status,
+    Backup {
+        output_dir: PathBuf,
+    },
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
@@ -46,7 +49,10 @@ enum AuthCommand {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let config_path = gdclone_bot::config::resolve_path(&cli.config)?;
+    let config_path = match &cli.config {
+        Some(path) => gdclone_bot::config::resolve_path(path)?,
+        None => gdclone_bot::config::default_config_path()?,
+    };
     let config = AppConfig::load(&config_path)?;
     init_tracing(&config)?;
 
@@ -60,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
             let db = open_db(&config).await?;
             cli::status::run(&db).await
         }
+        Command::Backup { output_dir } => cli::backup::run(&config_path, &config, &output_dir),
         Command::Auth { command } => {
             let db = open_db(&config).await?;
             match command {

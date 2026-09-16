@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 use crate::{
     config::AppConfig,
-    drive::{client::DriveClient, token_manager::TokenManager},
+    drive::{client::DriveClient, token_manager::TokenManager, types::FOLDER_MIME_TYPE},
     engine::{
         mapping::{MappingRecord, record_mapping},
         operation::ScopeType,
@@ -55,11 +55,29 @@ async fn dispatch_one(
     let drive =
         DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
 
+    let cursor = repo::cursor_by_id(db, &watch.cursor_id).await?;
+    if backlog_exceeds_limit(
+        watch.last_consumed_sequence,
+        cursor.last_event_sequence,
+        config.watch.max_backlog_events_per_watch,
+    ) {
+        repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
+        let msg = format!(
+            "⚠️ Watch `{}` cần đồng bộ lại vì backlog vượt {} events.",
+            &watch.id[..8.min(watch.id.len())],
+            config.watch.max_backlog_events_per_watch
+        );
+        let _ = notify_tx.try_send((watch.chat_id, msg));
+        return Ok(());
+    }
+
     let events =
         pending_events_for_watch(db, &watch.id, watch.last_consumed_sequence, DISPATCH_BATCH)
             .await?;
 
     if events.is_empty() {
+        finish_catch_up_if_current(db, watch, watch.last_consumed_sequence).await?;
+        scan_missing_children(config, db, &drive, &token_manager, watch, notify_tx).await?;
         return Ok(());
     }
 
@@ -70,14 +88,19 @@ async fn dispatch_one(
         let in_tree = repo::is_in_watch_tree(db, &watch.id, &event.file_id).await?;
 
         // Parse current file metadata from the event JSON (no extra Drive call yet).
-        let prior = event
-            .file_json
-            .as_deref()
-            .and_then(ItemFingerprint::from_json);
         let file = event
             .file_json
             .as_deref()
             .and_then(|j| serde_json::from_str::<crate::drive::types::DriveFile>(j).ok());
+        let prior = repo::watch_mapping_fingerprint(db, &watch.id, &event.file_id)
+            .await?
+            .map(|f| ItemFingerprint {
+                parents: f.parents,
+                name: f.name,
+                md5: f.md5_checksum,
+                version: f.version,
+                trashed: false,
+            });
 
         // Determine which parents are in-tree.
         let parents_in_tree: Vec<bool> = if let Some(f) = &file {
@@ -100,6 +123,24 @@ async fn dispatch_one(
             file.as_ref(),
             event.removed,
         );
+        if classification == Classification::Ambiguous {
+            repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
+            upsert_event_application(
+                db,
+                &watch.id,
+                event.sequence,
+                classification.as_str(),
+                "failed",
+            )
+            .await?;
+            let msg = format!(
+                "⚠️ Watch `{}` cần đồng bộ lại vì event `{}` không đủ metadata để áp an toàn.",
+                &watch.id[..8.min(watch.id.len())],
+                event.sequence
+            );
+            let _ = notify_tx.try_send((watch.chat_id, msg));
+            break;
+        }
 
         // Record the application row as pending before trying to apply.
         upsert_event_application(
@@ -151,13 +192,153 @@ async fn dispatch_one(
         )
         .await?;
 
-        last_consumed = last_consumed.max(event.sequence);
+        let stored_status = if classification == Classification::Irrelevant {
+            "ignored"
+        } else {
+            final_status
+        };
+        if should_advance_consumed(stored_status) {
+            last_consumed = last_consumed.max(event.sequence);
+        } else {
+            break;
+        }
     }
 
     if last_consumed > watch.last_consumed_sequence {
         advance_watch_consumed_sequence(db, &watch.id, last_consumed).await?;
     }
+    finish_catch_up_if_current(db, watch, last_consumed).await?;
+    scan_missing_children(config, db, &drive, &token_manager, watch, notify_tx).await?;
 
+    Ok(())
+}
+
+fn should_advance_consumed(status: &str) -> bool {
+    matches!(status, "applied" | "ignored")
+}
+
+async fn finish_catch_up_if_current(
+    db: &Database,
+    watch: &WatchSubscription,
+    last_consumed: i64,
+) -> anyhow::Result<()> {
+    if watch.status != "catching_up" {
+        return Ok(());
+    }
+    let cursor = repo::cursor_by_id(db, &watch.cursor_id).await?;
+    if should_finish_catch_up(&watch.status, last_consumed, cursor.last_event_sequence) {
+        repo::update_watch_status(db, &watch.id, "active").await?;
+    }
+    Ok(())
+}
+
+fn should_finish_catch_up(status: &str, last_consumed: i64, cursor_last_sequence: i64) -> bool {
+    status == "catching_up" && last_consumed >= cursor_last_sequence
+}
+
+fn backlog_exceeds_limit(last_consumed: i64, cursor_last: i64, limit: u64) -> bool {
+    cursor_last > last_consumed && (cursor_last - last_consumed) as u64 > limit
+}
+
+async fn scan_missing_children(
+    config: &AppConfig,
+    db: &Database,
+    drive: &DriveClient,
+    token_manager: &TokenManager,
+    watch: &WatchSubscription,
+    notify_tx: &NotifySender,
+) -> anyhow::Result<()> {
+    let folders = repo::active_watch_folder_mappings(db, &watch.id).await?;
+    let mut copied = 0usize;
+    for folder in folders {
+        let resource_key = if folder.source_item_id == watch.source_root_id {
+            watch.source_resource_key.as_deref()
+        } else {
+            None
+        };
+        let mut page_token = None;
+        loop {
+            let access_token = token_manager.access_token("default").await?;
+            let page = drive
+                .list_children(
+                    access_token.as_str(),
+                    &folder.source_item_id,
+                    resource_key,
+                    page_token.as_deref(),
+                )
+                .await
+                .context("scan watched source folder")?;
+
+            for child in page.files {
+                if child.trashed == Some(true)
+                    || repo::watch_mapping_destination(db, &watch.id, &child.id)
+                        .await?
+                        .is_some()
+                {
+                    continue;
+                }
+                let destination = if child.mime_type == FOLDER_MIME_TYPE {
+                    let access_token = token_manager.access_token("default").await?;
+                    drive
+                        .create_folder(
+                            access_token.as_str(),
+                            &child.name,
+                            &folder.destination_item_id,
+                            None,
+                        )
+                        .await
+                        .context("create missing watched folder")?
+                } else {
+                    let access_token = token_manager.access_token("default").await?;
+                    drive_copy_with_retry(
+                        drive,
+                        access_token.as_str(),
+                        &child.id,
+                        &child.name,
+                        &folder.destination_item_id,
+                        config,
+                    )
+                    .await?
+                };
+                record_mapping(
+                    db,
+                    MappingRecord {
+                        scope_type: ScopeType::Watch.as_str().to_string(),
+                        scope_id: watch.id.clone(),
+                        source_item_id: child.id.clone(),
+                        destination_item_id: destination.id.clone(),
+                        source_parent_id: Some(folder.source_item_id.clone()),
+                        destination_parent_id: Some(folder.destination_item_id.clone()),
+                        mime_type: child.mime_type,
+                        source_name: child.name,
+                        source_version: child.version,
+                        source_modified_time: child.modified_time,
+                        source_md5_checksum: child.md5_checksum,
+                    },
+                )
+                .await?;
+                copied += 1;
+            }
+
+            match page.next_page_token {
+                Some(next) => page_token = Some(next),
+                None => break,
+            }
+        }
+    }
+
+    if copied > 0 {
+        info!(
+            watch_id = watch.id,
+            copied, "fallback source scan copied missing children"
+        );
+        let msg = format!(
+            "✅ Watch `{}`: quét bù đã copy {} item mới từ nguồn.",
+            &watch.id[..8.min(watch.id.len())],
+            copied
+        );
+        let _ = notify_tx.try_send((watch.chat_id, msg));
+    }
     Ok(())
 }
 
@@ -193,6 +374,7 @@ async fn apply_classification(
                     let _ = notify_tx.try_send((watch.chat_id, msg));
                 }
                 "manual_confirmation" => {
+                    repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
                     let msg = format!(
                         "❓ Watch `{}`: source `{}` removed/trashed. Reply with action.",
                         &watch.id[..8.min(watch.id.len())],
@@ -203,6 +385,9 @@ async fn apply_classification(
                         watch_id = watch.id,
                         file_id, "source removed — manual confirmation required (notified)"
                     );
+                    return Err(anyhow::anyhow!(
+                        "manual confirmation required for removed source"
+                    ));
                 }
                 other => warn!(
                     watch_id = watch.id,
@@ -249,7 +434,7 @@ async fn apply_classification(
             let Some(file) = file else { return Ok(()) };
             for parent_id in &file.parents {
                 if let Some(dest_parent) =
-                    repo::watch_mapping_destination(db, &watch.id, parent_id).await?
+                    repo::active_watch_mapping_destination(db, &watch.id, parent_id).await?
                 {
                     let access_token = token_manager.access_token("default").await?;
                     let copied = drive_copy_with_retry(
@@ -272,6 +457,9 @@ async fn apply_classification(
                             destination_parent_id: Some(dest_parent),
                             mime_type: file.mime_type.clone(),
                             source_name: file.name.clone(),
+                            source_version: file.version.clone(),
+                            source_modified_time: file.modified_time.clone(),
+                            source_md5_checksum: file.md5_checksum.clone(),
                         },
                     )
                     .await?;
@@ -340,6 +528,9 @@ async fn apply_classification(
                                 destination_parent_id: Some(dest_parent),
                                 mime_type: file.mime_type.clone(),
                                 source_name: file.name.clone(),
+                                source_version: file.version.clone(),
+                                source_modified_time: file.modified_time.clone(),
+                                source_md5_checksum: file.md5_checksum.clone(),
                             },
                         )
                         .await?;
@@ -378,6 +569,9 @@ async fn apply_classification(
                                 destination_parent_id: Some(dest_parent),
                                 mime_type: file.mime_type.clone(),
                                 source_name: file.name.clone(),
+                                source_version: file.version.clone(),
+                                source_modified_time: file.modified_time.clone(),
+                                source_md5_checksum: file.md5_checksum.clone(),
                             },
                         )
                         .await?;
@@ -403,6 +597,7 @@ async fn apply_classification(
                     }
                 }
                 "manual_confirmation" => {
+                    repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
                     let msg = format!(
                         "❓ Watch `{}`: content changed in `{}`. Choose action: versioned_copy / skip.",
                         &watch.id[..8.min(watch.id.len())],
@@ -413,6 +608,9 @@ async fn apply_classification(
                         watch_id = watch.id,
                         file_id, "content changed — manual confirmation notified"
                     );
+                    return Err(anyhow::anyhow!(
+                        "manual confirmation required for content change"
+                    ));
                 }
                 other => warn!(
                     watch_id = watch.id,
@@ -437,7 +635,7 @@ async fn apply_classification(
                 // Lost mapping; treat as new item — find an in-tree parent and clone.
                 for parent_id in &file.parents {
                     if let Some(dest_parent) =
-                        repo::watch_mapping_destination(db, &watch.id, parent_id).await?
+                        repo::active_watch_mapping_destination(db, &watch.id, parent_id).await?
                     {
                         let access_token = token_manager.access_token("default").await?;
                         let copied = drive_copy_with_retry(
@@ -460,6 +658,9 @@ async fn apply_classification(
                                 destination_parent_id: Some(dest_parent),
                                 mime_type: file.mime_type.clone(),
                                 source_name: file.name.clone(),
+                                source_version: file.version.clone(),
+                                source_modified_time: file.modified_time.clone(),
+                                source_md5_checksum: file.md5_checksum.clone(),
                             },
                         )
                         .await?;
@@ -476,7 +677,7 @@ async fn apply_classification(
             };
             for parent_id in &file.parents {
                 if let Some(dest_parent) =
-                    repo::watch_mapping_destination(db, &watch.id, parent_id).await?
+                    repo::active_watch_mapping_destination(db, &watch.id, parent_id).await?
                 {
                     let access_token = token_manager.access_token("default").await?;
                     drive
@@ -507,7 +708,8 @@ async fn get_dest_parent(
     file: &crate::drive::types::DriveFile,
 ) -> anyhow::Result<Option<String>> {
     for parent_id in &file.parents {
-        if let Some(dest) = repo::watch_mapping_destination(db, &watch.id, parent_id).await? {
+        if let Some(dest) = repo::active_watch_mapping_destination(db, &watch.id, parent_id).await?
+        {
             return Ok(Some(dest));
         }
     }
@@ -557,4 +759,34 @@ async fn drive_copy_with_retry(
         }
     }
     unreachable!("loop exits via return or error")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{backlog_exceeds_limit, should_advance_consumed, should_finish_catch_up};
+
+    #[test]
+    fn failed_watch_event_does_not_advance_cursor() {
+        assert!(should_advance_consumed("applied"));
+        assert!(should_advance_consumed("ignored"));
+        assert!(!should_advance_consumed("failed"));
+        assert!(!should_advance_consumed("applying"));
+        assert!(!should_advance_consumed("pending"));
+    }
+
+    #[test]
+    fn catch_up_finishes_only_at_cursor_head() {
+        assert!(should_finish_catch_up("catching_up", 10, 10));
+        assert!(should_finish_catch_up("catching_up", 11, 10));
+        assert!(!should_finish_catch_up("catching_up", 9, 10));
+        assert!(!should_finish_catch_up("active", 10, 10));
+    }
+
+    #[test]
+    fn backlog_limit_is_strictly_greater_than_limit() {
+        assert!(!backlog_exceeds_limit(10, 10, 0));
+        assert!(!backlog_exceeds_limit(10, 15, 5));
+        assert!(backlog_exceeds_limit(10, 16, 5));
+        assert!(!backlog_exceeds_limit(20, 10, 5));
+    }
 }

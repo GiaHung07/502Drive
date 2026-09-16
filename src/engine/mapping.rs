@@ -15,6 +15,9 @@ pub struct MappingRecord {
     pub destination_parent_id: Option<String>,
     pub mime_type: String,
     pub source_name: String,
+    pub source_version: Option<String>,
+    pub source_modified_time: Option<String>,
+    pub source_md5_checksum: Option<String>,
 }
 
 pub async fn record_mapping(db: &Database, record: MappingRecord) -> anyhow::Result<()> {
@@ -24,14 +27,18 @@ pub async fn record_mapping(db: &Database, record: MappingRecord) -> anyhow::Res
                 "INSERT INTO source_mappings (
                     scope_type, scope_id, source_item_id, destination_item_id,
                     source_parent_id, destination_parent_id, mime_type, source_name,
+                    source_version, source_modified_time, source_md5_checksum,
                     mapping_state, updated_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9)
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12)
                  ON CONFLICT(scope_type, scope_id, source_item_id) DO UPDATE SET
                     destination_item_id = excluded.destination_item_id,
                     source_parent_id = excluded.source_parent_id,
                     destination_parent_id = excluded.destination_parent_id,
                     mime_type = excluded.mime_type,
                     source_name = excluded.source_name,
+                    source_version = excluded.source_version,
+                    source_modified_time = excluded.source_modified_time,
+                    source_md5_checksum = excluded.source_md5_checksum,
                     mapping_state = 'active',
                     updated_at_ms = excluded.updated_at_ms",
                 params![
@@ -43,6 +50,9 @@ pub async fn record_mapping(db: &Database, record: MappingRecord) -> anyhow::Res
                     record.destination_parent_id,
                     record.mime_type,
                     record.source_name,
+                    record.source_version,
+                    record.source_modified_time,
+                    record.source_md5_checksum,
                     now_ms(),
                 ],
             )?;

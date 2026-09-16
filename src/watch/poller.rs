@@ -186,7 +186,7 @@ async fn poll_one_cursor(config: &AppConfig, db: &Database, cursor: &ChangeCurso
                 let next_poll_at =
                     compute_next_poll_ms(config, 0, had_events_this_cycle, idle_since_ms);
 
-                let _ = repo::commit_change_page(
+                if let Err(err) = repo::commit_change_page(
                     db,
                     &cursor.id,
                     events,
@@ -194,7 +194,43 @@ async fn poll_one_cursor(config: &AppConfig, db: &Database, cursor: &ChangeCurso
                     page.new_start_page_token.as_deref(),
                     next_poll_at,
                 )
-                .await;
+                .await
+                {
+                    let next = compute_next_poll_ms(
+                        config,
+                        cursor.consecutive_error_count + 1,
+                        false,
+                        idle_since_ms,
+                    );
+                    let _ = record_cursor_error(db, &cursor.id, next).await;
+                    warn!(
+                        cursor_id = cursor.id,
+                        error = %err,
+                        "failed to commit changes page, will retry page later"
+                    );
+                    return;
+                }
+                match repo::mark_paused_watches_over_backlog_limit(
+                    db,
+                    &cursor.id,
+                    config.watch.max_backlog_events_per_watch,
+                )
+                .await
+                {
+                    Ok(n) if n > 0 => {
+                        warn!(
+                            cursor_id = cursor.id,
+                            watches = n,
+                            "paused watches exceeded backlog limit and now need reconcile"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(err) => warn!(
+                        cursor_id = cursor.id,
+                        error = %err,
+                        "failed to mark paused watches over backlog limit"
+                    ),
+                }
 
                 if let Some(next_token) = page.next_page_token {
                     // More pages — continue immediately (no sleep).

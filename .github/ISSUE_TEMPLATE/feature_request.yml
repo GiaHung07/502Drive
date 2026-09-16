@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a Drive502 improvement.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Telegram UX
+        - Clone engine
+        - Watch/sync
+        - Setup/packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require quota bypass, service-account rotation, scraping, or torrent/leech scope.
+          required: true

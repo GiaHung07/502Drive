@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  rust:
+    name: fmt and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Test
+        run: cargo test
+      - name: Build release
+        run: cargo build --release
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdclone-bot-linux-x86_64
+          path: target/release/gdclone-bot
+

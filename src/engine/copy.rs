@@ -344,6 +344,9 @@ impl CloneService {
                 destination_parent_id: Some(destination_parent_id.to_string()),
                 mime_type: FOLDER_MIME_TYPE.to_string(),
                 source_name: source.name.clone(),
+                source_version: source.version.clone(),
+                source_modified_time: source.modified_time.clone(),
+                source_md5_checksum: source.md5_checksum.clone(),
             },
         )
         .await?;
@@ -468,6 +471,9 @@ impl CloneService {
                 destination_parent_id: Some(destination_parent_id.to_string()),
                 mime_type: source.mime_type.clone(),
                 source_name: source.name.clone(),
+                source_version: source.version.clone(),
+                source_modified_time: source.modified_time.clone(),
+                source_md5_checksum: source.md5_checksum.clone(),
             },
         )
         .await?;
@@ -634,6 +640,9 @@ impl CloneService {
                 destination_parent_id: Some(parent.destination_folder_id.clone()),
                 mime_type: FOLDER_MIME_TYPE.to_string(),
                 source_name: source.name.clone(),
+                source_version: source.version.clone(),
+                source_modified_time: source.modified_time.clone(),
+                source_md5_checksum: source.md5_checksum.clone(),
             },
         )
         .await?;
@@ -747,6 +756,9 @@ impl CloneService {
                 destination_parent_id: Some(parent.destination_folder_id.clone()),
                 mime_type: source.mime_type.clone(),
                 source_name: source.name.clone(),
+                source_version: source.version.clone(),
+                source_modified_time: source.modified_time.clone(),
+                source_md5_checksum: source.md5_checksum.clone(),
             },
         )
         .await?;

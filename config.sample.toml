@@ -2,6 +2,7 @@
 bot_token = "REPLACE_ME"
 owner_telegram_id = 0
 progress_edit_min_interval_ms = 3000
+language = "vi" # vi | en
 
 [destination]
 auto_use_default = true
