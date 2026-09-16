@@ -47,7 +47,9 @@ pub enum Command {
     Grant(String),
     #[command(description = "thu hồi quyền dùng bot của user id")]
     Revoke(String),
-    // ── Watch commands ────────────────────────────────────────────────────────
+    // ── Watch & Sync commands ──────────────────────────────────────────────────
+    #[command(description = "đồng bộ realtime từ nguồn sang đích: /sync <nguon> [dich]")]
+    Sync(String),
     #[command(description = "theo dõi thư mục nguồn sang thư mục đích")]
     Watch(String),
     #[command(description = "liệt kê thư mục đang theo dõi")]

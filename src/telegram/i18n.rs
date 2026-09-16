@@ -289,8 +289,8 @@ impl TextKey {
             (UiLanguage::En, Self::CommandWatchResume) => "Resume watch",
             (UiLanguage::Vi, Self::CommandWatchStatus) => "Chi tiết đồng bộ của một watch",
             (UiLanguage::En, Self::CommandWatchStatus) => "Show watch details",
-            (UiLanguage::Vi, Self::CommandWatches) => "Danh sách thư mục đang theo dõi",
-            (UiLanguage::En, Self::CommandWatches) => "Show watched folders",
+            (UiLanguage::Vi, Self::CommandWatches) => "Danh sách thư mục đang đồng bộ",
+            (UiLanguage::En, Self::CommandWatches) => "Show synced folders",
             (UiLanguage::Vi, Self::Destination) => "Thư mục đích",
             (UiLanguage::En, Self::Destination) => "Destination",
             (UiLanguage::Vi, Self::Jobs) => "Jobs",
@@ -301,8 +301,8 @@ impl TextKey {
             (UiLanguage::En, Self::KeepWatch) => "Keep watch",
             (UiLanguage::Vi, Self::Manual) => "Xác nhận tay",
             (UiLanguage::En, Self::Manual) => "Manual",
-            (UiLanguage::Vi, Self::NewWatch) => "Theo dõi mới",
-            (UiLanguage::En, Self::NewWatch) => "New watch",
+            (UiLanguage::Vi, Self::NewWatch) => "Đồng bộ mới",
+            (UiLanguage::En, Self::NewWatch) => "New sync",
             (UiLanguage::Vi, Self::NextPage) => "Trang sau",
             (UiLanguage::En, Self::NextPage) => "Next",
             (UiLanguage::Vi, Self::Pause) => "Tạm dừng",
@@ -513,8 +513,8 @@ impl TextKey {
             (UiLanguage::En, Self::UpOneLevel) => "Up one level",
             (UiLanguage::Vi, Self::Versioned) => "Tạo bản mới",
             (UiLanguage::En, Self::Versioned) => "Versioned",
-            (UiLanguage::Vi, Self::Watches) => "Theo dõi",
-            (UiLanguage::En, Self::Watches) => "Watches",
+            (UiLanguage::Vi, Self::Watches) => "Đồng bộ (Sync)",
+            (UiLanguage::En, Self::Watches) => "Sync",
         }
     }
 }

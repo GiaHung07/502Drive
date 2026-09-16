@@ -10,6 +10,32 @@ pub fn confirm_clone_keyboard(state_id: &str) -> InlineKeyboardMarkup {
     ]])
 }
 
+pub fn smart_link_action_keyboard(state_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
+    let (clone_label, sync_label, dest_label, cancel_label) = match lang {
+        UiLanguage::Vi => (
+            "Sao chép (Clone)",
+            "Đồng bộ (Realtime Sync)",
+            "Đổi thư mục đích",
+            "Huỷ",
+        ),
+        UiLanguage::En => ("Clone now", "Realtime Sync", "Change destination", "Cancel"),
+    };
+    InlineKeyboardMarkup::new([
+        vec![InlineKeyboardButton::callback(
+            clone_label,
+            format!("smart:clone:{state_id}"),
+        )],
+        vec![InlineKeyboardButton::callback(
+            sync_label,
+            format!("smart:sync:{state_id}"),
+        )],
+        vec![
+            InlineKeyboardButton::callback(dest_label, "menu:open:destination"),
+            InlineKeyboardButton::callback(cancel_label, format!("smart:cancel:{state_id}")),
+        ],
+    ])
+}
+
 pub fn job_control_keyboard(job_id: &str, paused: bool, lang: UiLanguage) -> InlineKeyboardMarkup {
     let primary = if paused {
         InlineKeyboardButton::callback(lang.text(T::Resume), format!("job:resume:{job_id}"))
@@ -362,8 +388,8 @@ mod tests {
     use super::{
         UiLanguage, account_keyboard, destination_browser_keyboard, destination_panel_keyboard,
         job_cancel_confirm_keyboard, job_detail_keyboard, language_keyboard, main_menu_keyboard,
-        recent_destinations_keyboard, truncate_label, watch_detail_keyboard, watch_list_keyboard,
-        watch_unwatch_confirm_keyboard,
+        recent_destinations_keyboard, smart_link_action_keyboard, truncate_label,
+        watch_detail_keyboard, watch_list_keyboard, watch_unwatch_confirm_keyboard,
     };
 
     #[test]
@@ -520,6 +546,15 @@ mod tests {
         let keyboard = watch_unwatch_confirm_keyboard("watch-id", UiLanguage::Vi);
         assert_eq!(keyboard.inline_keyboard[0][0].text, "Dừng theo dõi");
         assert_eq!(keyboard.inline_keyboard[0][1].text, "Giữ watch");
-        assert_eq!(keyboard.inline_keyboard[1][0].text, "Theo dõi");
+        assert_eq!(keyboard.inline_keyboard[1][0].text, "Đồng bộ (Sync)");
+    }
+
+    #[test]
+    fn smart_link_action_keyboard_renders_clone_and_sync() {
+        let kb = smart_link_action_keyboard("state-123", UiLanguage::Vi);
+        assert_eq!(kb.inline_keyboard[0][0].text, "Sao chép (Clone)");
+        assert_eq!(kb.inline_keyboard[1][0].text, "Đồng bộ (Realtime Sync)");
+        assert_eq!(kb.inline_keyboard[2][0].text, "Đổi thư mục đích");
+        assert_eq!(kb.inline_keyboard[2][1].text, "Huỷ");
     }
 }

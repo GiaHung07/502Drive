@@ -28,3 +28,15 @@ fn parses_snake_case_commands_used_in_help_text() {
         Command::LastReport
     ));
 }
+
+#[test]
+fn parses_sync_command() {
+    assert!(matches!(
+        Command::parse("/sync https://drive.google.com/drive/folders/SRC https://drive.google.com/drive/folders/DST", "gdclone_bot").unwrap(),
+        Command::Sync(val) if val.contains("SRC") && val.contains("DST")
+    ));
+    assert!(matches!(
+        Command::parse("/sync https://drive.google.com/drive/folders/SRC", "gdclone_bot").unwrap(),
+        Command::Sync(val) if val == "https://drive.google.com/drive/folders/SRC"
+    ));
+}

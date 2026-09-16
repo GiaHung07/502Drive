@@ -1,0 +1,12 @@
+target/
+.git/
+.github/
+.trash/
+.ai/
+packaging/
+scripts/
+*.log
+*.svg
+*.png
+*.deb
+*.rpm
