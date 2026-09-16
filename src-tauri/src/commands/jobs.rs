@@ -1,6 +1,6 @@
-use serde::Serialize;
-use rusqlite::{Connection, OpenFlags, params};
 use crate::commands::get_db_path;
+use rusqlite::{Connection, OpenFlags, params};
+use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct JobSummary {
@@ -33,45 +33,53 @@ pub async fn list_jobs(limit: Option<usize>) -> Result<Vec<JobSummary>, String> 
         .map_err(|e| e.to_string())?;
 
     let max_rows = limit.unwrap_or(30);
-    let mut stmt = conn.prepare(
-        "SELECT id, kind, status, source_root_id, destination_parent_id,
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, kind, status, source_root_id, destination_parent_id,
                 total_discovered, completed_items, failed_items, skipped_items,
                 error_summary, created_at_ms, updated_at_ms
          FROM jobs
          ORDER BY updated_at_ms DESC
-         LIMIT ?1;"
-    ).map_err(|e| e.to_string())?;
+         LIMIT ?1;",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let rows = stmt.query_map(params![max_rows as i64], |row| {
-        let id: String = row.get(0)?;
-        let short_id = if id.len() > 8 { id[..8].to_string() } else { id.clone() };
-        let total: i64 = row.get(5)?;
-        let completed: i64 = row.get(6)?;
-        let progress_pct = if total > 0 {
-            (completed as f64 / total as f64 * 100.0).clamp(0.0, 100.0)
-        } else {
-            0.0
-        };
+    let rows = stmt
+        .query_map(params![max_rows as i64], |row| {
+            let id: String = row.get(0)?;
+            let short_id = if id.len() > 8 {
+                id[..8].to_string()
+            } else {
+                id.clone()
+            };
+            let total: i64 = row.get(5)?;
+            let completed: i64 = row.get(6)?;
+            let progress_pct = if total > 0 {
+                (completed as f64 / total as f64 * 100.0).clamp(0.0, 100.0)
+            } else {
+                0.0
+            };
 
-        Ok(JobSummary {
-            id,
-            short_id,
-            kind: row.get(1)?,
-            status: row.get(2)?,
-            source_root_id: row.get(3)?,
-            destination_parent_id: row.get(4)?,
-            total_discovered: total,
-            completed_items: completed,
-            failed_items: row.get(7)?,
-            skipped_items: row.get(8)?,
-            progress_pct,
-            error_summary: row.get(9)?,
-            created_at_ms: row.get(10)?,
-            updated_at_ms: row.get(11)?,
-            speed_bytes_per_sec: None,
-            eta_seconds: None,
+            Ok(JobSummary {
+                id,
+                short_id,
+                kind: row.get(1)?,
+                status: row.get(2)?,
+                source_root_id: row.get(3)?,
+                destination_parent_id: row.get(4)?,
+                total_discovered: total,
+                completed_items: completed,
+                failed_items: row.get(7)?,
+                skipped_items: row.get(8)?,
+                progress_pct,
+                error_summary: row.get(9)?,
+                created_at_ms: row.get(10)?,
+                updated_at_ms: row.get(11)?,
+                speed_bytes_per_sec: None,
+                eta_seconds: None,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
 
     let mut jobs = Vec::new();
     for job in rows {
@@ -127,8 +135,9 @@ pub async fn cancel_job(job_id: String) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp_millis();
     conn.execute(
         "UPDATE jobs SET status = 'cancelled', updated_at_ms = ?1 WHERE id = ?2;",
-        params![now, job_id]
-    ).map_err(|e| e.to_string())?;
+        params![now, job_id],
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(())
 }
