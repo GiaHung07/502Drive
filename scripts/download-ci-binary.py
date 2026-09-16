@@ -69,16 +69,16 @@ def main():
         artifacts = data.get("artifacts", [])
         target_art = None
         for art in artifacts:
-            if art["name"] == "gdclone-bot-linux-x86_64":
+            if art["name"] in ("502drive-linux-x86_64", "gdclone-bot-linux-x86_64"):
                 target_art = art
                 break
         if not target_art:
-            print("Artifact gdclone-bot-linux-x86_64 not found in artifacts list!")
+            print("Artifact 502drive-linux-x86_64 not found in artifacts list!")
             sys.exit(1)
 
     download_url = target_art["archive_download_url"]
     print(f"Downloading artifact from {download_url}...")
-    zip_path = "/tmp/gdclone-bot-download.zip"
+    zip_path = "/tmp/502drive-download.zip"
     subprocess.run([
         "curl", "-fL",
         "-H", f"Authorization: Bearer {token}",
@@ -89,22 +89,32 @@ def main():
 
     dest_dir = Path.home() / ".local" / "bin"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    binary_dest = dest_dir / "gdclone-bot"
 
+    installed = []
     with zipfile.ZipFile(zip_path) as zf:
         for name in zf.namelist():
-            if name.endswith("gdclone-bot") or name == "gdclone-bot":
+            base = os.path.basename(name)
+            if base in ("502drive", "gdclone-bot"):
+                binary_dest = dest_dir / base
                 with zf.open(name) as src, open(binary_dest, "wb") as dst:
                     dst.write(src.read())
                 binary_dest.chmod(0o755)
-                os.remove(zip_path)
-                print(f"Successfully installed binary to {binary_dest}")
-                return
+                installed.append(str(binary_dest))
+
+    # Also make sure symlinks exist if only one was built
+    if (dest_dir / "502drive").exists() and not (dest_dir / "gdclone-bot").exists():
+        (dest_dir / "gdclone-bot").symlink_to(dest_dir / "502drive")
+    elif (dest_dir / "gdclone-bot").exists() and not (dest_dir / "502drive").exists():
+        (dest_dir / "502drive").symlink_to(dest_dir / "gdclone-bot")
+
     if os.path.exists(zip_path):
         os.remove(zip_path)
 
+    if installed:
+        print(f"Successfully installed binaries: {', '.join(installed)}")
+        return
 
-    print("Could not find gdclone-bot inside downloaded zip artifact.")
+    print("Could not find 502drive or gdclone-bot inside downloaded zip artifact.")
     sys.exit(1)
 
 

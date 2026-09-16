@@ -5,7 +5,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=~/.local/bin/drive502-tray
+ExecStart=~/.local/bin/502drive-tray
 Restart=on-failure
 RestartSec=3
 StandardOutput=journal

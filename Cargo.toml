@@ -5,6 +5,18 @@ edition = "2024"
 authors = ["PGH"]
 license = "GPL-3.0-only"
 
+[lib]
+name = "gdclone_bot"
+path = "src/lib.rs"
+
+[[bin]]
+name = "502drive"
+path = "src/main.rs"
+
+[[bin]]
+name = "gdclone-bot"
+path = "src/main.rs"
+
 [dependencies]
 aes-gcm = "0.10"
 anyhow = "1"

@@ -6,7 +6,7 @@ Bot chạy trên máy của bạn bằng Telegram long polling, Google OAuth loc
 
 [English README](README.md)
 
-![502Drive Telegram demo](docs/assets/drive502-telegram-demo.vi.gif)
+![502Drive Telegram demo](docs/assets/502drive-telegram-demo.vi.gif)
 
 ## Tính Năng
 

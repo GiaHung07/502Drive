@@ -19,8 +19,8 @@ from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 SERVICE_NAME = "gdclone-bot"
 APP_NAME = "502Drive"
 APP_ID = "502drive"
-ICON_ACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/drive502-symbolic.svg")
-ICON_INACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/drive502-inactive-symbolic.svg")
+ICON_ACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/502drive-symbolic.svg")
+ICON_INACTIVE = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/502drive-inactive-symbolic.svg")
 CONFIG_PATH = Path.home() / ".config" / "gdclone-bot" / "config.toml"
 
 
@@ -32,7 +32,7 @@ def run_cmd(cmd):
         return False, "", str(e)
 
 
-def notify(title, message, icon="drive502-symbolic"):
+def notify(title, message, icon="502drive-symbolic"):
     subprocess.Popen(["notify-send", "-a", APP_NAME, "-i", icon, title, message])
 
 

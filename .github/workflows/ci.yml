@@ -21,6 +21,8 @@ jobs:
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gdclone-bot-linux-x86_64
-          path: target/release/gdclone-bot
+          name: 502drive-linux-x86_64
+          path: |
+            target/release/502drive
+            target/release/gdclone-bot
 
