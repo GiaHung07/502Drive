@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release Tag (e.g. v0.1.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    name: Build & Package Linux (x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Release
+        run: cargo build --release --bin 502drive
+
+      - name: Package Linux Bundle
+        run: |
+          chmod +x packaging/package.sh
+          ARCH=x86_64 ./packaging/package.sh
+
+      - name: Upload Linux x86_64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-release
+          path: dist/linux/*
+
+  build-linux-arm64:
+    name: Build & Package Linux (aarch64)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Release
+        run: cargo build --release --bin 502drive
+
+      - name: Package Linux ARM64 Bundle
+        run: |
+          chmod +x packaging/package.sh
+          ARCH=aarch64 ./packaging/package.sh
+
+      - name: Upload Linux ARM64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64-release
+          path: dist/linux/*
+
+  build-windows:
+    name: Build & Package Windows (x86_64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Package Windows Bundle
+        shell: pwsh
+        run: .\package-release.ps1
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/windows/*
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-linux-x86_64, build-linux-arm64, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Linux x86_64 Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x86_64-release
+          path: artifacts/linux-x86_64
+
+      - name: Download Linux ARM64 Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-aarch64-release
+          path: artifacts/linux-aarch64
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: artifacts/windows
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/linux-x86_64/*
+            artifacts/linux-aarch64/*
+            artifacts/windows/*
+          name: "502Drive Release ${{ github.ref_name || inputs.tag_name }}"
+          body: |
+            ## 🚀 502Drive Release ${{ github.ref_name || inputs.tag_name }}
+
+            Local-first Google Drive Cloning & Realtime Sync Telegram Bot.
+
+            ### 📦 Download Packages
+
+            #### 🐧 Linux (x86_64 - Standard PC, VPS, Servers)
+            - **Portable Bundle**: `502drive-${{ github.ref_name || inputs.tag_name }}-linux-x86_64.tar.gz`
+            - **Installation**: Extract and run `bash packaging/install.sh`
+
+            #### 🍓 Linux ARM64 (aarch64 - Raspberry Pi 4/5, Oracle Ampere A1, Apple Silicon VMs)
+            - **Portable Bundle**: `502drive-${{ github.ref_name || inputs.tag_name }}-linux-aarch64.tar.gz`
+            - **Installation**: Extract and run `bash packaging/install.sh`
+
+            #### 🪟 Windows (x86_64 - Windows 10, 11, Windows Server)
+            - **Portable Zip**: `502drive-${{ github.ref_name || inputs.tag_name }}-windows-x86_64.zip`
+            - **Execution**: Extract and run `502drive.exe run` (or use `windows-task.ps1` to register as scheduled task)
+
+            #### 🐳 Docker / VPS / NAS
+            - Use `docker-compose.yml`:
+              ```bash
+              git clone https://github.com/GiaHung07/502Drive.git
+              cd 502Drive
+              docker compose up -d
+              ```
+
+            ---
+            *All packages include SHA256 checksums (`.sha256`) for cryptographic integrity verification.*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
