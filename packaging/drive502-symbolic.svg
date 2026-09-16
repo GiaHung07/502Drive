@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <g fill="#dfdfdf" fill-rule="evenodd">
+    <!-- Drive segment 1: Top -->
+    <path d="M 5.8 2.2 L 10.2 2.2 L 13.8 8.0 L 9.4 8.0 Z" />
+    <!-- Drive segment 2: Bottom -->
+    <path d="M 9.4 8.0 L 11.8 12.8 L 4.2 12.8 L 6.4 8.0 Z" opacity="0.75" />
+    <!-- Drive segment 3: Left -->
+    <path d="M 5.8 2.2 L 8.0 6.5 L 3.5 12.8 L 2.2 10.5 Z" opacity="0.9" />
+  </g>
+  <!-- Center Telegram arrow / paper plane -->
+  <path d="M 6.0 6.2 L 11.5 8.0 L 6.0 9.8 L 7.4 8.0 Z" fill="#ffffff" />
+</svg>

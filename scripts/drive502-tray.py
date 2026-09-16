@@ -2,6 +2,7 @@
 """
 Drive502 Tray Controller
 A lightweight desktop indicator for controlling Drive502 Telegram Bot service on GNOME/KDE/Linux.
+Clean, professional GTK interface without emojis, using native symbolic icons.
 """
 
 import os
@@ -16,10 +17,10 @@ gi.require_version("AyatanaAppIndicator3", "0.1")
 from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 
 SERVICE_NAME = "gdclone-bot"
-APP_NAME = "Drive502 Bot"
+APP_NAME = "Drive502"
 APP_ID = "drive502"
-ICON_ACTIVE = "drive502"
-ICON_INACTIVE = "drive502-inactive"
+ICON_ACTIVE = "drive502-symbolic"
+ICON_INACTIVE = "drive502-inactive-symbolic"
 CONFIG_PATH = Path.home() / ".config" / "gdclone-bot" / "config.toml"
 
 
@@ -31,8 +32,23 @@ def run_cmd(cmd):
         return False, "", str(e)
 
 
-def notify(title, message, icon="drive502"):
+def notify(title, message, icon="drive502-symbolic"):
     subprocess.Popen(["notify-send", "-a", APP_NAME, "-i", icon, title, message])
+
+
+def make_menu_item(label_text, icon_name=None, callback=None):
+    item = Gtk.MenuItem()
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    img = None
+    if icon_name:
+        img = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        box.pack_start(img, False, False, 0)
+    lbl = Gtk.Label(label=label_text, xalign=0)
+    box.pack_start(lbl, True, True, 0)
+    item.add(box)
+    if callback:
+        item.connect("activate", callback)
+    return item, lbl, img
 
 
 class Drive502Tray:
@@ -61,49 +77,58 @@ class Drive502Tray:
 
     def build_menu(self):
         # 1. Header / Status item
-        self.status_item = Gtk.MenuItem(label="Drive502: Đang kiểm tra...")
+        self.status_item, self.status_lbl, self.status_img = make_menu_item(
+            "Drive502: Đang kiểm tra...", "network-idle-symbolic"
+        )
         self.status_item.set_sensitive(False)
         self.menu.append(self.status_item)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # 2. Open Telegram
-        tg_item = Gtk.MenuItem(label="✈️ Mở Telegram Bot (@Drive502_Bot)")
-        tg_item.connect("activate", self.open_telegram)
+        tg_item, _, _ = make_menu_item(
+            "Mở Telegram Bot (@Drive502_Bot)", "send-to-symbolic", self.open_telegram
+        )
         self.menu.append(tg_item)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # 3. Toggle Start/Stop
-        self.toggle_item = Gtk.MenuItem(label="⏸️ Tạm dừng Bot")
-        self.toggle_item.connect("activate", self.toggle_service)
+        self.toggle_item, self.toggle_lbl, self.toggle_img = make_menu_item(
+            "Tạm dừng dịch vụ", "media-playback-pause-symbolic", self.toggle_service
+        )
         self.menu.append(self.toggle_item)
 
         # 4. Restart
-        restart_item = Gtk.MenuItem(label="🔄 Khởi động lại Bot")
-        restart_item.connect("activate", self.restart_service)
+        restart_item, _, _ = make_menu_item(
+            "Khởi động lại dịch vụ", "view-refresh-symbolic", self.restart_service
+        )
         self.menu.append(restart_item)
 
         # 5. Doctor
-        doctor_item = Gtk.MenuItem(label="🩺 Kiểm tra hệ thống (Doctor)")
-        doctor_item.connect("activate", self.run_doctor)
+        doctor_item, _, _ = make_menu_item(
+            "Kiểm tra hệ thống (Doctor)", "system-run-symbolic", self.run_doctor
+        )
         self.menu.append(doctor_item)
 
         # 6. View Logs
-        logs_item = Gtk.MenuItem(label="📋 Xem nhật ký (Live Logs)")
-        logs_item.connect("activate", self.view_logs)
+        logs_item, _, _ = make_menu_item(
+            "Xem nhật ký hoạt động (Logs)", "utilities-terminal-symbolic", self.view_logs
+        )
         self.menu.append(logs_item)
 
         # 7. Edit Config
-        config_item = Gtk.MenuItem(label="⚙️ Cấu hình (config.toml)")
-        config_item.connect("activate", self.edit_config)
+        config_item, _, _ = make_menu_item(
+            "Tệp cấu hình (config.toml)", "document-properties-symbolic", self.edit_config
+        )
         self.menu.append(config_item)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # 8. Quit Tray
-        quit_item = Gtk.MenuItem(label="🚪 Đóng Tray Icon")
-        quit_item.connect("activate", self.quit_app)
+        quit_item, _, _ = make_menu_item(
+            "Đóng khay hệ thống", "application-exit-symbolic", self.quit_app
+        )
         self.menu.append(quit_item)
 
         self.menu.show_all()
@@ -114,16 +139,19 @@ class Drive502Tray:
             self.last_status = active
             if active:
                 self.indicator.set_icon_full(ICON_ACTIVE, "Active")
-                self.status_item.set_label("🟢 Drive502: Đang chạy (Active)")
-                self.toggle_item.set_label("⏸️ Tạm dừng Bot")
+                self.status_lbl.set_text("Drive502: Đang hoạt động")
+                self.status_img.set_from_icon_name("emblem-default-symbolic", Gtk.IconSize.MENU)
+                self.toggle_lbl.set_text("Tạm dừng dịch vụ")
+                self.toggle_img.set_from_icon_name("media-playback-pause-symbolic", Gtk.IconSize.MENU)
             else:
                 self.indicator.set_icon_full(ICON_INACTIVE, "Inactive")
-                self.status_item.set_label("🔴 Drive502: Đã dừng (Inactive)")
-                self.toggle_item.set_label("▶️ Bật Bot")
+                self.status_lbl.set_text("Drive502: Đã dừng")
+                self.status_img.set_from_icon_name("process-stop-symbolic", Gtk.IconSize.MENU)
+                self.toggle_lbl.set_text("Khởi động dịch vụ")
+                self.toggle_img.set_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.MENU)
         return True
 
     def open_telegram(self, _):
-        # Try native telegram link first, fallback to web
         subprocess.Popen(["xdg-open", "tg://resolve?domain=Drive502_Bot"])
 
     def toggle_service(self, _):
@@ -143,17 +171,14 @@ class Drive502Tray:
     def run_doctor(self, _):
         ok, out, err = run_cmd("gdclone-bot doctor")
         msg = out if ok else (err or out or "Lỗi khi kiểm tra doctor")
-        # Display using zenity info dialog if available
         subprocess.Popen([
             "zenity", "--info",
-            "--title=Drive502 Doctor Check",
+            "--title=Drive502 Doctor Report",
             "--text=" + msg,
-            "--width=480", "--height=320",
-            "--icon-name=drive502"
+            "--width=480", "--height=320"
         ])
 
     def view_logs(self, _):
-        # Try ptyxis or gnome-terminal
         term_cmd = None
         for t in ["ptyxis", "gnome-terminal", "kgx", "xterm"]:
             if subprocess.run(f"which {t}", shell=True, capture_output=True).returncode == 0:
@@ -179,7 +204,6 @@ class Drive502Tray:
 
 
 def main():
-    # Handle Ctrl+C cleanly
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     _app = Drive502Tray()
     Gtk.main()
