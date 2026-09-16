@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E232F" />
+      <stop offset="100%" stop-color="#0E121A" />
+    </linearGradient>
+    <linearGradient id="yellow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD54F" />
+      <stop offset="100%" stop-color="#FF9800" />
+    </linearGradient>
+    <linearGradient id="blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#42A5F5" />
+      <stop offset="100%" stop-color="#1565C0" />
+    </linearGradient>
+    <linearGradient id="green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#66BB6A" />
+      <stop offset="100%" stop-color="#2E7D32" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background squircle -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)" stroke="#2C3545" stroke-width="2" />
+
+  <!-- Google Drive 3 segments -->
+  <g transform="translate(64,62) scale(1.1) translate(-64,-62)">
+    <!-- Yellow (Top-Right) -->
+    <polygon points="50,30 78,30 98,65 70,65" fill="url(#yellow)" />
+    <!-- Blue (Bottom) -->
+    <polygon points="42,65 98,65 84,90 28,90" fill="url(#blue)" />
+    <!-- Green (Left) -->
+    <polygon points="28,90 42,65 64,26 50,26" fill="url(#green)" />
+    
+    <!-- Telegram paper plane emblem in center -->
+    <polygon points="52,54 78,63 52,72 58,63" fill="#FFFFFF" opacity="0.95" />
+  </g>
+</svg>

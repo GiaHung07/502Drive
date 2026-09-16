@@ -1,28 +1,40 @@
 [Desktop Entry]
-Name=502Drive Bot
-GenericName=Telegram Google Drive Clone Bot
-Comment=Local-first Telegram bot for Google Drive cloning and folder sync
-Exec=~/.local/bin/502drive-tray
-Icon=502drive-symbolic
+Version=1.0
+Name=502Drive
+GenericName=Google Drive Cloud Sync & Clone
+GenericName[vi]=Đồng bộ & Sao chép Google Drive
+Comment=Local-first Google Drive sync and clone tool with Telegram control
+Comment[vi]=Công cụ đồng bộ và sao chép Google Drive chạy cục bộ điều khiển qua Telegram
+Exec=502drive-tray
+Icon=502drive
 Terminal=false
 Type=Application
-Categories=Network;Utility;FileTransfer;
+Categories=Utility;Network;FileTransfer;
 StartupNotify=false
-Keywords=Google;Drive;Telegram;Clone;Sync;Bot;
-Actions=OpenTelegram;Doctor;RestartService;ViewLogs;
+Keywords=502;502drive;drive;google;sync;clone;telegram;gdclone;
+Actions=Tray;Doctor;RestartService;ViewLogs;OpenTelegram;
 
-[Desktop Action OpenTelegram]
-Name=Mở Telegram Bot
-Exec=xdg-open tg://resolve?domain=Drive502_Bot
+[Desktop Action Tray]
+Name=Mở Khay điều khiển
+Name[en]=Open Control Tray
+Exec=502drive-tray
 
 [Desktop Action Doctor]
 Name=Kiểm tra hệ thống (Doctor)
-Exec=~/.local/bin/gdclone-bot doctor
+Name[en]=System Health Check (Doctor)
+Exec=ptyxis --title "502Drive Doctor" -- 502drive doctor
 
 [Desktop Action RestartService]
 Name=Khởi động lại Bot
+Name[en]=Restart Bot Service
 Exec=systemctl --user restart gdclone-bot
 
 [Desktop Action ViewLogs]
-Name=Xem nhật ký (Logs)
+Name=Xem nhật ký hoạt động (Live Logs)
+Name[en]=View Live Logs
 Exec=ptyxis --title "502Drive Live Logs" -- journalctl --user -u gdclone-bot -f
+
+[Desktop Action OpenTelegram]
+Name=Mở Telegram Bot
+Name[en]=Open Telegram Bot
+Exec=xdg-open "tg://resolve?domain=Drive502_Bot"

@@ -172,7 +172,10 @@ Create `~/.config/gdclone-bot/config.toml` (or `./config/config.toml` when using
 
 ```toml
 [telegram]
+# Token from @BotFather
 bot_token = "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+# [NOTE] 987654321 is a SAMPLE PLACEHOLDER!
+# Replace with your actual Telegram User ID (get it from @userinfobot or /whoami)
 owner_telegram_id = 987654321
 progress_edit_min_interval_ms = 3000
 language = "vi" # "vi" or "en"

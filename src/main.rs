@@ -14,13 +14,16 @@ use gdclone_bot::{
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Parser)]
-#[command(name = "502drive")]
+#[command(
+    name = "502drive",
+    about = "502Drive: Local-first Telegram Google Drive Clone & Realtime Sync"
+)]
 struct Cli {
-    #[arg(short, long)]
+    #[arg(short, long, help = "Path to config.toml")]
     config: Option<PathBuf>,
 
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -56,7 +59,8 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load(&config_path)?;
     init_tracing(&config)?;
 
-    match cli.command {
+    let command = cli.command.unwrap_or(Command::Run);
+    match command {
         Command::Run => run_bot(config).await,
         Command::Doctor => {
             let db = open_db(&config).await?;
