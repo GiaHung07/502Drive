@@ -13,7 +13,7 @@ Actions=OpenTelegram;Doctor;RestartService;ViewLogs;
 
 [Desktop Action OpenTelegram]
 Name=Mở Telegram Bot
-Exec=xdg-open tg://resolve?domain=p502Drive_bot
+Exec=xdg-open tg://resolve?domain=Drive502_Bot
 
 [Desktop Action Doctor]
 Name=Kiểm tra hệ thống (Doctor)
