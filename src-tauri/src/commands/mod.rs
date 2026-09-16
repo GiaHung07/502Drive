@@ -1,5 +1,6 @@
 pub mod config;
 pub mod doctor;
+pub mod features;
 pub mod jobs;
 pub mod logs;
 pub mod service;

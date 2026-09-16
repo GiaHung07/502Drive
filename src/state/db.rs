@@ -29,6 +29,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0007_watch_filters",
         include_str!("../../migrations/0007_watch_filters.sql"),
     ),
+    (
+        "0008_ui_requests",
+        include_str!("../../migrations/0008_ui_requests.sql"),
+    ),
 ];
 
 #[derive(Clone)]
@@ -119,6 +123,23 @@ impl Database {
         Ok(self
             .conn
             .call(|conn| conn.query_row("PRAGMA integrity_check", [], |row| row.get(0)))
+            .await?)
+    }
+
+    /// Whether a table exists — used by tests and by the GUI to detect an
+    /// uninitialized database.
+    pub async fn table_exists(&self, name: &str) -> anyhow::Result<bool> {
+        let name = name.to_string();
+        Ok(self
+            .conn
+            .call(move |conn| {
+                let exists: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [name],
+                    |row| row.get(0),
+                )?;
+                Ok::<bool, rusqlite::Error>(exists)
+            })
             .await?)
     }
 

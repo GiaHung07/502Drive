@@ -41,3 +41,11 @@ export function formatTimeAgo(ms: number): string {
   const diffDay = Math.floor(diffHour / 24)
   return `${diffDay} ngày trước`
 }
+
+/** Accepts a Drive link, a `folders/…` link, or a bare Drive ID (≥ 20 chars). */
+export function isValidDriveSource(value: string): boolean {
+  const t = value.trim()
+  if (!t) return false
+  if (t.includes('drive.google.com') || t.includes('folders/')) return true
+  return /^[A-Za-z0-9_-]{20,}$/.test(t)
+}

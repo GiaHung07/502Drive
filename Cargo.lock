@@ -1063,6 +1063,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "directories",
+ "gdclone-bot",
  "open",
  "rusqlite",
  "serde",

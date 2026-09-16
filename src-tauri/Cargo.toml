@@ -25,6 +25,7 @@ toml = "0.8"
 anyhow = "1"
 open = "5"
 tauri-plugin-single-instance = "2"
+gdclone-bot = { path = ".." }
 
 [[bin]]
 name = "drive502-gui"

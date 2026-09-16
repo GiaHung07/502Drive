@@ -9,6 +9,11 @@ import type {
   RemoteUpdateInfo,
   WizardConfigInput,
   TelegramBotVerifyResult,
+  DriveItemRef,
+  UiRequestStatus,
+  CloneDuplicatePolicy,
+  WatchPolicyKind,
+  CreateRequestResult,
 } from './types'
 
 // Check if running inside Tauri window
@@ -82,6 +87,22 @@ let mockJobs: JobSummary[] = [
     created_at_ms: Date.now() - 1000 * 60 * 360,
     updated_at_ms: Date.now() - 1000 * 60 * 320,
   },
+  {
+    id: 'job-c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f',
+    short_id: 'c1d2e3f4',
+    kind: 'one_shot',
+    status: 'failed',
+    source_root_id: '1Xx9Yy8Zz7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp',
+    destination_parent_id: '0B1c2D3e4F5g6H7i8J9kLmNoPqRsTuVwX',
+    total_discovered: 860,
+    completed_items: 512,
+    failed_items: 348,
+    skipped_items: 0,
+    progress_pct: 59.5,
+    error_summary: 'Drive API quota exceeded sau 512 tệp',
+    created_at_ms: Date.now() - 1000 * 60 * 90,
+    updated_at_ms: Date.now() - 1000 * 60 * 80,
+  },
 ]
 
 let mockWatches: WatchSummary[] = [
@@ -106,8 +127,71 @@ let mockWatches: WatchSummary[] = [
     baseline_sequence: 890,
     last_consumed_sequence: 886,
     updated_at_ms: Date.now() - 1000 * 60 * 60,
+    exclude_globs: ['*.mp4', '**/temp/**', '.DS_Store'],
+    cursor_last_event_sequence: 886,
   },
 ]
+
+// ── Browser-dev mock state for the GUI ↔ Engine bridge ──────────────────────
+
+/** Queued mock ui_requests; the daemon-equivalent "accepts" after ~3s. */
+interface MockUiRequest {
+  kind: 'clone' | 'watch' | 'retry'
+  created_at_ms: number
+  note: string | null
+}
+const MOCK_ACCEPT_DELAY_MS = 3000
+const mockUiRequests = new Map<string, MockUiRequest>()
+const mockWatchPolicies = new Map<string, Partial<Record<WatchPolicyKind, string>>>()
+
+const makeMockRequestId = (kind: string): string =>
+  `req-${kind}-${Math.random().toString(36).slice(2, 10)}`
+
+const makeMockJobId = (): string =>
+  `job-${Math.random().toString(36).slice(2, 6)}${Math.random()
+    .toString(36)
+    .slice(2, 6)}-${Date.now().toString(36)}`
+
+/** Plausible Drive folder tree for the folder picker in browser dev mode. */
+const MOCK_DRIVE_TREE: Record<string, DriveItemRef[]> = {
+  // parent_id = null → shared drives first, then My Drive root (matches engine).
+  root: [
+    { id: 'drive-0AjKlMnOpQrStUv', name: 'Team Archive 502', is_folder: true, drive_id: 'drive-0AjKlMnOpQrStUv' },
+    { id: 'drive-0BcDeFgHiJkLmNo', name: 'Media Vault (chia sẻ)', is_folder: true, drive_id: 'drive-0BcDeFgHiJkLmNo' },
+    { id: 'root', name: 'My Drive', is_folder: true },
+  ],
+  root_my_drive: [
+    { id: '1Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56', name: 'Backup 502', is_folder: true },
+    { id: '1Qr56St78Uv90Wx12Yz34Ab56Cd78Ef90', name: 'Tài liệu làm việc', is_folder: true },
+    { id: '1Gh12Ij34Kl56Mn78Op90Qr12St34Uv56', name: 'Photos Archive', is_folder: true },
+  ],
+  'drive-0AjKlMnOpQrStUv': [
+    { id: '1Xx22Yy44Zz66Ww88Uu00Tt12Rr34Qq56', name: 'Dự án 2026', is_folder: true, drive_id: 'drive-0AjKlMnOpQrStUv' },
+    { id: '1Aa12Bb34Cc56Dd78Ee90Ff12Gg34Hh56', name: 'Lưu trữ lâu dài', is_folder: true, drive_id: 'drive-0AjKlMnOpQrStUv' },
+  ],
+  'drive-0BcDeFgHiJkLmNo': [
+    { id: '1Mm12Nn34Oo56Pp78Qq90Rr12Ss34Tt56', name: 'Phim 4K', is_folder: true, drive_id: 'drive-0BcDeFgHiJkLmNo' },
+    { id: '1Uu12Vv34Ww56Xx78Yy90Zz12Aa34Bb56', name: 'Nhạc lossless', is_folder: true, drive_id: 'drive-0BcDeFgHiJkLmNo' },
+  ],
+  '1Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56': [
+    { id: '1Cc12Dd34Ee56Ff78Gg90Hh12Ii34Jj56', name: 'Clone từ bot Telegram', is_folder: true },
+    { id: '1Kk12Ll34Mm56Nn78Oo90Pp12Qq34Rr56', name: 'Sao lưu máy cũ', is_folder: true },
+  ],
+  '1Qr56St78Uv90Wx12Yz34Ab56Cd78Ef90': [
+    { id: '1Ss12Tt34Uu56Vv78Ww90Xx12Yy34Zz56', name: 'Báo cáo quý', is_folder: true },
+  ],
+  '1Gh12Ij34Kl56Mn78Op90Qr12St34Uv56': [
+    { id: '1Vv12Ww34Xx56Yy78Zz90Aa12Bb34Cc56', name: '2025', is_folder: true },
+  ],
+  '1Cc12Dd34Ee56Ff78Gg90Hh12Ii34Jj56': [],
+  '1Kk12Ll34Mm56Nn78Oo90Pp12Qq34Rr56': [],
+  '1Ss12Tt34Uu56Vv78Ww90Xx12Yy34Zz56': [],
+  '1Vv12Ww34Xx56Yy78Zz90Aa12Bb34Cc56': [],
+  '1Xx22Yy44Zz66Ww88Uu00Tt12Rr34Qq56': [],
+  '1Aa12Bb34Cc56Dd78Ee90Ff12Gg34Hh56': [],
+  '1Mm12Nn34Oo56Pp78Qq90Rr12Ss34Tt56': [],
+  '1Uu12Vv34Ww56Xx78Yy90Zz12Aa34Bb56': [],
+}
 
 let mockConfig: ConfigSummary = {
   engine_concurrency: 8,
@@ -416,6 +500,165 @@ export const api = {
         `[${new Date().toISOString()}] [INFO] gdclone_bot::engine::worker: Processing job 9a8b7c6d: 8233/12847 files (64.1%)`,
         `[${new Date().toISOString()}] [INFO] gdclone_bot::watch: Change event stream caught up at sequence 1204`,
       ]
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  // ── GUI ↔ Engine bridge (ui_requests queue) ──────────────────────────────
+
+  async createCloneRequest(input: {
+    sourceUrl: string
+    nameOverride?: string
+    destinationParentId?: string
+    duplicatePolicy?: CloneDuplicatePolicy
+  }): Promise<CreateRequestResult> {
+    if (isTauri()) {
+      return await invoke<CreateRequestResult>('create_clone_request', {
+        sourceUrl: input.sourceUrl,
+        nameOverride: input.nameOverride ?? null,
+        destinationParentId: input.destinationParentId ?? null,
+        duplicatePolicy: input.duplicatePolicy ?? null,
+      })
+    }
+    if (USE_MOCKS) {
+      const id = makeMockRequestId('clone')
+      mockUiRequests.set(id, {
+        kind: 'clone',
+        created_at_ms: Date.now(),
+        note: `Đã tạo tác vụ sao chép ${makeMockJobId()}`,
+      })
+      return { request_id: id }
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  async createWatchRequest(input: {
+    sourceUrl: string
+    destinationUrl?: string
+    excludeGlobs: string[]
+  }): Promise<CreateRequestResult> {
+    if (isTauri()) {
+      return await invoke<CreateRequestResult>('create_watch_request', {
+        sourceUrl: input.sourceUrl,
+        destinationUrl: input.destinationUrl ?? null,
+        excludeGlobs: input.excludeGlobs,
+      })
+    }
+    if (USE_MOCKS) {
+      const id = makeMockRequestId('watch')
+      mockUiRequests.set(id, {
+        kind: 'watch',
+        created_at_ms: Date.now(),
+        note: `Đã tạo thư mục theo dõi watch-${Math.random().toString(36).slice(2, 10)}`,
+      })
+      return { request_id: id }
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  async retryJob(jobId: string): Promise<CreateRequestResult> {
+    if (isTauri()) {
+      return await invoke<CreateRequestResult>('retry_job', { jobId })
+    }
+    if (USE_MOCKS) {
+      const id = makeMockRequestId('retry')
+      mockUiRequests.set(id, {
+        kind: 'retry',
+        created_at_ms: Date.now(),
+        note: `Job ${jobId.slice(0, 8)} đã được lên lịch chạy lại`,
+      })
+      return { request_id: id }
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  async getUiRequestStatus(requestId: string): Promise<UiRequestStatus | null> {
+    if (isTauri()) {
+      return await invoke<UiRequestStatus | null>('get_ui_request_status', { requestId })
+    }
+    if (USE_MOCKS) {
+      const entry = mockUiRequests.get(requestId)
+      if (!entry) return null
+      const elapsed = Date.now() - entry.created_at_ms
+      if (elapsed < MOCK_ACCEPT_DELAY_MS) {
+        return {
+          request_id: requestId,
+          kind: entry.kind,
+          status: 'pending',
+          note: null,
+          created_at_ms: entry.created_at_ms,
+          decided_at_ms: null,
+        }
+      }
+      return {
+        request_id: requestId,
+        kind: entry.kind,
+        status: 'accepted',
+        note: entry.note,
+        created_at_ms: entry.created_at_ms,
+        decided_at_ms: entry.created_at_ms + MOCK_ACCEPT_DELAY_MS,
+      }
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  /**
+   * Poll `get_ui_request_status` every 2s (max 45s) until the daemon decides.
+   * Resolves with the final status; throws on timeout so callers can toast a
+   * user-safe error via getErrorMessage.
+   */
+  async trackUiRequest(
+    requestId: string,
+    opts?: { intervalMs?: number; timeoutMs?: number }
+  ): Promise<UiRequestStatus> {
+    const intervalMs = opts?.intervalMs ?? 2000
+    const timeoutMs = opts?.timeoutMs ?? 45_000
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const status = await api.getUiRequestStatus(requestId)
+      if (status && status.status !== 'pending') return status
+      if (Date.now() + intervalMs > deadline) {
+        throw new Error('Hết thời gian chờ daemon xác nhận yêu cầu. Vui lòng kiểm tra lại trong tab Tác vụ.')
+      }
+      await new Promise((r) => setTimeout(r, intervalMs))
+    }
+  },
+
+  async browseDriveChildren(parentId?: string, driveId?: string): Promise<DriveItemRef[]> {
+    if (isTauri()) {
+      return await invoke<DriveItemRef[]>('browse_drive_children', {
+        parentId: parentId ?? null,
+        driveId: driveId ?? null,
+      })
+    }
+    if (USE_MOCKS) {
+      // Small artificial latency so loading states are exercised in dev.
+      await new Promise((r) => setTimeout(r, 250))
+      const key = parentId == null ? 'root' : parentId === 'root' ? 'root_my_drive' : parentId
+      return [...(MOCK_DRIVE_TREE[key] ?? [])]
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  async unwatch(watchId: string): Promise<boolean> {
+    if (isTauri()) {
+      return await invoke<boolean>('unwatch', { watchId })
+    }
+    if (USE_MOCKS) {
+      const before = mockWatches.length
+      mockWatches = mockWatches.filter((w) => w.id !== watchId)
+      return mockWatches.length < before
+    }
+    throw new Error(MOCK_UNAVAILABLE)
+  },
+
+  async setWatchPolicy(watchId: string, policyKind: WatchPolicyKind, policyValue: string): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('set_watch_policy', { watchId, policyKind, policyValue })
+    }
+    if (USE_MOCKS) {
+      mockWatchPolicies.set(watchId, { ...mockWatchPolicies.get(watchId), [policyKind]: policyValue })
+      return
     }
     throw new Error(MOCK_UNAVAILABLE)
   },

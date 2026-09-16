@@ -126,6 +126,15 @@ async fn run_bot(config: AppConfig) -> anyhow::Result<()> {
         (None, vec![])
     };
 
+    // Consume GUI-submitted requests (clone/watch/retry) from the shared
+    // ui_requests queue. Runs in the daemon process by design: the GUI only
+    // enqueues, never executes engine work.
+    let _ui_request_consumer = gdclone_bot::engine::ui_requests::spawn_ui_request_consumer(
+        config.clone(),
+        db.clone(),
+        drive.clone(),
+    );
+
     telegram::run(config, db).await
     // _stop_tx drops here → broadcasts shutdown to pollers
 }
@@ -136,6 +145,11 @@ fn spawn_notify_forwarder(mut notify_rx: NotifyReceiver, config: &AppConfig) {
     let bot_token = config.telegram.bot_token.clone();
     tokio::spawn(async move {
         while let Some((chat_id, text)) = notify_rx.recv().await {
+            // GUI-initiated watches (chat_id = 0) have no Telegram chat —
+            // skip instead of hammering the API with invalid requests.
+            if chat_id <= 0 {
+                continue;
+            }
             let url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
             let body = serde_json::json!({
                 "chat_id": chat_id,

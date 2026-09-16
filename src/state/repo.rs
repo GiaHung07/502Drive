@@ -1,4 +1,5 @@
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
+use serde::Serialize;
 use uuid::Uuid;
 
 use super::db::{Database, now_ms};
@@ -2134,6 +2135,8 @@ pub struct NewWatchSubscription {
     pub content_update_policy: String,
     pub deletion_policy: String,
     pub move_out_policy: String,
+    /// JSON string array of exclude globs, e.g. `["*.tmp", "~$*"]`.
+    pub exclude_globs: String,
     pub baseline_sequence: i64,
 }
 
@@ -2152,13 +2155,13 @@ pub async fn create_watch_subscription(
                     source_root_id, source_resource_key, source_drive_id,
                     destination_root_id, destination_drive_id,
                     status, content_update_policy, deletion_policy, move_out_policy,
-                    baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms
+                    exclude_globs, baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms
                  ) VALUES (
                     ?1, ?2, ?3, ?4, ?5,
                     ?6, ?7, ?8,
                     ?9, ?10,
                     'initializing', ?11, ?12, ?13,
-                    ?14, ?14, ?15, ?15
+                    ?14, ?15, ?15, ?16, ?16
                  )",
                 params![
                     id_for_db,
@@ -2174,6 +2177,7 @@ pub async fn create_watch_subscription(
                     sub.content_update_policy,
                     sub.deletion_policy,
                     sub.move_out_policy,
+                    sub.exclude_globs,
                     sub.baseline_sequence,
                     now,
                 ],
@@ -2356,6 +2360,62 @@ pub async fn watch_backlog(db: &Database, watch_id: &str) -> anyhow::Result<Opti
             .optional()
         })
         .await?)
+}
+
+/// GUI-facing watch summary. `backlog_count` is derived from the watch's
+/// change cursor (`change_cursors.last_event_sequence`), NOT the baseline —
+/// the baseline only matters during initialization and goes stale after
+/// catch-up. Exposed as a sync function over a plain `rusqlite::Connection`
+/// so the GUI process can share the exact query with its read-only connection.
+#[derive(Debug, Clone, Serialize)]
+pub struct WatchSummaryRow {
+    pub id: String,
+    pub source_root_id: String,
+    pub destination_root_id: String,
+    pub status: String,
+    /// JSON string array of exclude globs (column default `'[]'`).
+    pub exclude_globs: String,
+    pub backlog_count: i64,
+    pub baseline_sequence: i64,
+    pub last_consumed_sequence: i64,
+    pub cursor_last_event_sequence: i64,
+    pub updated_at_ms: i64,
+}
+
+pub fn watch_summaries_sync(conn: &Connection) -> rusqlite::Result<Vec<WatchSummaryRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT w.id, w.source_root_id, w.destination_root_id, w.status, w.exclude_globs,
+                w.baseline_sequence, w.last_consumed_sequence,
+                COALESCE(c.last_event_sequence, w.last_consumed_sequence),
+                w.updated_at_ms
+         FROM watch_subscriptions w
+         LEFT JOIN change_cursors c ON c.id = w.cursor_id
+         ORDER BY w.updated_at_ms DESC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            let last_consumed: i64 = row.get(6)?;
+            let cursor_last: i64 = row.get(7)?;
+            Ok(WatchSummaryRow {
+                id: row.get(0)?,
+                source_root_id: row.get(1)?,
+                destination_root_id: row.get(2)?,
+                status: row.get(3)?,
+                exclude_globs: row.get(4)?,
+                baseline_sequence: row.get(5)?,
+                last_consumed_sequence: last_consumed,
+                cursor_last_event_sequence: cursor_last,
+                backlog_count: (cursor_last - last_consumed).max(0),
+                updated_at_ms: row.get(8)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Async wrapper over [`watch_summaries_sync`] for the daemon process.
+pub async fn watch_summaries(db: &Database) -> anyhow::Result<Vec<WatchSummaryRow>> {
+    Ok(db.conn().call(|conn| watch_summaries_sync(conn)).await?)
 }
 
 pub async fn mark_paused_watches_over_backlog_limit(

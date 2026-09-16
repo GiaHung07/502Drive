@@ -4982,73 +4982,40 @@ async fn start_watch(
         }
     };
 
-    let token_manager = TokenManager::new(config.clone(), db.clone());
-    let access_token = token_manager.access_token("default").await?;
-    let drive =
-        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+    let drive = crate::watch::service::drive_client_for(config);
 
-    let source = drive
-        .get_reference(access_token.as_str(), &source_ref)
-        .await?;
-    if !source.is_folder() {
-        anyhow::bail!(watch_source_must_be_folder(lang));
-    }
-    let dest = drive
-        .get_reference(access_token.as_str(), &dest_ref)
-        .await?;
-    if !dest.is_folder() {
-        anyhow::bail!(watch_destination_must_be_folder(lang));
-    }
-    if dest.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
-        anyhow::bail!(watch_destination_not_writable(lang));
-    }
-
-    let corpus_kind = if source.drive_id.is_some() {
-        "shared_drive"
-    } else {
-        "user"
-    };
-    let start_token = drive
-        .get_start_page_token(access_token.as_str(), source.drive_id.as_deref())
-        .await?;
-    let cursor = repo::upsert_change_cursor(
+    let created = crate::watch::service::create_watch(
+        config,
         db,
-        "default",
-        corpus_kind,
-        source.drive_id.as_deref(),
-        &start_token.start_page_token,
-    )
-    .await?;
-
-    let watch_id = repo::create_watch_subscription(
-        db,
-        repo::NewWatchSubscription {
-            google_account_id: "default".to_string(),
-            cursor_id: cursor.id.clone(),
+        &drive,
+        crate::watch::service::CreateWatchParams {
+            source: source_ref,
+            destination: dest_ref,
             telegram_user_id,
             chat_id,
-            source_root_id: source.id.clone(),
-            source_resource_key: source_ref
-                .resource_key
-                .clone()
-                .or(source.resource_key.clone()),
-            source_drive_id: source.drive_id.clone(),
-            destination_root_id: dest.id.clone(),
-            destination_drive_id: dest.drive_id.clone(),
-            content_update_policy: config.watch.default_content_update_policy.clone(),
-            deletion_policy: config.watch.default_deletion_policy.clone(),
-            move_out_policy: config.watch.default_move_out_policy.clone(),
-            baseline_sequence: cursor.last_event_sequence,
+            exclude_globs: Vec::new(),
         },
     )
-    .await?;
+    .await
+    .map_err(|err| match err {
+        crate::watch::service::CreateWatchError::SourceNotFolder => {
+            anyhow::anyhow!(watch_source_must_be_folder(lang))
+        }
+        crate::watch::service::CreateWatchError::DestinationNotFolder => {
+            anyhow::anyhow!(watch_destination_must_be_folder(lang))
+        }
+        crate::watch::service::CreateWatchError::DestinationNotWritable => {
+            anyhow::anyhow!(watch_destination_not_writable(lang))
+        }
+        crate::watch::service::CreateWatchError::Other(err) => err,
+    })?;
 
     {
         let config2 = config.clone();
         let db2 = db.clone();
         let bot2 = bot.clone();
         let chat_id2 = chat_id;
-        let watch_id2 = watch_id.clone();
+        let watch_id2 = created.watch_id.clone();
         tokio::spawn(async move {
             let notify = move |msg_text: String| {
                 let bot = bot2.clone();
@@ -5075,10 +5042,10 @@ async fn start_watch(
 
     Ok(watch_created_text(
         lang,
-        &watch_id,
-        &source.name,
-        &source.id,
-        &dest.name,
+        &created.watch_id,
+        &created.source_name,
+        &created.source_id,
+        &created.destination_name,
     ))
 }
 

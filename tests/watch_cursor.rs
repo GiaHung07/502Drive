@@ -146,6 +146,7 @@ async fn failed_event_application_stays_pending() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -217,6 +218,7 @@ async fn needs_reconcile_watch_does_not_block_event_prune() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )

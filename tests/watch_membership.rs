@@ -40,6 +40,7 @@ async fn create_and_list_watch() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -71,6 +72,7 @@ async fn watch_prefix_lookup_is_user_scoped() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -91,6 +93,7 @@ async fn watch_prefix_lookup_is_user_scoped() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -131,6 +134,7 @@ async fn watch_pause_and_resume() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -179,6 +183,7 @@ async fn watch_resume_over_backlog_limit_needs_reconcile() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -248,6 +253,7 @@ async fn paused_watch_over_backlog_limit_needs_reconcile() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -320,6 +326,7 @@ async fn watch_stop() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -358,6 +365,7 @@ async fn advance_consumed_sequence() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 5,
         },
     )
@@ -391,6 +399,7 @@ async fn watch_backlog_tracks_cursor_gap() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -457,6 +466,7 @@ async fn list_watches_user_isolation() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )
@@ -493,6 +503,7 @@ async fn exclude_globs_round_trip() {
             content_update_policy: "versioned_copy".into(),
             deletion_policy: "preserve_destination".into(),
             move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
             baseline_sequence: 0,
         },
     )

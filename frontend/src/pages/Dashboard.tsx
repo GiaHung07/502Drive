@@ -19,6 +19,7 @@ import {
   LogIn,
   Layers,
   ArrowRight,
+  Copy,
 } from "lucide-react"
 import { SystemStatus, JobSummary } from "@/lib/types"
 import { formatBytes } from "@/lib/utils"
@@ -35,6 +36,7 @@ export interface DashboardProps {
   onResumeJob?: (id: string) => void
   onCancelJob?: (id: string) => void
   onOpenWizard?: () => void
+  onOpenQuickClone?: () => void
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -49,6 +51,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onResumeJob,
   onCancelJob,
   onOpenWizard,
+  onOpenQuickClone,
 }) => {
   const isAccountConnected = status?.account_status === "connected"
   const isServiceActive = status?.service_active ?? false
@@ -81,6 +84,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
           >
             <Sparkles className="h-3.5 w-3.5" />
             <span>Mở Setup Wizard</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+      {/* ── Quick action: Sao chép nhanh (khi tài khoản đã kết nối) ── */}
+      {isAccountConnected && onOpenQuickClone && (
+        <div className="p-5 sm:p-6 rounded-2xl bg-accent/10 border border-accent/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 shadow-xs">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-accent text-white shadow-sm shrink-0 mt-0.5">
+              <Copy className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base sm:text-lg font-bold text-text-primary">
+                Sao chép nhanh thư mục Drive
+              </h3>
+              <p className="text-xs sm:text-sm text-text-secondary leading-relaxed">
+                Dán liên kết thư mục Google Drive để gửi yêu cầu sao chép ngay lập tức — daemon sẽ xác nhận và bắt đầu clone trong nền.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={onOpenQuickClone}
+            className="text-xs gap-1.5 rounded-xl shrink-0 font-semibold shadow-xs"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            <span>Sao chép nhanh</span>
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>

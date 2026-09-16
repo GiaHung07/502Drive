@@ -72,6 +72,41 @@ export interface WatchSummary {
   baseline_sequence: number
   last_consumed_sequence: number
   updated_at_ms: number
+  /** New bridge fields — optional so existing dev mocks keep compiling. */
+  exclude_globs?: string[]
+  cursor_last_event_sequence?: number | null
+}
+
+// ── GUI ↔ Engine bridge (ui_requests queue) ─────────────────────────────────
+
+export type CloneDuplicatePolicy = 'keep_both' | 'skip_same_source' | 'replace_safe'
+
+export type WatchPolicyKind = 'content_update' | 'deletion' | 'move_out'
+
+/** A Drive folder/file reference returned by `browse_drive_children`. */
+export interface DriveItemRef {
+  id: string
+  name: string
+  is_folder: boolean
+  /** Set on shared-drive entries; pass back when listing that folder's children. */
+  drive_id?: string
+}
+
+export type UiRequestState = 'pending' | 'accepted' | 'rejected'
+
+/** Decision record for a queued GUI request. `note` carries the rejection
+ *  reason on 'rejected' and the job id / watch id on 'accepted'. */
+export interface UiRequestStatus {
+  request_id: string
+  kind: string
+  status: UiRequestState
+  note: string | null
+  created_at_ms: number
+  decided_at_ms: number | null
+}
+
+export interface CreateRequestResult {
+  request_id: string
 }
 
 export interface ConfigSummary {

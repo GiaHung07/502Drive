@@ -7,10 +7,12 @@ import { Settings } from '@/pages/Settings'
 import { Dev } from '@/pages/Dev'
 import { PreflightSplash } from '@/components/layout/PreflightSplash'
 import { SetupWizardModal } from '@/components/setup/SetupWizardModal'
+import { QuickCloneModal } from '@/components/modals/QuickCloneModal'
+import { CreateWatchModal } from '@/components/modals/CreateWatchModal'
 import { ToastProvider, useToast } from '@/components/primitives/Toast'
 import { ThemeProvider } from '@/hooks/useTheme'
 import { api, getErrorMessage } from '@/lib/ipc'
-import { SystemStatus, JobSummary, WatchSummary, ConfigSummary } from '@/lib/types'
+import { SystemStatus, JobSummary, WatchSummary, ConfigSummary, WatchPolicyKind } from '@/lib/types'
 
 const AppContent: React.FC = () => {
   const [isPreflightDone, setIsPreflightDone] = useState(false)
@@ -21,6 +23,8 @@ const AppContent: React.FC = () => {
   const [config, setConfig] = useState<ConfigSummary | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isWizardOpen, setIsWizardOpen] = useState(false)
+  const [isCloneOpen, setIsCloneOpen] = useState(false)
+  const [isWatchOpen, setIsWatchOpen] = useState(false)
 
   const { toast } = useToast()
 
@@ -198,6 +202,77 @@ const AppContent: React.FC = () => {
     }
   }
 
+  const handleRetryJob = async (jobId: string) => {
+    try {
+      const { request_id } = await api.retryJob(jobId)
+      toast({
+        title: 'Đã gửi yêu cầu thử lại',
+        description: 'Đang chờ daemon xác nhận…',
+        variant: 'default',
+      })
+      const result = await api.trackUiRequest(request_id)
+      if (result.status === 'accepted') {
+        toast({
+          title: 'Thử lại đã được chấp nhận',
+          description: result.note || `Job ${jobId.slice(0, 8)} đã được lên lịch chạy lại.`,
+          variant: 'success',
+          duration: 6000,
+        })
+        await refreshData()
+      } else {
+        toast({
+          title: 'Yêu cầu thử lại bị từ chối',
+          description: result.note || 'Daemon từ chối yêu cầu thử lại.',
+          variant: 'error',
+          duration: 6000,
+        })
+      }
+    } catch (err) {
+      toast({ title: 'Lỗi thử lại job', description: getErrorMessage(err), variant: 'error' })
+    }
+  }
+
+  const handleSetWatchPolicy = async (
+    watchId: string,
+    policyKind: WatchPolicyKind,
+    policyValue: string
+  ) => {
+    try {
+      await api.setWatchPolicy(watchId, policyKind, policyValue)
+      toast({
+        title: 'Đã cập nhật chính sách',
+        description: `Chính sách "${policyKind}" của watch ${watchId.slice(0, 8)} đã được áp dụng.`,
+        variant: 'success',
+        duration: 3000,
+      })
+      await refreshData()
+    } catch (err) {
+      toast({ title: 'Lỗi cập nhật chính sách', description: getErrorMessage(err), variant: 'error' })
+    }
+  }
+
+  const handleUnwatch = async (watchId: string) => {
+    try {
+      const stopped = await api.unwatch(watchId)
+      if (stopped) {
+        toast({
+          title: 'Đã ngừng theo dõi',
+          description: `Watch ${watchId.slice(0, 8)} đã được dừng. Dữ liệu đã sao chép được giữ nguyên.`,
+          variant: 'warning',
+        })
+      } else {
+        toast({
+          title: 'Không thể ngừng theo dõi',
+          description: 'Watch không tồn tại hoặc đã dừng trước đó.',
+          variant: 'error',
+        })
+      }
+      await refreshData()
+    } catch (err) {
+      toast({ title: 'Lỗi ngừng theo dõi', description: getErrorMessage(err), variant: 'error' })
+    }
+  }
+
   const handleUpdateConfig = async (field: string, value: unknown) => {
     try {
       await api.updateConfig(field, value)
@@ -267,6 +342,7 @@ const AppContent: React.FC = () => {
               onCancelJob={handleCancelJob}
               onNavigateToJobs={() => setActiveTab('jobs')}
               onOpenWizard={() => setIsWizardOpen(true)}
+              onOpenQuickClone={() => setIsCloneOpen(true)}
             />
           )}
 
@@ -279,6 +355,10 @@ const AppContent: React.FC = () => {
               onCancelJob={handleCancelJob}
               onPauseWatch={handlePauseWatch}
               onResumeWatch={handleResumeWatch}
+              onRetryJob={handleRetryJob}
+              onSetWatchPolicy={handleSetWatchPolicy}
+              onUnwatch={handleUnwatch}
+              onCreateWatch={() => setIsWatchOpen(true)}
               onRefresh={refreshData}
               isRefreshing={isRefreshing}
             />
@@ -314,6 +394,18 @@ const AppContent: React.FC = () => {
         onTriggerLogin={handleTriggerLogin}
         onRefreshData={refreshData}
         onRestartService={handleRestartService}
+      />
+
+      <QuickCloneModal
+        isOpen={isCloneOpen}
+        onClose={() => setIsCloneOpen(false)}
+        onRefreshData={refreshData}
+      />
+
+      <CreateWatchModal
+        isOpen={isWatchOpen}
+        onClose={() => setIsWatchOpen(false)}
+        onRefreshData={refreshData}
       />
     </>
   )

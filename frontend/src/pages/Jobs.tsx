@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/Card"
 import { JobCard } from "@/components/primitives/JobCard"
 import { WatchCard } from "@/components/primitives/WatchCard"
 import { Button } from "@/components/ui/Button"
-import { JobSummary, WatchSummary } from "@/lib/types"
+import { JobSummary, WatchSummary, WatchPolicyKind } from "@/lib/types"
 import {
   ArrowLeftRight,
   Radio,
@@ -14,6 +14,7 @@ import {
   Inbox,
   Search,
   X,
+  Plus,
 } from "lucide-react"
 
 export interface JobsProps {
@@ -24,6 +25,10 @@ export interface JobsProps {
   onCancelJob: (id: string) => void
   onPauseWatch: (id: string) => void
   onResumeWatch: (id: string) => void
+  onRetryJob?: (id: string) => void
+  onSetWatchPolicy?: (id: string, policyKind: WatchPolicyKind, policyValue: string) => void
+  onUnwatch?: (id: string) => void
+  onCreateWatch?: () => void
   onRefresh: () => void
   isRefreshing?: boolean
 }
@@ -38,6 +43,10 @@ export const Jobs: React.FC<JobsProps> = ({
   onCancelJob,
   onPauseWatch,
   onResumeWatch,
+  onRetryJob,
+  onSetWatchPolicy,
+  onUnwatch,
+  onCreateWatch,
   onRefresh,
   isRefreshing,
 }) => {
@@ -261,6 +270,18 @@ export const Jobs: React.FC<JobsProps> = ({
                 Thư mục theo dõi thời gian thực ({filteredWatches.length})
               </h2>
             </div>
+            {onCreateWatch && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={onCreateWatch}
+                className="text-xs gap-1.5 rounded-xl font-medium shrink-0"
+                title="Thêm thư mục theo dõi thời gian thực mới"
+              >
+                <Plus className="h-3.5 w-3.5 text-accent" />
+                Tạo theo dõi
+              </Button>
+            )}
           </div>
 
           {filteredWatches.length === 0 ? (
@@ -291,6 +312,8 @@ export const Jobs: React.FC<JobsProps> = ({
                       watch={watch}
                       onPause={onPauseWatch}
                       onResume={onResumeWatch}
+                      onSetWatchPolicy={onSetWatchPolicy}
+                      onUnwatch={onUnwatch}
                     />
                   </motion.div>
                 ))}
@@ -335,7 +358,7 @@ export const Jobs: React.FC<JobsProps> = ({
                     exit={{ opacity: 0, scale: 0.98 }}
                     transition={{ duration: 0.15 }}
                   >
-                    <JobCard key={job.id} job={job} compact />
+                    <JobCard key={job.id} job={job} compact onRetry={onRetryJob} />
                   </motion.div>
                 ))}
               </AnimatePresence>

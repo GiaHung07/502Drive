@@ -5,13 +5,14 @@ import { Button } from '@/components/ui/Button'
 import { ProgressBar } from '@/components/primitives/ProgressBar'
 import { JobSummary } from '@/lib/types'
 import { formatBytes, formatDuration, formatTimeAgo, shortId } from '@/lib/utils'
-import { Play, Pause, X, Loader2, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
+import { Play, Pause, X, Loader2, CheckCircle2, AlertCircle, Clock, RotateCcw } from 'lucide-react'
 
 export interface JobCardProps {
   job: JobSummary
   onPause?: (id: string) => void
   onResume?: (id: string) => void
   onCancel?: (id: string) => void
+  onRetry?: (id: string) => void
   compact?: boolean
 }
 
@@ -68,6 +69,7 @@ export const JobCard: React.FC<JobCardProps> = ({
   onPause,
   onResume,
   onCancel,
+  onRetry,
   compact = false,
 }) => {
   const isRunning = job.status === 'running' || job.status === 'discovering'
@@ -130,6 +132,19 @@ export const JobCard: React.FC<JobCardProps> = ({
               aria-label="Hủy job"
             >
               <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          {isFailed && onRetry && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => onRetry(job.id)}
+              className="h-6.5 px-2 text-[0.6875rem] gap-1 text-error hover:bg-error/10 hover:border-error/40"
+              title="Thử lại job"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Thử lại
             </Button>
           )}
         </div>
