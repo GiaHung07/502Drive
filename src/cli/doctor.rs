@@ -81,7 +81,7 @@ async fn check_google_drive(config: &AppConfig, db: &Database) -> anyhow::Result
             print_check(
                 "google_account",
                 false,
-                "not connected; run gdclone-bot auth login",
+                "not connected; run 502drive auth login",
             );
             return Ok(());
         }

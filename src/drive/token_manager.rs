@@ -90,7 +90,7 @@ impl TokenManager {
             Ok(token) => token,
             Err(RefreshTokenError::InvalidGrant) => {
                 repo::mark_account_reconnect_required(&self.db, account_id).await?;
-                bail!("Google refresh token expired or was revoked. Run: gdclone-bot auth login");
+                bail!("Google refresh token expired or was revoked. Run: 502drive auth login");
             }
             Err(err) => return Err(err.into()),
         };

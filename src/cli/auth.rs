@@ -14,7 +14,7 @@ pub async fn login(config: &AppConfig, db: &Database) -> anyhow::Result<()> {
     let port = oauth::choose_redirect_port(&config.google_oauth).await?;
     let start = oauth::build_authorization_url(&config.google_oauth, port)?;
 
-    println!("Open this URL on this machine to authorize gdclone-bot:\n");
+    println!("Open this URL on this machine to authorize 502drive:\n");
     println!("{}", start.auth_url);
     if let Err(err) = open::that(&start.auth_url) {
         eprintln!("Could not open browser automatically: {err}");
@@ -71,7 +71,7 @@ pub async fn login(config: &AppConfig, db: &Database) -> anyhow::Result<()> {
 pub async fn status(db: &Database) -> anyhow::Result<()> {
     match repo::account_status(db).await? {
         Some(status) => println!("Google account status: {status}"),
-        None => println!("No Google account connected. Run: gdclone-bot auth login"),
+        None => println!("No Google account connected. Run: 502drive auth login"),
     }
     Ok(())
 }

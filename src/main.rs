@@ -14,7 +14,7 @@ use gdclone_bot::{
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Parser)]
-#[command(name = "gdclone-bot")]
+#[command(name = "502drive")]
 struct Cli {
     #[arg(short, long)]
     config: Option<PathBuf>,

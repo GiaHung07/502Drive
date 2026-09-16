@@ -1067,22 +1067,35 @@ async fn handle_command(
             spawn_preview_dashboard(bot, msg.chat.id, db, user_id).await?;
         }
         Command::Connect => {
-            bot.send_message(
-                msg.chat.id,
-                "Google Auth chạy local-first.\n\
-                 \n\
-                 Chạy lệnh sau trên máy đang chạy bot:\n\
-                 \n\
-                   gdclone-bot auth login\n\
-                 \n\
-                 Sau đó dùng /account để kiểm tra kết nối.",
-            )
-            .await?;
+            let connect_text = match ui_language(&config) {
+                keyboards::UiLanguage::Vi => {
+                    "Google Auth chạy local-first.\n\
+                     \n\
+                     Chạy lệnh sau trên máy đang chạy bot:\n\
+                     \n\
+                       502drive auth login\n\
+                     \n\
+                     Sau đó dùng /account để kiểm tra kết nối."
+                }
+                keyboards::UiLanguage::En => {
+                    "Google Auth runs local-first.\n\
+                     \n\
+                     Run this command on the machine running the bot:\n\
+                     \n\
+                       502drive auth login\n\
+                     \n\
+                     Then use /account to verify the connection."
+                }
+            };
+            bot.send_message(msg.chat.id, connect_text).await?;
         }
         Command::Account => {
             let text = account_summary(&config, &db, ui_language(&config))
                 .await
-                .unwrap_or_else(|err| format!("Lỗi đọc trạng thái tài khoản: {err}"));
+                .unwrap_or_else(|err| match ui_language(&config) {
+                    keyboards::UiLanguage::Vi => format!("Lỗi đọc trạng thái tài khoản: {err}"),
+                    keyboards::UiLanguage::En => format!("Error reading account status: {err}"),
+                });
             bot.send_message(msg.chat.id, text)
                 .reply_markup(keyboards::account_keyboard(ui_language(&config)))
                 .await?;
@@ -1121,31 +1134,54 @@ async fn handle_command(
             spawn_clone_now(bot, msg.chat.id, config, db, user_id, input).await?;
         }
         Command::Whoami => {
+            let lang = ui_language(&config);
             let role = repo::authorized_user(&db, user_id)
                 .await
                 .ok()
                 .flatten()
                 .map(|u| u.role)
-                .unwrap_or_else(|| "không rõ".to_string());
-            bot.send_message(
-                msg.chat.id,
-                format!(
+                .unwrap_or_else(|| match lang {
+                    keyboards::UiLanguage::Vi => "không rõ".to_string(),
+                    keyboards::UiLanguage::En => "unknown".to_string(),
+                });
+            let whoami_text = match lang {
+                keyboards::UiLanguage::Vi => format!(
                     "NGƯỜI DÙNG\n\
                      ━━━━━━━━━\n\
                      Telegram ID : {user_id}\n\
                      Quyền       : {role}"
                 ),
-            )
-            .await?;
+                keyboards::UiLanguage::En => format!(
+                    "USER\n\
+                     ━━━━━━━━━\n\
+                     Telegram ID : {user_id}\n\
+                     Role        : {role}"
+                ),
+            };
+            bot.send_message(msg.chat.id, whoami_text).await?;
         }
         Command::Destination => {
             spawn_destination_panel(bot, msg.chat.id, db, user_id, ui_language(&config)).await?;
         }
         Command::ClearDestination => {
+            let lang = ui_language(&config);
             let text = match repo::clear_default_destination(&db, "default").await {
-                Ok(0) => "Chưa có thư mục đích mặc định để xoá.".to_string(),
-                Ok(_) => "Đã xoá thư mục đích mặc định.".to_string(),
-                Err(err) => format!("Lỗi xoá thư mục đích: {err}"),
+                Ok(0) => match lang {
+                    keyboards::UiLanguage::Vi => {
+                        "Chưa có thư mục đích mặc định để xoá.".to_string()
+                    }
+                    keyboards::UiLanguage::En => {
+                        "No default destination folder to clear.".to_string()
+                    }
+                },
+                Ok(_) => match lang {
+                    keyboards::UiLanguage::Vi => "Đã xoá thư mục đích mặc định.".to_string(),
+                    keyboards::UiLanguage::En => "Cleared default destination folder.".to_string(),
+                },
+                Err(err) => match lang {
+                    keyboards::UiLanguage::Vi => format!("Lỗi xoá thư mục đích: {err}"),
+                    keyboards::UiLanguage::En => format!("Error clearing destination: {err}"),
+                },
             };
             bot.send_message(msg.chat.id, text).await?;
         }
@@ -1599,13 +1635,22 @@ fn watch_id_prompt(command: &str, lang: keyboards::UiLanguage) -> String {
         "/unwatch" => ReplyPrompt::Unwatch.marker(lang),
         _ => "",
     };
-    format!(
-        "Dán ID watch vào ô trả lời tin nhắn này.\n\
-         Lệnh: {command} <id_watch>\n\
-         \n\
-         Dùng /watches để bấm chọn, không cần nhớ ID.\n\
-         {marker}"
-    )
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Dán ID watch vào ô trả lời tin nhắn này.\n\
+             Lệnh: {command} <id_watch>\n\
+             \n\
+             Dùng /watches để bấm chọn, không cần nhớ ID.\n\
+             {marker}"
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Paste the watch ID in reply to this message.\n\
+             Command: {command} <watch_id>\n\
+             \n\
+             Use /watches to select from list without remembering ID.\n\
+             {marker}"
+        ),
+    }
 }
 
 fn job_id_prompt(command: &str, lang: keyboards::UiLanguage) -> String {
@@ -1617,13 +1662,22 @@ fn job_id_prompt(command: &str, lang: keyboards::UiLanguage) -> String {
         "/retry" => ReplyPrompt::Retry.marker(lang),
         _ => "",
     };
-    format!(
-        "Dán job ID vào ô trả lời tin nhắn này.\n\
-         Lệnh: {command} <job_id>\n\
-         \n\
-         Dùng /jobs để xem job đang chạy.\n\
-         {marker}"
-    )
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Dán job ID vào ô trả lời tin nhắn này.\n\
+             Lệnh: {command} <job_id>\n\
+             \n\
+             Dùng /jobs để xem job đang chạy.\n\
+             {marker}"
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Paste the job ID in reply to this message.\n\
+             Command: {command} <job_id>\n\
+             \n\
+             Use /jobs to see running jobs.\n\
+             {marker}"
+        ),
+    }
 }
 
 fn user_id_prompt(command: &str, lang: keyboards::UiLanguage) -> String {
@@ -1632,13 +1686,22 @@ fn user_id_prompt(command: &str, lang: keyboards::UiLanguage) -> String {
         "/revoke" => ReplyPrompt::Revoke.marker(lang),
         _ => "",
     };
-    format!(
-        "Dán Telegram user ID vào ô trả lời tin nhắn này.\n\
-         Lệnh: {command} <telegram_user_id>\n\
-         \n\
-         User có thể dùng /whoami để xem ID.\n\
-         {marker}"
-    )
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Dán Telegram user ID vào ô trả lời tin nhắn này.\n\
+             Lệnh: {command} <telegram_user_id>\n\
+             \n\
+             User có thể dùng /whoami để xem ID.\n\
+             {marker}"
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Paste the Telegram user ID in reply to this message.\n\
+             Command: {command} <telegram_user_id>\n\
+             \n\
+             Users can run /whoami to see their ID.\n\
+             {marker}"
+        ),
+    }
 }
 
 fn watch_policy_prompt(lang: keyboards::UiLanguage) -> &'static str {
@@ -1730,8 +1793,8 @@ async fn render_home_dashboard(
 
 fn home_title(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
-        keyboards::UiLanguage::Vi => "DRIVE502 CONTROL CENTER",
-        keyboards::UiLanguage::En => "DRIVE502 CONTROL CENTER",
+        keyboards::UiLanguage::Vi => "502DRIVE CONTROL CENTER",
+        keyboards::UiLanguage::En => "502DRIVE CONTROL CENTER",
     }
 }
 
@@ -2600,7 +2663,7 @@ async fn account_summary(
     } else {
         lines.push(String::new());
         lines.push(account_login_hint(lang).to_string());
-        lines.push("  gdclone-bot auth login".to_string());
+        lines.push("  502drive auth login".to_string());
     }
 
     lines.push(String::new());
@@ -4723,10 +4786,10 @@ fn drive_error_friendly(
 ) -> &'static str {
     match (lang, status, reason) {
         (keyboards::UiLanguage::Vi, 401, _) => {
-            "Phiên Google hết hạn. Chạy `gdclone-bot auth login` trên máy bot."
+            "Phiên Google hết hạn. Chạy `502drive auth login` trên máy bot."
         }
         (keyboards::UiLanguage::En, 401, _) => {
-            "Google session expired. Run `gdclone-bot auth login` on the bot machine."
+            "Google session expired. Run `502drive auth login` on the bot machine."
         }
         (keyboards::UiLanguage::Vi, 403, Some("insufficientPermissions")) => {
             "Tài khoản Google hiện tại không đủ quyền với file/folder này."
