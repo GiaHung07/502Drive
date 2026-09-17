@@ -211,6 +211,18 @@ body {
   animation: shimmer 1.8s ease-in-out infinite;
 }
 
+/* Language switch crossfade — added/removed by useI18n outside React state.
+   Eases the text reflow (vi copy runs longer than en) into an intentional
+   fade instead of an abrupt layout jump. */
+@keyframes lang-fade {
+  0% { opacity: 0.45; }
+  100% { opacity: 1; }
+}
+
+html.lang-fading body {
+  animation: lang-fade 240ms ease-out;
+}
+
 /* Accessibility */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

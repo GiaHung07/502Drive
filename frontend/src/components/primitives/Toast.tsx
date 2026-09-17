@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -15,6 +15,9 @@ const MAX_TOASTS = 3
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
+  // Dedupe guard: identical title+description fired while still visible
+  // refreshes the existing toast instead of stacking another copy.
+  const lastSignatureRef = useRef<{ signature: string; at: number } | null>(null)
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -22,6 +25,18 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toast = useCallback(
     ({ title, description, variant = 'default', duration = 3500 }: Omit<ToastMessage, 'id'>) => {
+      const now = Date.now()
+      const signature = `${variant}::${title}::${description ?? ''}`
+      if (
+        lastSignatureRef.current &&
+        lastSignatureRef.current.signature === signature &&
+        now - lastSignatureRef.current.at < 1500
+      ) {
+        lastSignatureRef.current.at = now
+        return
+      }
+      lastSignatureRef.current = { signature, at: now }
+
       const id = Math.random().toString(36).substring(2, 9)
       const newToast: ToastMessage = { id, title, description, variant, duration }
       setToasts((prev) => {
@@ -73,26 +88,26 @@ const ToastItem: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
 
   const variantStyles = {
     default: {
-      card: 'border-border/80 shadow-modal hover:border-accent/40',
-      badge: 'bg-accent/15 text-accent border border-accent/25',
+      card: 'border-border/80 shadow-float hover:border-accent/40',
+      badge: 'bg-accent/12 text-accent',
       icon: <Info className="h-4 w-4 stroke-[2.2]" />,
       bar: 'bg-accent',
     },
     success: {
-      card: 'border-success/35 shadow-[0_12px_36px_-6px_rgba(34,197,94,0.18)] hover:border-success/50',
-      badge: 'bg-success/15 text-success border border-success/30',
+      card: 'border-success/30 shadow-float hover:border-success/45',
+      badge: 'bg-success/12 text-success',
       icon: <CheckCircle2 className="h-4 w-4 stroke-[2.2]" />,
       bar: 'bg-success',
     },
     warning: {
-      card: 'border-warning/35 shadow-[0_12px_36px_-6px_rgba(234,179,8,0.18)] hover:border-warning/50',
-      badge: 'bg-warning/15 text-warning border border-warning/30',
+      card: 'border-warning/30 shadow-float hover:border-warning/45',
+      badge: 'bg-warning/12 text-warning',
       icon: <AlertTriangle className="h-4 w-4 stroke-[2.2]" />,
       bar: 'bg-warning',
     },
     error: {
-      card: 'border-error/35 shadow-[0_12px_36px_-6px_rgba(239,68,68,0.18)] hover:border-error/50',
-      badge: 'bg-error/15 text-error border border-error/30',
+      card: 'border-error/30 shadow-float hover:border-error/45',
+      badge: 'bg-error/12 text-error',
       icon: <AlertCircle className="h-4 w-4 stroke-[2.2]" />,
       bar: 'bg-error',
     },
@@ -108,7 +123,7 @@ const ToastItem: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
       exit={{ opacity: 0, y: -16, scale: 0.94, filter: 'blur(3px)', transition: { duration: 0.16 } }}
       transition={{ type: 'spring', stiffness: 450, damping: 30, mass: 0.8 }}
       className={cn(
-        'pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-bg-elevated/95 backdrop-blur-2xl border overflow-hidden relative select-none w-full max-w-sm sm:max-w-md transition-all',
+        'pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-bg-elevated/90 backdrop-blur-xl border overflow-hidden relative select-none w-full max-w-sm sm:max-w-md transition-colors',
         current.card
       )}
     >

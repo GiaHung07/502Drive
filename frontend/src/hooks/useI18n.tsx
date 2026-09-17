@@ -35,6 +35,15 @@ export const I18nProvider: React.FC<{
       setLangState(newLang)
       localStorage.setItem(STORAGE_KEY, newLang)
       onLangChange?.(newLang)
+      // Crossfade the app surface so text reflow (vi strings run longer than
+      // en) reads as an intentional transition instead of layout jank.
+      // Runs outside React state — one class toggle, self-removing.
+      const root = document.documentElement
+      root.classList.remove('lang-fading')
+      // Force a reflow so the animation restarts on rapid re-toggles.
+      void root.offsetWidth
+      root.classList.add('lang-fading')
+      window.setTimeout(() => root.classList.remove('lang-fading'), 260)
     },
     [onLangChange]
   )

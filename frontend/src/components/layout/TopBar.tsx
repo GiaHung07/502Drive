@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { StatusDot } from "@/components/primitives/StatusDot"
 import { Button } from "@/components/ui/Button"
@@ -6,6 +6,7 @@ import { RefreshCw, RotateCcw, Search, Sun, Moon, ArrowUpCircle } from "lucide-r
 import { SystemStatus } from "@/lib/types"
 import { useTheme } from "@/hooks/useTheme"
 import { useI18n } from "@/hooks/useI18n"
+import { useCircularThemeToggle } from "@/hooks/useCircularThemeToggle"
 
 export interface TopBarProps {
   title: string
@@ -44,8 +45,22 @@ export const TopBar: React.FC<TopBarProps> = ({
   const isServiceActive = status?.service_active ?? false
   const isAccountConnected = status?.account_status === "connected"
   const isReconnectRequired = status?.account_status === "reconnect_required"
-  const { resolvedTheme, toggleTheme } = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
   const { t, lang, setLang } = useI18n()
+  const { toggleTheme: circularToggleTheme } = useCircularThemeToggle({
+    currentTheme: resolvedTheme,
+    setTheme,
+  })
+  const [isRestarting, setIsRestarting] = useState(false)
+
+  const handleRestartService = () => {
+    if (isRestarting) return
+    setIsRestarting(true)
+    Promise.resolve(onRestartService?.()).finally(() => {
+      // Minimum spin so the affordance reads even on instant responses.
+      setTimeout(() => setIsRestarting(false), 800)
+    })
+  }
 
   const activeLang = currentLang || lang
 
@@ -121,7 +136,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 aria-pressed={isActive}
                 whileHover={{ scale: isActive ? 1 : 1.05 }}
                 whileTap={{ scale: 0.96 }}
-                className={`relative px-2.5 py-1 text-[0.6875rem] font-semibold rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                className={`relative w-9 py-1 flex items-center justify-center text-[0.6875rem] font-semibold rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                   isActive
                     ? "text-text-primary"
                     : "text-text-secondary hover:text-text-primary"
@@ -161,11 +176,11 @@ export const TopBar: React.FC<TopBarProps> = ({
           </motion.button>
         )}
 
-        {/* Apple-style Theme Toggle Button with Spring Morph */}
+        {/* Theme Toggle — Telegram-style circular reveal outside the VDOM */}
         <motion.button
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.92 }}
-          onClick={toggleTheme}
+          onClick={(e) => circularToggleTheme(e)}
           aria-label={resolvedTheme === "dark" ? t('topbar.toggle_light') : t('topbar.toggle_dark')}
           className="relative h-9 w-9 rounded-xl flex items-center justify-center bg-bg-input/70 hover:bg-bg-input text-text-secondary hover:text-text-primary border border-border/50 shadow-xs cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           title={resolvedTheme === "dark" ? t('topbar.toggle_light') : t('topbar.toggle_dark')}
@@ -201,12 +216,13 @@ export const TopBar: React.FC<TopBarProps> = ({
             <Button
               size="sm"
               variant="ghost"
-              onClick={onRestartService}
+              onClick={handleRestartService}
+              disabled={isRestarting}
               className="h-9 px-3 text-xs sm:text-sm text-text-secondary hover:text-text-primary gap-2 rounded-xl border border-border/50 font-medium"
               title={t('topbar.reload_service')}
               aria-label={t('topbar.reload_service')}
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className={`h-4 w-4 ${isRestarting ? "animate-spin text-accent" : ""}`} />
               <span className="hidden lg:inline text-[0.6875rem] font-medium">{t('topbar.reload_service')}</span>
             </Button>
           )}
