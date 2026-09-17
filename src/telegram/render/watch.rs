@@ -1,0 +1,633 @@
+//! Watch list/detail texts, status and policy labels, filter and action texts.
+
+use crate::state::repo;
+use crate::telegram::handlers::WatchListMode;
+use crate::telegram::keyboards;
+use crate::telegram::render::{progress_status_field, push_field, short_id};
+
+pub(crate) fn watch_list_mode_title(
+    mode: WatchListMode,
+    lang: keyboards::UiLanguage,
+) -> &'static str {
+    match (lang, mode) {
+        (keyboards::UiLanguage::Vi, WatchListMode::Status) => "Chọn watch để xem chi tiết",
+        (keyboards::UiLanguage::Vi, WatchListMode::Pause) => "Chọn watch để tạm dừng",
+        (keyboards::UiLanguage::Vi, WatchListMode::Resume) => "Chọn watch để tiếp tục",
+        (keyboards::UiLanguage::Vi, WatchListMode::Unwatch) => "Chọn watch để dừng theo dõi",
+        (keyboards::UiLanguage::En, WatchListMode::Status) => "Choose a watch to view details",
+        (keyboards::UiLanguage::En, WatchListMode::Pause) => "Choose a watch to pause",
+        (keyboards::UiLanguage::En, WatchListMode::Resume) => "Choose a watch to resume",
+        (keyboards::UiLanguage::En, WatchListMode::Unwatch) => "Choose a watch to stop",
+    }
+}
+
+pub(crate) fn render_watch_detail(
+    lang: keyboards::UiLanguage,
+    watch: &repo::WatchSubscription,
+    source: &str,
+    destination: &str,
+    cursor_seq: i64,
+    pending_events: i64,
+) -> String {
+    let mut lines = vec![watch_title().to_string(), "━━━━━━━━━━".to_string()];
+    push_field(&mut lines, watch_id_field(lang), &watch.id);
+    push_field(
+        &mut lines,
+        progress_status_field(lang),
+        watch_status_label(lang, &watch.status),
+    );
+    push_field(
+        &mut lines,
+        watch_source_field(lang),
+        &format!("{source} ({})", watch.source_root_id),
+    );
+    push_field(
+        &mut lines,
+        watch_destination_field(lang),
+        &format!("{destination} ({})", watch.destination_root_id),
+    );
+    push_field(
+        &mut lines,
+        watch_content_policy_field(lang),
+        content_update_policy_label(lang, &watch.content_update_policy),
+    );
+    push_field(
+        &mut lines,
+        watch_deletion_policy_field(lang),
+        deletion_policy_label(lang, &watch.deletion_policy),
+    );
+    push_field(
+        &mut lines,
+        watch_move_policy_field(lang),
+        move_out_policy_label(lang, &watch.move_out_policy),
+    );
+    push_field(
+        &mut lines,
+        watch_baseline_field(lang),
+        &watch.baseline_sequence.to_string(),
+    );
+    push_field(
+        &mut lines,
+        watch_consumed_field(lang),
+        &watch.last_consumed_sequence.to_string(),
+    );
+    push_field(
+        &mut lines,
+        watch_cursor_field(lang),
+        &cursor_seq.to_string(),
+    );
+    push_field(
+        &mut lines,
+        watch_pending_field(lang),
+        &pending_events.to_string(),
+    );
+    lines.join("\n")
+}
+
+pub(crate) fn watch_title() -> &'static str {
+    "WATCH/SYNC"
+}
+
+pub(crate) fn watch_empty_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "WATCH/SYNC\n━━━━━━━━━━\nChưa có thư mục nào đang được theo dõi."
+        }
+        keyboards::UiLanguage::En => "WATCH/SYNC\n━━━━━━━━━━\nNo watched folders yet.",
+    }
+}
+
+pub(crate) fn watch_page_label(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Trang",
+        keyboards::UiLanguage::En => "Page",
+    }
+}
+
+pub(crate) fn watch_name_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Tên",
+        keyboards::UiLanguage::En => "Name",
+    }
+}
+
+pub(crate) fn watch_id_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "ID watch",
+        keyboards::UiLanguage::En => "Watch ID",
+    }
+}
+
+pub(crate) fn watch_source_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Nguồn (folder cần lưu)",
+        keyboards::UiLanguage::En => "Source folder",
+    }
+}
+
+pub(crate) fn watch_destination_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Đích (folder nhận copy)",
+        keyboards::UiLanguage::En => "Destination folder",
+    }
+}
+
+pub(crate) fn watch_content_policy_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Khi nội dung file đổi",
+        keyboards::UiLanguage::En => "When file content changes",
+    }
+}
+
+pub(crate) fn watch_deletion_policy_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Khi nguồn xoá file",
+        keyboards::UiLanguage::En => "When source deletes a file",
+    }
+}
+
+pub(crate) fn watch_move_policy_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Khi file rời khỏi nguồn",
+        keyboards::UiLanguage::En => "When a file leaves source",
+    }
+}
+
+pub(crate) fn watch_baseline_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Mốc bắt đầu theo dõi",
+        keyboards::UiLanguage::En => "Watch baseline",
+    }
+}
+
+pub(crate) fn watch_consumed_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Đã áp đến sự kiện",
+        keyboards::UiLanguage::En => "Applied through event",
+    }
+}
+
+pub(crate) fn watch_cursor_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Sự kiện mới nhất",
+        keyboards::UiLanguage::En => "Latest event",
+    }
+}
+
+pub(crate) fn watch_pending_field(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Số thay đổi còn chờ",
+        keyboards::UiLanguage::En => "Pending changes",
+    }
+}
+
+pub(crate) fn vi_watch_status(status: &str) -> &str {
+    match status {
+        "active" => "hoạt động",
+        "paused" => "tạm dừng",
+        "initializing" => "đang khởi tạo",
+        "catching_up" => "đang bắt kịp",
+        "degraded" => "bi lỗi",
+        "needs_reconcile" => "cần đồng bộ lại",
+        "stopped" => "đã dừng",
+        other => other,
+    }
+}
+
+pub(crate) fn watch_status_label(lang: keyboards::UiLanguage, status: &str) -> &str {
+    if lang == keyboards::UiLanguage::Vi {
+        return vi_watch_status(status);
+    }
+    match status {
+        "active" => "active",
+        "paused" => "paused",
+        "initializing" => "initializing",
+        "catching_up" => "catching up",
+        "degraded" => "degraded",
+        "needs_reconcile" => "needs reconcile",
+        "stopped" => "stopped",
+        other => other,
+    }
+}
+
+pub(crate) fn vi_content_update_policy(policy: &str) -> &str {
+    match policy {
+        "versioned_copy" => "tạo bản copy mới",
+        "replace_copy" => "copy mới rồi đưa bản cũ vào thùng rác",
+        "manual_confirmation" => "dừng để xác nhận thủ công",
+        other => other,
+    }
+}
+
+pub(crate) fn content_update_policy_label(lang: keyboards::UiLanguage, policy: &str) -> &str {
+    if lang == keyboards::UiLanguage::Vi {
+        return vi_content_update_policy(policy);
+    }
+    match policy {
+        "versioned_copy" => "create a new copy",
+        "replace_copy" => "copy new, then trash old copy",
+        "manual_confirmation" => "stop for manual confirmation",
+        other => other,
+    }
+}
+
+pub(crate) fn vi_deletion_policy(policy: &str) -> &str {
+    match policy {
+        "preserve_destination" => "giữ bản copy ở đích",
+        "manual_confirmation" => "dừng để xác nhận thủ công",
+        other => other,
+    }
+}
+
+pub(crate) fn deletion_policy_label(lang: keyboards::UiLanguage, policy: &str) -> &str {
+    if lang == keyboards::UiLanguage::Vi {
+        return vi_deletion_policy(policy);
+    }
+    match policy {
+        "preserve_destination" => "keep destination copy",
+        "manual_confirmation" => "stop for manual confirmation",
+        other => other,
+    }
+}
+
+pub(crate) fn vi_move_out_policy(policy: &str) -> &str {
+    match policy {
+        "detach" => "tách khỏi watch, không xoá bản copy",
+        "keep_following" => "tiếp tục theo dõi file đó",
+        other => other,
+    }
+}
+
+pub(crate) fn move_out_policy_label(lang: keyboards::UiLanguage, policy: &str) -> &str {
+    if lang == keyboards::UiLanguage::Vi {
+        return vi_move_out_policy(policy);
+    }
+    match policy {
+        "detach" => "detach from watch, keep copy",
+        "keep_following" => "keep following this file",
+        other => other,
+    }
+}
+
+pub(crate) fn watch_disabled_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "Watch đang tắt. Bật `watch.enabled = true` trong config rồi khởi động lại bot."
+        }
+        keyboards::UiLanguage::En => {
+            "Watch is disabled. Set `watch.enabled = true` in config, then restart the bot."
+        }
+    }
+}
+
+pub(crate) fn watch_usage_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "Cú pháp: /sync <nguồn> [đích] (hoặc /watch <nguồn> [đích])\n\
+             • Nguồn: link/ID thư mục Drive cần theo dõi và đồng bộ.\n\
+             • Đích: (tuỳ chọn nếu đã có đích mặc định) link/ID thư mục nhận bản copy.\n\
+             Ví dụ: /sync https://drive.google.com/drive/folders/NGUON https://drive.google.com/drive/folders/DICH"
+        }
+        keyboards::UiLanguage::En => {
+            "Usage: /sync <source> [destination] (or /watch <source> [destination])\n\
+             • Source: Drive folder link/ID to watch and sync.\n\
+             • Destination: (optional if default set) Drive folder link/ID that receives copies.\n\
+             Example: /sync https://drive.google.com/drive/folders/SOURCE https://drive.google.com/drive/folders/DEST"
+        }
+    }
+}
+
+pub(crate) fn watch_source_must_be_folder(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "Nguồn phải là thư mục Google Drive. Hãy gửi link/ID folder cần lưu."
+        }
+        keyboards::UiLanguage::En => {
+            "Source must be a Google Drive folder. Send the folder link/ID to preserve."
+        }
+    }
+}
+
+pub(crate) fn watch_destination_must_be_folder(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "Đích phải là thư mục Google Drive. Hãy gửi link/ID folder nhận bản copy."
+        }
+        keyboards::UiLanguage::En => {
+            "Destination must be a Google Drive folder. Send the folder link/ID that receives copies."
+        }
+    }
+}
+
+pub(crate) fn watch_destination_not_writable(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Không có quyền ghi vào thư mục đích.",
+        keyboards::UiLanguage::En => "No write access to the destination folder.",
+    }
+}
+
+pub(crate) fn watch_created_text(
+    lang: keyboards::UiLanguage,
+    watch_id: &str,
+    source_name: &str,
+    source_id: &str,
+    destination_name: &str,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Watch đã tạo thành công.\n\
+             ID          : {short}\n\
+             Nguồn       : {source_name} ({source_id})\n\
+             Đích        : {destination_name}\n\
+             Khi nguồn xoá file: giữ bản copy ở đích.\n\
+             Khi nguồn đổi tên: cố gắng đổi tên bản copy theo.\n\
+             Clone ban đầu đang chạy nền. Dùng /watch_status {short} để theo dõi.",
+            short = short_id(watch_id),
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Watch created.\n\
+             ID          : {short}\n\
+             Source      : {source_name} ({source_id})\n\
+             Destination : {destination_name}\n\
+             When source deletes a file: keep the destination copy.\n\
+             When source renames a file: try to rename the copy too.\n\
+             Initial clone is running in the background. Use /watch_status {short} to follow it.",
+            short = short_id(watch_id),
+        ),
+    }
+}
+
+pub(crate) fn watch_not_found_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Không tìm thấy watch.",
+        keyboards::UiLanguage::En => "Watch not found.",
+    }
+}
+
+pub(crate) fn watch_prefix_ambiguous_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Có nhiều watch trùng prefix. Nhập thêm vài ký tự watch ID.",
+        keyboards::UiLanguage::En => {
+            "More than one watch matches that prefix. Enter a few more watch ID characters."
+        }
+    }
+}
+
+pub(crate) fn watch_paused_text(lang: keyboards::UiLanguage, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!("Watch {} đã tạm dừng.", short_id(watch_id)),
+        keyboards::UiLanguage::En => format!("Watch {} paused.", short_id(watch_id)),
+    }
+}
+
+pub(crate) fn watch_pause_failed_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Không tìm thấy watch hoặc không thể tạm dừng.",
+        keyboards::UiLanguage::En => "Watch not found or cannot be paused.",
+    }
+}
+
+pub(crate) fn watch_resumed_text(lang: keyboards::UiLanguage, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            format!("Watch {} đã tiếp tục (đang bắt kịp).", short_id(watch_id))
+        }
+        keyboards::UiLanguage::En => format!("Watch {} resumed (catching up).", short_id(watch_id)),
+    }
+}
+
+pub(crate) fn watch_needs_reconcile_text(
+    lang: keyboards::UiLanguage,
+    watch_id: &str,
+    pending_events: i64,
+    limit: u64,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Watch {} cần đồng bộ lại vì backlog đã tới {} events (limit {}). Tạo lại watch hoặc chạy reconcile trước khi resume.",
+            short_id(watch_id),
+            pending_events,
+            limit
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Watch {} needs reconciliation because backlog reached {} events (limit {}). Recreate the watch or reconcile before resuming.",
+            short_id(watch_id),
+            pending_events,
+            limit
+        ),
+    }
+}
+
+pub(crate) fn watch_resume_failed_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Không tìm thấy watch hoặc watch chưa ở trạng thái tạm dừng.",
+        keyboards::UiLanguage::En => "Watch not found or is not paused.",
+    }
+}
+
+pub(crate) fn watch_stopped_text(lang: keyboards::UiLanguage, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!("Watch {} đã dừng.", short_id(watch_id)),
+        keyboards::UiLanguage::En => format!("Watch {} stopped.", short_id(watch_id)),
+    }
+}
+
+pub(crate) fn watch_stop_failed_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Không tìm thấy watch hoặc đã dừng trước đó.",
+        keyboards::UiLanguage::En => "Watch not found or was already stopped.",
+    }
+}
+
+pub(crate) fn watch_policy_usage_text(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "Cú pháp: /watch_policy <id_watch> <policy>\n\
+             Policy hợp lệ:\n\
+             • versioned_copy: file nguồn đổi nội dung thì tạo bản copy mới.\n\
+             • replace_copy: copy mới rồi đưa bản cũ vào thùng rác.\n\
+             • manual_confirmation: dừng lại để xác nhận thủ công."
+        }
+        keyboards::UiLanguage::En => {
+            "Usage: /watch_policy <watch_id> <policy>\n\
+             Valid policies:\n\
+             • versioned_copy: create a new copy when source file content changes.\n\
+             • replace_copy: copy new, then trash the old copy.\n\
+             • manual_confirmation: stop for manual confirmation."
+        }
+    }
+}
+
+pub(crate) fn watch_policy_invalid(lang: keyboards::UiLanguage) -> &'static str {
+    match lang {
+        keyboards::UiLanguage::Vi => "Policy không hợp lệ.",
+        keyboards::UiLanguage::En => "Invalid policy.",
+    }
+}
+
+pub(crate) fn watch_policy_invalid_value(lang: keyboards::UiLanguage, policy: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Policy không hợp lệ '{policy}'. Chọn một trong: versioned_copy | replace_copy | manual_confirmation"
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Invalid policy '{policy}'. Choose one of: versioned_copy | replace_copy | manual_confirmation"
+        ),
+    }
+}
+
+pub(crate) fn watch_policy_changed_text(
+    lang: keyboards::UiLanguage,
+    watch_id: &str,
+    policy: &str,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Watch {} đã đổi policy: {}.",
+            short_id(watch_id),
+            content_update_policy_label(lang, policy)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Watch {} policy changed: {}.",
+            short_id(watch_id),
+            content_update_policy_label(lang, policy)
+        ),
+    }
+}
+
+pub(crate) fn render_watch_filter_list(
+    lang: keyboards::UiLanguage,
+    watch: &repo::WatchSubscription,
+) -> String {
+    let globs = crate::watch::glob::parse_glob_list(&watch.exclude_globs);
+    if globs.is_empty() {
+        return match lang {
+            keyboards::UiLanguage::Vi => format!(
+                "Watch `{short}` chưa có glob loại trừ.\nDùng /watch_filter {short} add <glob> để thêm.",
+                short = short_id(&watch.id)
+            ),
+            keyboards::UiLanguage::En => format!(
+                "Watch `{short}` has no exclude globs yet.\nUse /watch_filter {short} add <glob> to add one.",
+                short = short_id(&watch.id)
+            ),
+        };
+    }
+    let mut text = match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "GLOB LOẠI TRỪ — watch `{}`\n━━━━━━━━━━\n",
+            short_id(&watch.id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "EXCLUDE GLOBS — watch `{}`\n━━━━━━━━━━\n",
+            short_id(&watch.id)
+        ),
+    };
+    for glob in &globs {
+        text.push_str(&format!("• {glob}\n"));
+    }
+    text
+}
+
+pub(crate) fn watch_filter_usage_text(lang: keyboards::UiLanguage) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => "Cú pháp: /watch_filter <id_watch> <lệnh>\n\
+             \n\
+             • list — xem các glob hiện có\n\
+             • add <glob> — thêm glob loại trừ (vd: *.tmp, ~$*)\n\
+             • remove <glob> — xóa một glob\n\
+             • clear — xóa tất cả\n\
+             \n\
+             File trùng glob sẽ bị bỏ qua khi đồng bộ. Dùng /watches để chọn watch."
+            .to_string(),
+        keyboards::UiLanguage::En => "Syntax: /watch_filter <watch_id> <action>\n\
+             \n\
+             • list — show current globs\n\
+             • add <glob> — add an exclude glob (e.g. *.tmp, ~$*)\n\
+             • remove <glob> — remove one glob\n\
+             • clear — remove all\n\
+             \n\
+             Files matching a glob are skipped during sync. Use /watches to pick a watch."
+            .to_string(),
+    }
+}
+
+pub(crate) fn watch_filter_added_text(
+    lang: keyboards::UiLanguage,
+    glob: &str,
+    watch_id: &str,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Đã thêm glob `{glob}` vào watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Added glob `{glob}` to watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+pub(crate) fn watch_filter_removed_text(
+    lang: keyboards::UiLanguage,
+    glob: &str,
+    watch_id: &str,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Đã xóa glob `{glob}` khỏi watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Removed glob `{glob}` from watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+pub(crate) fn watch_filter_cleared_text(lang: keyboards::UiLanguage, watch_id: &str) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Đã xóa toàn bộ glob của watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Cleared all globs of watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+pub(crate) fn watch_filter_exists_text(
+    lang: keyboards::UiLanguage,
+    glob: &str,
+    watch_id: &str,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Glob `{glob}` đã có trong watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Glob `{glob}` is already on watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}
+
+pub(crate) fn watch_filter_missing_text(
+    lang: keyboards::UiLanguage,
+    glob: &str,
+    watch_id: &str,
+) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => format!(
+            "Glob `{glob}` không có trong watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+        keyboards::UiLanguage::En => format!(
+            "Glob `{glob}` is not on watch `{short}`.",
+            short = short_id(watch_id)
+        ),
+    }
+}

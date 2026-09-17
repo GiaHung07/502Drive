@@ -27,23 +27,47 @@ impl ProgressThrottle {
 }
 
 /// Render a compact Telegram-friendly progress block.
-pub fn render_progress(total: Option<u64>, completed: u64, failed: u64) -> String {
-    match total {
-        Some(total) if total > 0 => {
-            let width = 16_usize;
-            let filled = ((completed.min(total) * width as u64) / total) as usize;
-            let pct = (completed.min(total) * 100) / total;
-            format!(
-                "Tiến độ: {}%\n{}{}\nXong: {}/{} | Lỗi: {}",
-                pct,
-                "█".repeat(filled),
-                "░".repeat(width - filled),
-                completed,
-                total,
-                failed,
-            )
-        }
-        _ => format!("Đang quét...\nXong: {completed} | Lỗi: {failed}"),
+pub fn render_progress(
+    lang: crate::telegram::i18n::UiLanguage,
+    total: Option<u64>,
+    completed: u64,
+    failed: u64,
+) -> String {
+    match lang {
+        crate::telegram::i18n::UiLanguage::Vi => match total {
+            Some(total) if total > 0 => {
+                let width = 16_usize;
+                let filled = ((completed.min(total) * width as u64) / total) as usize;
+                let pct = (completed.min(total) * 100) / total;
+                format!(
+                    "Tiến độ: {}%\n{}{}\nXong: {}/{} | Lỗi: {}",
+                    pct,
+                    "█".repeat(filled),
+                    "░".repeat(width - filled),
+                    completed,
+                    total,
+                    failed,
+                )
+            }
+            _ => format!("Đang quét...\nXong: {completed} | Lỗi: {failed}"),
+        },
+        crate::telegram::i18n::UiLanguage::En => match total {
+            Some(total) if total > 0 => {
+                let width = 16_usize;
+                let filled = ((completed.min(total) * width as u64) / total) as usize;
+                let pct = (completed.min(total) * 100) / total;
+                format!(
+                    "Progress: {}%\n{}{}\nDone: {}/{} | Failed: {}",
+                    pct,
+                    "█".repeat(filled),
+                    "░".repeat(width - filled),
+                    completed,
+                    total,
+                    failed,
+                )
+            }
+            _ => format!("Scanning...\nDone: {completed} | Failed: {failed}"),
+        },
     }
 }
 

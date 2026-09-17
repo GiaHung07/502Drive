@@ -3,10 +3,10 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use crate::telegram::i18n::TextKey as T;
 pub use crate::telegram::i18n::UiLanguage;
 
-pub fn confirm_clone_keyboard(state_id: &str) -> InlineKeyboardMarkup {
+pub fn confirm_clone_keyboard(state_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([[
-        InlineKeyboardButton::callback("Clone ngay", format!("clone:confirm:{state_id}")),
-        InlineKeyboardButton::callback("Huỷ", format!("clone:cancel:{state_id}")),
+        InlineKeyboardButton::callback(lang.text(T::CloneNow), format!("clone:confirm:{state_id}")),
+        InlineKeyboardButton::callback(lang.text(T::Cancel), format!("clone:cancel:{state_id}")),
     ]])
 }
 
@@ -294,13 +294,18 @@ pub fn watch_unwatch_confirm_keyboard(watch_id: &str, lang: UiLanguage) -> Inlin
 /// Callback: `dest:select:<profile_id>`
 pub fn recent_destinations_keyboard(
     profiles: &[crate::state::repo::DestinationProfile],
+    lang: UiLanguage,
 ) -> InlineKeyboardMarkup {
     let rows: Vec<Vec<InlineKeyboardButton>> = profiles
         .iter()
         .map(|p| {
-            let marker = if p.is_default { "[mặc định] " } else { "" };
+            let marker = if p.is_default {
+                lang.text(T::BadgeDefault)
+            } else {
+                ""
+            };
             let drive = if p.destination_drive_id.is_some() {
-                "[SD]"
+                lang.text(T::BadgeSharedDrive)
             } else {
                 "[My]"
             };
@@ -320,7 +325,7 @@ pub fn destination_panel_keyboard(
     shared_drives_state_id: &str,
     lang: UiLanguage,
 ) -> InlineKeyboardMarkup {
-    let mut rows = recent_destinations_keyboard(profiles).inline_keyboard;
+    let mut rows = recent_destinations_keyboard(profiles, lang).inline_keyboard;
     rows.push(vec![InlineKeyboardButton::callback(
         lang.text(T::BrowseMyDrive),
         format!("browse:open:{my_drive_state_id}"),
@@ -424,7 +429,7 @@ mod tests {
             destination_resource_key: None,
             is_default: true,
         }];
-        let keyboard = recent_destinations_keyboard(&profiles);
+        let keyboard = recent_destinations_keyboard(&profiles, UiLanguage::Vi);
         assert_eq!(
             keyboard.inline_keyboard[0][0].text,
             "[mặc định] [SD] Folder"

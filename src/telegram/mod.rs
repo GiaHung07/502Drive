@@ -3,6 +3,7 @@ pub mod handlers;
 pub mod i18n;
 pub mod keyboards;
 pub mod progress;
+pub mod render;
 
 use teloxide::prelude::*;
 use teloxide::types::BotCommand;
