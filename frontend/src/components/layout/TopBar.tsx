@@ -14,6 +14,10 @@ export interface TopBarProps {
   onRefresh?: () => void
   onRestartService?: () => void
   onOpenCommandPalette?: () => void
+  /** Currently active language ("vi" | "en"). */
+  currentLang?: string
+  /** Called when user toggles language from the TopBar pill. */
+  onChangeLang?: (lang: string) => void
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -24,6 +28,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onRefresh,
   onRestartService,
   onOpenCommandPalette,
+  currentLang = "vi",
+  onChangeLang,
 }) => {
   const isServiceActive = status?.service_active ?? false
   const isAccountConnected = status?.account_status === "connected"
@@ -80,6 +86,39 @@ export const TopBar: React.FC<TopBarProps> = ({
           </span>
         </div>
 
+        {/* Quick Language Toggle Pill — VI / EN */}
+        {onChangeLang && (
+          <div className="flex items-center p-0.5 rounded-xl bg-bg-input/70 border border-border/50 shadow-xs shrink-0">
+            {(["vi", "en"] as const).map((lang) => {
+              const isActive = currentLang === lang
+              return (
+                <motion.button
+                  key={lang}
+                  onClick={() => onChangeLang(lang)}
+                  aria-pressed={isActive}
+                  whileHover={{ scale: isActive ? 1 : 1.05 }}
+                  whileTap={{ scale: 0.96 }}
+                  className={`relative px-2.5 py-1 text-[0.6875rem] font-semibold rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                    isActive
+                      ? "text-text-primary"
+                      : "text-text-secondary hover:text-text-primary"
+                  }`}
+                  title={lang === "vi" ? "Tiếng Việt" : "English"}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="topbar-lang-pill"
+                      transition={{ type: "spring", stiffness: 500, damping: 32 }}
+                      className="absolute inset-0 bg-bg-card rounded-lg shadow-sm border border-border/60 -z-10"
+                    />
+                  )}
+                  <span className="relative z-10">{lang.toUpperCase()}</span>
+                </motion.button>
+              )
+            })}
+          </div>
+        )}
+
         {/* Apple-style Theme Toggle Button with Spring Morph */}
         <motion.button
           whileHover={{ scale: 1.08 }}
@@ -126,7 +165,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               aria-label="Khởi động lại background service"
             >
               <RotateCcw className="h-4 w-4" />
-              <span className="hidden lg:inline text-[0.6875rem] font-medium">Tải lại bot</span>
+              <span className="hidden lg:inline text-[0.6875rem] font-medium">Tải lại service</span>
             </Button>
           )}
 
@@ -148,3 +187,4 @@ export const TopBar: React.FC<TopBarProps> = ({
     </header>
   )
 }
+

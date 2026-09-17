@@ -3,14 +3,13 @@
 @tailwind utilities;
 
 /* ── Responsive root scaling ─────────────────────────────────────
-   Tailwind spacing/typography is rem-based, so scaling the root
-   font-size with the window width scales the entire UI fluidly
-   (1080p → 2K → 4K) without touching a single component.
-   The slope is aggressive enough that a maximized 1920px window
-   renders ~22% larger than the 980px default — cards, text and
-   controls grow together instead of floating in empty space. */
+   Tailwind spacing/typography is rem-based. We scale the root font-size
+   gently with viewport width so layout breathes on larger screens while
+   staying crisp at default 1080p.
+   Cap is 15.5px so a maximised 1920×1080 window does not feel over-sized.
+   (Old: clamp(15px, 0.5vw + 12.1px, 19.5px) computed ~21.7px at 1920px) */
 html {
-  font-size: clamp(15px, 0.5vw + 12.1px, 19.5px);
+  font-size: clamp(13.5px, 0.25vw + 12.2px, 15.5px);
 }
 
 /* ── Light Mode Default (macOS System Settings / Finder style) ──── */

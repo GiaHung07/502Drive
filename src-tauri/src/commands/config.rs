@@ -87,6 +87,8 @@ pub async fn get_config_summary() -> Result<ConfigSummary, String> {
     let mut owner_id = 0i64;
     let mut oauth_client_id: Option<String> = None;
     let mut oauth_client_secret_configured = false;
+    let mut language = "vi".to_string();
+    let mut launch_at_startup = true;
 
     if cfg_path.exists() {
         if let Ok(content) = fs::read_to_string(&cfg_path) {
@@ -130,6 +132,17 @@ pub async fn get_config_summary() -> Result<ConfigSummary, String> {
                         auto_confirm = b;
                     }
                 }
+                // Read [app] section for GUI-only settings
+                if let Some(app) = value.get("app").and_then(|v| v.as_table()) {
+                    if let Some(lang) = app.get("language").and_then(|v| v.as_str()) {
+                        if lang == "en" || lang == "vi" {
+                            language = lang.to_string();
+                        }
+                    }
+                    if let Some(startup) = app.get("launch_at_startup").and_then(|v| v.as_bool()) {
+                        launch_at_startup = startup;
+                    }
+                }
             }
         }
     }
@@ -147,8 +160,8 @@ pub async fn get_config_summary() -> Result<ConfigSummary, String> {
     Ok(ConfigSummary {
         engine_concurrency: concurrency,
         auto_confirm_clone: auto_confirm,
-        launch_at_startup: true,
-        language: "vi".to_string(),
+        launch_at_startup,
+        language,
         bot_token_configured,
         bot_token,
         owner_telegram_id: owner_id,
@@ -217,6 +230,27 @@ pub async fn update_config_field(field: String, value: String) -> Result<(), Str
                     "bot_token".to_string(),
                     toml::Value::String(value.trim().to_string()),
                 );
+            }
+        }
+        "language" => {
+            // Stored in [app] section — GUI-only, not consumed by the engine daemon.
+            let valid = value == "vi" || value == "en";
+            if valid {
+                let app = table
+                    .entry("app")
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                if let Some(t) = app.as_table_mut() {
+                    t.insert("language".to_string(), toml::Value::String(value.trim().to_string()));
+                }
+            }
+        }
+        "launch_at_startup" => {
+            let b = value == "true" || value == "1";
+            let app = table
+                .entry("app")
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+            if let Some(t) = app.as_table_mut() {
+                t.insert("launch_at_startup".to_string(), toml::Value::Boolean(b));
             }
         }
         _ => {}

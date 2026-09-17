@@ -25,6 +25,8 @@ const AppContent: React.FC = () => {
   const [isWizardOpen, setIsWizardOpen] = useState(false)
   const [isCloneOpen, setIsCloneOpen] = useState(false)
   const [isWatchOpen, setIsWatchOpen] = useState(false)
+  // Optimistic language state — immediately reflects user toggle without waiting for round-trip
+  const [currentLang, setCurrentLang] = useState<string>('vi')
 
   const { toast } = useToast()
 
@@ -41,6 +43,10 @@ const AppContent: React.FC = () => {
       setJobs(newJobs)
       setWatches(newWatches)
       setConfig(newConfig)
+      // Sync language state when config refreshes (avoid stomping an in-flight optimistic update)
+      if (newConfig?.language) {
+        setCurrentLang(newConfig.language)
+      }
     } catch (err) {
       console.error('Lỗi tải dữ liệu 502Drive:', err)
     } finally {
@@ -56,6 +62,31 @@ const AppContent: React.FC = () => {
     }, 3000)
     return () => clearInterval(interval)
   }, [refreshData, isWizardOpen])
+
+  // Sync currentLang from config on initial load
+  useEffect(() => {
+    if (config?.language) {
+      setCurrentLang(config.language)
+    }
+  }, [config?.language])
+
+  const handleChangeLang = useCallback(async (lang: string) => {
+    // Optimistic: update UI immediately before backend round-trip
+    setCurrentLang(lang)
+    try {
+      await api.updateConfig('language', lang)
+      toast({
+        title: lang === 'vi' ? 'Đã chuyển sang Tiếng Việt' : 'Switched to English',
+        variant: 'success',
+        duration: 1500,
+      })
+      await refreshData(true)
+    } catch (err) {
+      // Revert on error
+      setCurrentLang(config?.language || 'vi')
+      toast({ title: 'Lỗi đổi ngôn ngữ', description: getErrorMessage(err), variant: 'error' })
+    }
+  }, [config?.language, refreshData, toast])
 
   const handleStartService = async () => {
     try {
@@ -328,6 +359,8 @@ const AppContent: React.FC = () => {
           onRestartService={handleRestartService}
           onOpenBot={handleOpenBot}
           onTriggerLogin={handleTriggerLogin}
+          currentLang={currentLang}
+          onChangeLang={handleChangeLang}
         >
           {activeTab === 'dashboard' && (
             <Dashboard

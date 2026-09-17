@@ -16,6 +16,10 @@ export interface ShellProps {
   onRestartService?: () => void
   onOpenBot?: () => void
   onTriggerLogin?: () => void
+  /** Current language setting ("vi" | "en") for the TopBar pill. */
+  currentLang?: string
+  /** Callback when user toggles language from the TopBar. */
+  onChangeLang?: (lang: string) => void
   children: React.ReactNode
 }
 
@@ -35,6 +39,8 @@ export const Shell: React.FC<ShellProps> = ({
   onRestartService,
   onOpenBot,
   onTriggerLogin,
+  currentLang,
+  onChangeLang,
   children,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -132,10 +138,12 @@ export const Shell: React.FC<ShellProps> = ({
           onRefresh={onRefresh}
           onRestartService={onRestartService}
           onOpenCommandPalette={() => setIsCommandOpen(true)}
+          currentLang={currentLang}
+          onChangeLang={onChangeLang}
         />
 
         {/* Responsive viewport container with fluid auto-centering */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-bg-base p-4 sm:p-6 lg:p-8 xl:p-10 transition-colors">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-bg-base p-4 sm:p-5 lg:p-6 xl:p-8 transition-colors">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

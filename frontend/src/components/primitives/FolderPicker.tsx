@@ -129,9 +129,25 @@ export const FolderPickerPanel: React.FC<FolderPickerPanelProps> = ({
             <span>Đang tải thư mục…</span>
           </div>
         ) : error ? (
-          <div className="flex items-center gap-2 py-5 px-3 text-xs text-error">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
+          <div className="flex flex-col gap-2 py-4 px-3 text-xs text-error">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span className="font-medium leading-relaxed">
+                {error.includes('401') || error.includes('unauthorized_client')
+                  ? 'Không thể kết nối Google Drive — lỗi xác thực (401 Unauthorized)'
+                  : error}
+              </span>
+            </div>
+            {(error.includes('401') || error.includes('unauthorized_client')) && (
+              <div className="ml-6 space-y-1.5 text-[0.6875rem] text-text-secondary bg-bg-card rounded-lg p-2.5 border border-border/60">
+                <p className="font-semibold text-text-primary">Cách khắc phục:</p>
+                <ol className="list-decimal list-inside space-y-1 leading-relaxed">
+                  <li>Vào <strong>Cài đặt</strong> → nhấn <strong>Đăng nhập Google</strong> để cấp quyền lại</li>
+                  <li>Trên Google Cloud Console → OAuth Consent Screen → bấm <strong>"Publish App"</strong></li>
+                  <li>Hoặc thêm email của bạn vào danh sách <em>Test Users</em></li>
+                </ol>
+              </div>
+            )}
           </div>
         ) : items.length === 0 ? (
           <p className="py-6 text-center text-xs text-text-muted">Thư mục này trống</p>
