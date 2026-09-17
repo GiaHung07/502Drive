@@ -31,15 +31,6 @@ pub(crate) async fn render_home_dashboard(
             .filter(|w| w.status == "needs_reconcile")
             .count();
 
-    let drive_label = lang.text(T::HomeDriveLabel);
-    let bot_label = lang.text(T::HomeBotLabel);
-    let dest_label = lang.text(T::HomeDefaultDestination);
-    let width = [drive_label, bot_label, dest_label]
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0);
-
     let drive_status = match account.as_str() {
         "connected" => lang.text(T::HomeStatusConnected),
         "reconnect_required" => lang.text(T::HomeStatusReconnect),
@@ -50,37 +41,65 @@ pub(crate) async fn render_home_dashboard(
         None => lang.text(T::HomeNoDestination).to_string(),
     };
 
-    let mut lines = vec!["🚀 502Drive".to_string(), String::new()];
-    lines.push(status_row(width, drive_label, drive_status));
-    lines.push(status_row(width, bot_label, lang.text(T::HomeBotReady)));
-    lines.push(status_row(width, dest_label, &destination));
+    let mut lines = vec!["🚀 502Drive".to_string()];
+    // Overall health dot — needs-attention state wins over "ready".
+    if needs_attention > 0 {
+        lines.push(format!("⚠ {}", lang.text(T::HomeNeedsAttention)));
+    } else {
+        lines.push(format!("● {}", lang.text(T::HomeBotReady)));
+    }
     lines.push(String::new());
-    lines.push(status_row(
-        width,
+    // Natural label/value blocks — no space-padding alignment.
+    lines.push(lang.text(T::HomeDriveLabel).to_string());
+    lines.push(drive_status.to_string());
+    lines.push(String::new());
+    lines.push(lang.text(T::HomeDefaultDestination).to_string());
+    lines.push(destination);
+    lines.push(String::new());
+    lines.push(format!(
+        "{}  {}",
         lang.text(T::HomeJobsRunning),
-        &running_jobs.to_string(),
+        running_jobs
     ));
     if config.watch.enabled {
-        lines.push(status_row(
-            width,
-            lang.text(T::HomeWatching),
-            &watch_active.to_string(),
-        ));
-        lines.push(status_row(
-            width,
-            lang.text(T::HomeNeedsAttention),
-            &needs_attention.to_string(),
-        ));
+        lines.push(format!("{}  {}", lang.text(T::HomeWatching), watch_active));
+        if needs_attention > 0 {
+            lines.push(format!(
+                "⚠ {}  {}",
+                lang.text(T::HomeNeedsAttention),
+                needs_attention
+            ));
+        }
     }
     lines.push(String::new());
     lines.push(lang.text(T::HomeHint).to_string());
     Ok(lines.join("\n"))
 }
 
-/// `label` padded to `width` chars, then ` ● value`.
-fn status_row(width: usize, label: &str, value: &str) -> String {
-    let padding = " ".repeat(width.saturating_sub(label.chars().count()));
-    format!("{label}{padding} ● {value}")
+/// Settings panel — app-level configuration surfaced read-only. Notifications
+/// are app config (config.toml `[notifications]`), not per-user preferences.
+pub(crate) fn render_settings_panel(
+    lang: keyboards::UiLanguage,
+    drive_status: &str,
+    notifications_on: bool,
+) -> String {
+    let lang_value = match lang {
+        keyboards::UiLanguage::Vi => "Tiếng Việt",
+        keyboards::UiLanguage::En => "English",
+    };
+    let notif_value = if notifications_on {
+        lang.text(T::SettingsEnabled)
+    } else {
+        lang.text(T::SettingsDisabled)
+    };
+    let lines = vec![
+        lang.text(T::SettingsTitle).to_string(),
+        String::new(),
+        format!("{}  {}", lang.text(T::HomeDriveLabel), drive_status),
+        format!("{}  {}", lang.text(T::SettingsNotifications), notif_value),
+        format!("{}  {}", lang.text(T::SettingsLanguage), lang_value),
+    ];
+    lines.join("\n")
 }
 
 pub(crate) fn account_title(lang: keyboards::UiLanguage) -> &'static str {

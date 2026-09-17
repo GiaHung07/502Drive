@@ -18,31 +18,67 @@ pub(crate) fn access_denied_short(lang: keyboards::UiLanguage) -> &'static str {
     }
 }
 
+pub(crate) fn load_account_error(lang: keyboards::UiLanguage, err: &anyhow::Error) -> String {
+    tracing::warn!(error = %err, "load account error");
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            "Lỗi đọc trạng thái tài khoản. Xem log để biết chi tiết.".to_string()
+        }
+        keyboards::UiLanguage::En => {
+            "Could not read account status. See logs for details.".to_string()
+        }
+    }
+}
+
 pub(crate) fn load_home_error(lang: keyboards::UiLanguage, err: &anyhow::Error) -> String {
     match lang {
-        keyboards::UiLanguage::Vi => format!("Lỗi tải trang chính: {err}"),
-        keyboards::UiLanguage::En => format!("Could not load home: {err}"),
+        keyboards::UiLanguage::Vi => {
+            tracing::warn!(error = %err, "load error");
+            "Lỗi tải trang chính. Xem log để biết chi tiết.".to_string()
+        }
+        keyboards::UiLanguage::En => {
+            tracing::warn!(error = %err, "load error");
+            "Could not load home. See logs for details.".to_string()
+        }
     }
 }
 
 pub(crate) fn load_jobs_error(lang: keyboards::UiLanguage, err: &anyhow::Error) -> String {
     match lang {
-        keyboards::UiLanguage::Vi => format!("Lỗi tải job: {err}"),
-        keyboards::UiLanguage::En => format!("Could not load jobs: {err}"),
+        keyboards::UiLanguage::Vi => {
+            tracing::warn!(error = %err, "load error");
+            "Lỗi tải job. Xem log để biết chi tiết.".to_string()
+        }
+        keyboards::UiLanguage::En => {
+            tracing::warn!(error = %err, "load error");
+            "Could not load jobs. See logs for details.".to_string()
+        }
     }
 }
 
 pub(crate) fn load_watch_error(lang: keyboards::UiLanguage, err: &anyhow::Error) -> String {
     match lang {
-        keyboards::UiLanguage::Vi => format!("Lỗi tải watch: {err}"),
-        keyboards::UiLanguage::En => format!("Could not load watches: {err}"),
+        keyboards::UiLanguage::Vi => {
+            tracing::warn!(error = %err, "load error");
+            "Lỗi tải watch. Xem log để biết chi tiết.".to_string()
+        }
+        keyboards::UiLanguage::En => {
+            tracing::warn!(error = %err, "load error");
+            "Could not load watches. See logs for details.".to_string()
+        }
     }
 }
 
 pub(crate) fn load_watch_list_error(lang: keyboards::UiLanguage, err: &anyhow::Error) -> String {
     match lang {
-        keyboards::UiLanguage::Vi => format!("Lỗi tải danh sách watch: {err}"),
-        keyboards::UiLanguage::En => format!("Could not load watch list: {err}"),
+        keyboards::UiLanguage::Vi => {
+            tracing::warn!(error = %err, "load error");
+            "Lỗi tải danh sách watch. Xem log để biết chi tiết.".to_string()
+        }
+        keyboards::UiLanguage::En => {
+            tracing::warn!(error = %err, "load error");
+            "Could not load watch list. See logs for details.".to_string()
+        }
     }
 }
 

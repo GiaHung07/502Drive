@@ -27,29 +27,19 @@ pub(crate) fn render_watch_detail(
     watch: &repo::WatchSubscription,
     source: &str,
     destination: &str,
-    cursor_seq: i64,
+    _cursor_seq: i64,
     pending_events: i64,
     mapped_files: i64,
     now_ms: i64,
 ) -> String {
-    let mut lines = vec![watch_title().to_string(), "━━━━━━━━━━".to_string()];
-    push_field(&mut lines, watch_id_field(lang), &watch.id);
-    push_field(
-        &mut lines,
-        progress_status_field(lang),
-        &format!("● {}", watch_status_label(lang, &watch.status)),
-    );
-    push_field(
-        &mut lines,
-        watch_source_field(lang),
-        &format!("{source} ({})", watch.source_root_id),
-    );
-    push_field(
-        &mut lines,
-        watch_destination_field(lang),
-        &format!("{destination} ({})", watch.destination_root_id),
-    );
+    let mut lines = vec![format!("● {}", watch_status_label(lang, &watch.status))];
 
+    lines.push(String::new());
+    lines.push(source.to_string());
+    lines.push("        ↓".to_string());
+    lines.push(destination.to_string());
+
+    lines.push(String::new());
     let sync_time = match watch.last_consumed_at_ms {
         Some(ts) => {
             let elapsed_secs = (now_ms.saturating_sub(ts) / 1000).max(0);
@@ -61,47 +51,20 @@ pub(crate) fn render_watch_detail(
         },
     };
     push_field(&mut lines, watch_last_synced_field(lang), &sync_time);
-
-    let mapped_label = match lang {
-        keyboards::UiLanguage::Vi => format!("{mapped_files} tệp"),
-        keyboards::UiLanguage::En => format!("{mapped_files} files"),
-    };
-    push_field(&mut lines, watch_mapped_files_field(lang), &mapped_label);
-
     push_field(
         &mut lines,
         watch_pending_field(lang),
         &pending_events.to_string(),
     );
+    let mapped_label = match lang {
+        keyboards::UiLanguage::Vi => format!("{mapped_files} tệp"),
+        keyboards::UiLanguage::En => format!("{mapped_files} files"),
+    };
+    push_field(&mut lines, watch_mapped_files_field(lang), &mapped_label);
     push_field(
         &mut lines,
         watch_content_policy_field(lang),
         content_update_policy_label(lang, &watch.content_update_policy),
-    );
-    push_field(
-        &mut lines,
-        watch_deletion_policy_field(lang),
-        deletion_policy_label(lang, &watch.deletion_policy),
-    );
-    push_field(
-        &mut lines,
-        watch_move_policy_field(lang),
-        move_out_policy_label(lang, &watch.move_out_policy),
-    );
-    push_field(
-        &mut lines,
-        watch_baseline_field(lang),
-        &watch.baseline_sequence.to_string(),
-    );
-    push_field(
-        &mut lines,
-        watch_consumed_field(lang),
-        &watch.last_consumed_sequence.to_string(),
-    );
-    push_field(
-        &mut lines,
-        watch_cursor_field(lang),
-        &cursor_seq.to_string(),
     );
     lines.join("\n")
 }

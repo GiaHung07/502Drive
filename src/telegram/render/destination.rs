@@ -2,6 +2,7 @@
 
 use crate::drive::types::DriveFile;
 use crate::state::repo;
+use crate::telegram::i18n::TextKey as T;
 use crate::telegram::keyboards;
 use crate::telegram::render::{push_field, short_id};
 
@@ -177,14 +178,11 @@ pub(crate) fn render_destination_list(
     if profiles.is_empty() {
         return destination_empty_text(lang).to_string();
     }
-    let mut lines = vec![
-        destination_title(lang).to_string(),
-        "━━━━━━━━━━━━".to_string(),
-    ];
+    let mut lines = Vec::new();
     for p in profiles {
         lines.push(String::new());
         let title = if p.is_default {
-            format!("{} [{}]", p.label, destination_default_marker(lang))
+            format!("✓ {} [{}]", p.label, destination_default_marker(lang))
         } else {
             p.label.clone()
         };
@@ -193,13 +191,8 @@ pub(crate) fn render_destination_list(
         } else {
             destination_my_drive_label(lang)
         };
-        push_field(&mut lines, destination_name_field(lang), &title);
-        push_field(&mut lines, destination_location_field(lang), drive);
-        push_field(
-            &mut lines,
-            destination_short_id_field(lang),
-            short_id(&p.destination_parent_id),
-        );
+        lines.push(title);
+        lines.push(drive.to_string());
     }
     lines.push(String::new());
     lines.push(destination_hint(lang).to_string());
@@ -207,27 +200,16 @@ pub(crate) fn render_destination_list(
 }
 
 pub(crate) fn render_destination_saved(
+    lang: keyboards::UiLanguage,
     file: &DriveFile,
-    input_resource_key: Option<String>,
+    location: &str,
 ) -> String {
-    let mut lines = vec![
-        "ĐÃ ĐẶT THƯ MỤC ĐÍCH".to_string(),
-        "━━━━━━━━━━━━━━━".to_string(),
+    let lines = vec![
+        lang.text(T::DestSavedTitle).to_string(),
+        String::new(),
+        format!("📁 {}", file.name),
+        location.to_string(),
     ];
-    push_field(&mut lines, "Tên", &file.name);
-    push_field(&mut lines, "Folder ID", &file.id);
-    push_field(
-        &mut lines,
-        "Resource key",
-        capability_text(Some(
-            input_resource_key.is_some() || file.resource_key.is_some(),
-        )),
-    );
-    if let Some(drive_id) = &file.drive_id {
-        push_field(&mut lines, "Drive", &format!("Shared Drive ({drive_id})"));
-    } else {
-        push_field(&mut lines, "Drive", "My Drive / được chia sẻ");
-    }
     lines.join("\n")
 }
 

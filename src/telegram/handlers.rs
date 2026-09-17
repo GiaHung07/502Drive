@@ -200,6 +200,23 @@ impl ReplyPrompt {
 /// Dispatch a persistent reply-keyboard section press. Sections mirror the
 /// `menu:open:*` callback arms but always SEND a fresh panel (there is no
 /// message to edit when the user taps a keyboard button).
+
+/// The 502Drive build line ~2026-09 briefly shipped a persistent ReplyKeyboard.
+/// Old Telegram clients keep showing it even when the server stops sending it,
+/// so the first /start or /menu after a daemon (re)start explicitly removes it.
+async fn remove_legacy_reply_keyboard_once(bot: &Bot, chat_id: ChatId) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use teloxide::types::KeyboardRemove;
+    static LEGACY_KEYBOARD_REMOVED: AtomicBool = AtomicBool::new(false);
+    if LEGACY_KEYBOARD_REMOVED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let _ = bot
+        .send_message(chat_id, "🧹 Đã dọn bàn phím cũ. Dùng /menu để điều khiển.")
+        .reply_markup(KeyboardRemove::new())
+        .await;
+}
+
 pub(crate) async fn handle_section(
     bot: Bot,
     chat_id: ChatId,
@@ -739,7 +756,7 @@ pub async fn handle_callback_query(
         Some(("menu", "open", "account")) => {
             let text = account_summary(&config, &db, ui_language(&config))
                 .await
-                .unwrap_or_else(|err| format!("Lỗi đọc trạng thái tài khoản: {err}"));
+                .unwrap_or_else(|err| load_account_error(ui_language(&config), &err));
             edit_or_send_with_keyboard(
                 &bot,
                 chat_id,
@@ -800,6 +817,37 @@ pub async fn handle_callback_query(
                 query.message.as_ref().map(|m| m.id()),
                 language_changed_text(lang),
                 Some(keyboards::language_keyboard(lang)),
+            )
+            .await?;
+            return Ok(());
+        }
+        Some(("menu", "open", "settings")) => {
+            let lang = ui_language(&config);
+            let account = repo::account_status(&db)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let drive_status = match account.as_str() {
+                "connected" => lang.text(crate::telegram::i18n::TextKey::HomeStatusConnected),
+                "reconnect_required" => {
+                    lang.text(crate::telegram::i18n::TextKey::HomeStatusReconnect)
+                }
+                _ => lang.text(crate::telegram::i18n::TextKey::HomeStatusNotConnected),
+            };
+            let n = &config.notifications;
+            let notifications_on = n.job_completed || n.job_failed || n.watch_errors;
+            let text = crate::telegram::render::home::render_settings_panel(
+                lang,
+                drive_status,
+                notifications_on,
+            );
+            edit_or_send_with_keyboard(
+                &bot,
+                chat_id,
+                query.message.as_ref().map(|m| m.id()),
+                text,
+                Some(keyboards::settings_keyboard(lang)),
             )
             .await?;
             return Ok(());
@@ -2209,18 +2257,19 @@ async fn handle_command(
                 .await
                 .unwrap_or_else(|err| load_home_error(ui_language(&config), &err));
             bot.send_message(msg.chat.id, text)
-                .reply_markup(keyboards::main_reply_keyboard(
-                    ui_language(&config),
+                .reply_markup(keyboards::main_menu_keyboard(
                     config.watch.enabled,
+                    ui_language(&config),
                 ))
                 .await?;
+            remove_legacy_reply_keyboard_once(&bot, msg.chat.id).await;
         }
         Command::Help => {
             let text = render_help_text(ui_language(&config));
             bot.send_message(msg.chat.id, text)
-                .reply_markup(keyboards::main_reply_keyboard(
-                    ui_language(&config),
+                .reply_markup(keyboards::main_menu_keyboard(
                     config.watch.enabled,
+                    ui_language(&config),
                 ))
                 .await?;
         }
@@ -4034,6 +4083,7 @@ async fn pick_destination_from_browser(
     chat_id: i64,
     state_id: &str,
 ) -> anyhow::Result<String> {
+    let lang = ui_language(&config);
     let target = consume_destination_browser_state(db, telegram_user_id, chat_id, state_id).await?;
     let token_manager = TokenManager::new(config.clone(), db.clone());
     let access_token = token_manager.access_token("default").await?;
@@ -4042,7 +4092,7 @@ async fn pick_destination_from_browser(
     let folder = drive
         .get_reference(access_token.as_str(), &target.reference())
         .await?;
-    save_destination_profile(db, &folder, target.resource_key).await
+    save_destination_profile(lang, db, &folder, target.resource_key).await
 }
 
 /// Legacy helper kept for internal callers that only need the default.
@@ -4053,11 +4103,10 @@ async fn destination_summary(db: &Database) -> anyhow::Result<String> {
         Some(p) => {
             let mut lines = vec![
                 "Thư mục đích mặc định:".to_string(),
-                format!("  Ten : {}", p.label),
-                format!("  ID  : {}", p.destination_parent_id),
+                format!("  📁 {}", p.label),
             ];
-            if let Some(drive_id) = &p.destination_drive_id {
-                lines.push(format!("  Shared Drive: {drive_id}"));
+            if p.destination_drive_id.is_some() {
+                lines.push("  Shared Drive".to_string());
             }
             lines.push(String::new());
             lines.push("Thay đổi: /set_destination <url>   Xoá: /clear_destination".to_string());
@@ -4070,13 +4119,19 @@ async fn destination_summary(db: &Database) -> anyhow::Result<String> {
 }
 
 async fn save_destination_profile(
+    lang: keyboards::UiLanguage,
     db: &Database,
     file: &DriveFile,
     resource_key: Option<String>,
 ) -> anyhow::Result<String> {
     DestinationService::validate_writable_folder(file)?;
     DestinationService::save_as_default(db, file, resource_key.clone()).await?;
-    Ok(render_destination_saved(file, resource_key))
+    let location = if file.drive_id.is_some() {
+        "Shared Drive".to_string()
+    } else {
+        crate::telegram::render::destination::destination_my_drive_label(lang).to_string()
+    };
+    Ok(render_destination_saved(lang, file, &location))
 }
 
 // ── Clone source inspect ─────────────────────────────────────────────────────
@@ -5176,11 +5231,13 @@ mod tests {
             12,
             1000,
         );
-        assert!(en.contains("Status: ● catching up"));
-        assert!(en.contains("Source folder: Source (source)"));
+        assert!(en.contains("● catching up"));
+        assert!(en.contains("Source"));
         assert!(en.contains("Pending changes: 5"));
         assert!(en.contains("Create new version"));
-        assert!(en.contains("Mapped files: 12 files"));
+        assert!(en.contains("12 files"));
+        // Technical IDs never appear on the user card.
+        assert!(!en.contains("source_root_id"));
 
         let vi = render_watch_detail(
             keyboards::UiLanguage::Vi,
@@ -5192,8 +5249,9 @@ mod tests {
             12,
             1000,
         );
-        assert!(vi.contains("Trạng thái: ● đang bắt kịp"));
-        assert!(vi.contains("Nguồn (folder cần lưu): Nguồn (source)"));
+        assert!(vi.contains("● đang bắt kịp"));
+        assert!(vi.contains("Nguồn"));
+        assert!(!vi.contains("(source)"), "raw root ids stay off the card");
         assert!(vi.contains("Số thay đổi còn chờ: 5"));
         assert!(vi.contains("Tạo phiên bản mới"));
         assert!(vi.contains("Đã ánh xạ: 12 tệp"));
@@ -5337,11 +5395,9 @@ mod tests {
             is_default: true,
         }];
         let text = render_destination_list(&profiles, keyboards::UiLanguage::En);
-        assert!(text.contains("DESTINATIONS"));
-        assert!(text.contains("Backup [default]"));
-        assert!(text.contains("Location: My Drive / shared"));
-        assert!(text.contains("Short ID: abcdefgh"));
-        assert!(!text.contains("mặc định"));
+        assert!(text.contains("✓ Backup [default]"));
+        assert!(text.contains("My Drive / shared"));
+        assert!(!text.contains("abcdefgh"), "raw IDs stay out of the card");
     }
 
     #[test]
@@ -5505,13 +5561,12 @@ mod tests {
         assert_eq!(unknown_action(en), "Unknown action.");
 
         let err = anyhow::anyhow!("boom");
-        assert_eq!(load_home_error(en, &err), "Could not load home: boom");
-        assert_eq!(load_jobs_error(en, &err), "Could not load jobs: boom");
-        assert_eq!(load_watch_error(en, &err), "Could not load watches: boom");
-        assert_eq!(
-            load_watch_list_error(en, &err),
-            "Could not load watch list: boom"
-        );
+        // Raw error details go to logs only — user text stays generic.
+        assert!(load_home_error(en, &err).starts_with("Could not load home."));
+        assert!(load_jobs_error(en, &err).starts_with("Could not load jobs."));
+        assert!(load_watch_error(en, &err).starts_with("Could not load watches."));
+        assert!(load_watch_list_error(en, &err).starts_with("Could not load watch list."));
+        assert!(!load_home_error(en, &err).contains("boom"));
         assert!(browse_folder_error(en, &err).starts_with("Could not browse folder:"));
         assert!(pick_destination_error(en, &err).starts_with("Could not set destination folder:"));
         assert!(clone_run_error(en, &err).starts_with("Clone failed:"));

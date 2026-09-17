@@ -15,6 +15,9 @@ fn callback_of(button: &InlineKeyboardButton) -> Option<&str> {
 /// and a runtime UTF-8 truncation guard ensuring callback_data never exceeds Telegram's 64-byte limit.
 pub(crate) fn callback_btn(text: impl Into<String>, data: impl AsRef<str>) -> InlineKeyboardButton {
     let data_ref = data.as_ref();
+    // Never truncate: a cut payload can parse into a WRONG object id. A
+    // >64-byte callback means the caller should have used an opaque state id —
+    // fail loudly in dev, and let Telegram reject it visibly in release.
     debug_assert!(
         data_ref.len() <= 64,
         "callback_data exceeds 64 bytes limit (len = {}): '{}'",
@@ -22,14 +25,16 @@ pub(crate) fn callback_btn(text: impl Into<String>, data: impl AsRef<str>) -> In
         data_ref
     );
     if data_ref.len() > 64 {
-        let mut boundary = 64;
-        while boundary > 0 && !data_ref.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        InlineKeyboardButton::callback(text, &data_ref[..boundary])
-    } else {
-        InlineKeyboardButton::callback(text, data_ref)
+        // Release: never truncate (a cut payload can misroute to a wrong
+        // object id) and never panic the bot — pass through and let the
+        // Telegram API reject it loudly in logs.
+        tracing::error!(
+            len = data_ref.len(),
+            prefix = %data_ref.get(..24).unwrap_or(""),
+            "callback_data exceeds 64 bytes — button will fail; use an opaque state id"
+        );
     }
+    InlineKeyboardButton::callback(text, data_ref.to_string())
 }
 
 use crate::telegram::i18n::TextKey as T;
@@ -137,15 +142,32 @@ pub fn main_menu_keyboard(watch_enabled: bool, lang: UiLanguage) -> InlineKeyboa
         first_row.push(callback_btn(lang.text(T::MenuWatch), "menu:prompt:watch"));
     }
     rows.push(first_row);
-    rows.push(vec![
-        callback_btn(lang.text(T::MenuJobs), "menu:open:jobs"),
-        callback_btn(lang.text(T::Destination), "menu:open:destination"),
-    ]);
+    let mut second_row = vec![callback_btn(lang.text(T::MenuJobs), "menu:open:jobs")];
+    if watch_enabled {
+        second_row.push(callback_btn(lang.text(T::MenuWatches), "menu:open:watches"));
+    }
+    rows.push(second_row);
+    rows.push(vec![callback_btn(
+        lang.text(T::Destination),
+        "menu:open:destination",
+    )]);
     rows.push(vec![callback_btn(
         lang.text(T::MenuSettings),
-        "menu:open:account",
+        "menu:open:settings",
     )]);
     InlineKeyboardMarkup::new(rows)
+}
+
+/// Settings panel keyboard: language is the only per-user preference with a
+/// Telegram surface; notifications are app-level (informational row only).
+pub fn settings_keyboard(lang: UiLanguage) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new([
+        [callback_btn(
+            lang.text(T::SettingsLanguage),
+            "lang:open:panel",
+        )],
+        [callback_btn(lang.text(T::BackHome), "menu:open:home")],
+    ])
 }
 
 pub fn back_home_keyboard(lang: UiLanguage) -> InlineKeyboardMarkup {
@@ -754,15 +776,23 @@ mod tests {
                 .inline_keyboard
                 .iter()
                 .flatten()
-                .any(|button| button.text == "⟳ Theo dõi")
+                .any(|button| button.text == "⟳ Đồng bộ")
+        );
+        assert!(
+            !disabled
+                .inline_keyboard
+                .iter()
+                .flatten()
+                .any(|button| button.text == "👁 Theo dõi")
         );
 
         let enabled = main_menu_keyboard(true, UiLanguage::Vi);
         assert_eq!(enabled.inline_keyboard[0][0].text, "＋ Sao chép");
-        assert_eq!(enabled.inline_keyboard[0][1].text, "⟳ Theo dõi");
-        assert_eq!(enabled.inline_keyboard[1][0].text, "Công việc");
-        assert_eq!(enabled.inline_keyboard[1][1].text, "Thư mục đích");
-        assert_eq!(enabled.inline_keyboard[2][0].text, "Cài đặt");
+        assert_eq!(enabled.inline_keyboard[0][1].text, "⟳ Đồng bộ");
+        assert_eq!(enabled.inline_keyboard[1][0].text, "📦 Công việc");
+        assert_eq!(enabled.inline_keyboard[1][1].text, "👁 Theo dõi");
+        assert_eq!(enabled.inline_keyboard[2][0].text, "📁 Thư mục đích");
+        assert_eq!(enabled.inline_keyboard[3][0].text, "⚙ Cài đặt");
         assert_eq!(
             callback_of(&enabled.inline_keyboard[0][0]),
             Some("menu:prompt:clone")
@@ -777,11 +807,15 @@ mod tests {
         );
         assert_eq!(
             callback_of(&enabled.inline_keyboard[1][1]),
-            Some("menu:open:destination")
+            Some("menu:open:watches")
         );
         assert_eq!(
             callback_of(&enabled.inline_keyboard[2][0]),
-            Some("menu:open:account")
+            Some("menu:open:destination")
+        );
+        assert_eq!(
+            callback_of(&enabled.inline_keyboard[3][0]),
+            Some("menu:open:settings")
         );
     }
 
