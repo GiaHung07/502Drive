@@ -63,7 +63,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         role="region"
         aria-label="Notifications"
         aria-live="polite"
-        className="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 max-w-sm sm:max-w-md w-full px-4 pointer-events-none"
+        className="fixed top-4 right-4 z-50 flex flex-col items-end gap-2 w-full max-w-xs pointer-events-none"
       >
         <AnimatePresence mode="popLayout">
           {toasts.map((t) => (
@@ -90,25 +90,25 @@ const ToastItem: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
     default: {
       card: 'border-border/80 shadow-float hover:border-accent/40',
       badge: 'bg-accent/12 text-accent',
-      icon: <Info className="h-4 w-4 stroke-[2.2]" />,
+      icon: <Info className="h-3.5 w-3.5 stroke-[2.2]" />,
       bar: 'bg-accent',
     },
     success: {
       card: 'border-success/30 shadow-float hover:border-success/45',
       badge: 'bg-success/12 text-success',
-      icon: <CheckCircle2 className="h-4 w-4 stroke-[2.2]" />,
+      icon: <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.2]" />,
       bar: 'bg-success',
     },
     warning: {
       card: 'border-warning/30 shadow-float hover:border-warning/45',
       badge: 'bg-warning/12 text-warning',
-      icon: <AlertTriangle className="h-4 w-4 stroke-[2.2]" />,
+      icon: <AlertTriangle className="h-3.5 w-3.5 stroke-[2.2]" />,
       bar: 'bg-warning',
     },
     error: {
       card: 'border-error/30 shadow-float hover:border-error/45',
       badge: 'bg-error/12 text-error',
-      icon: <AlertCircle className="h-4 w-4 stroke-[2.2]" />,
+      icon: <AlertCircle className="h-3.5 w-3.5 stroke-[2.2]" />,
       bar: 'bg-error',
     },
   }
@@ -118,25 +118,25 @@ const ToastItem: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: -24, scale: 0.92, filter: 'blur(3px)' }}
-      animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-      exit={{ opacity: 0, y: -16, scale: 0.94, filter: 'blur(3px)', transition: { duration: 0.16 } }}
-      transition={{ type: 'spring', stiffness: 450, damping: 30, mass: 0.8 }}
+      initial={{ opacity: 0, y: -10, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 12, scale: 0.97, transition: { duration: 0.14 } }}
+      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
       className={cn(
-        'pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-bg-elevated/90 backdrop-blur-xl border overflow-hidden relative select-none w-full max-w-sm sm:max-w-md transition-colors',
+        'pointer-events-auto flex items-center gap-2.5 p-3 rounded-xl bg-bg-elevated/90 backdrop-blur-md border overflow-hidden relative select-none w-full shadow-float transition-colors',
         current.card
       )}
     >
-      <div className={cn('p-1.5 rounded-xl shrink-0 mt-0.5', current.badge)}>
+      <div className={cn('p-1 rounded-lg shrink-0', current.badge)}>
         {current.icon}
       </div>
 
-      <div className="flex-1 space-y-0.5 min-w-0 pr-1">
-        <p className="text-xs font-semibold text-text-primary leading-tight tracking-tight">
+      <div className="flex-1 min-w-0 pr-1 space-y-px">
+        <p className="text-[0.8125rem] font-medium text-text-primary leading-snug">
           {toast.title}
         </p>
         {toast.description && (
-          <p className="text-[0.6875rem] text-text-secondary leading-relaxed line-clamp-2">
+          <p className="text-xs text-text-secondary leading-snug line-clamp-2">
             {toast.description}
           </p>
         )}
@@ -145,15 +145,15 @@ const ToastItem: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
       <button
         onClick={onClose}
         aria-label="Đóng thông báo"
-        className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-input/80 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="p-1 rounded-md text-text-muted/80 hover:text-text-primary hover:bg-bg-input/70 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
-        <X className="h-3.5 w-3.5" />
+        <X className="h-3 w-3" />
       </button>
 
       {/* Synchronized progress bar indicator matching variant */}
       {toast.duration !== 0 && (
         <motion.div
-          className={cn('absolute bottom-0 left-0 right-0 h-[2px] opacity-75', current.bar)}
+          className={cn('absolute bottom-0 left-0 right-0 h-[2px] opacity-50', current.bar)}
           initial={{ width: '100%' }}
           animate={{ width: '0%' }}
           transition={{ duration: (toast.duration || 3500) / 1000, ease: 'linear' }}

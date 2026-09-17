@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { translations, Language } from '@/lib/i18n'
 
 interface I18nContextType {
@@ -30,23 +30,33 @@ export const I18nProvider: React.FC<{
     }
   }, [initialLang])
 
-  const setLang = useCallback(
-    (newLang: Language) => {
-      setLangState(newLang)
-      localStorage.setItem(STORAGE_KEY, newLang)
-      onLangChange?.(newLang)
-      // Crossfade the app surface so text reflow (vi strings run longer than
-      // en) reads as an intentional transition instead of layout jank.
-      // Runs outside React state — one class toggle, self-removing.
-      const root = document.documentElement
+  // Keep the callback in a ref so setLang stays identity-stable — consumers
+  // (e.g. the config-sync effect in App) depend on it and must not re-fire
+  // on every render.
+  const onLangChangeRef = useRef(onLangChange)
+  useEffect(() => {
+    onLangChangeRef.current = onLangChange
+  }, [onLangChange])
+
+  const setLang = useCallback((newLang: Language) => {
+    setLangState(newLang)
+    localStorage.setItem(STORAGE_KEY, newLang)
+
+    // Crossfade only on an ACTUAL language change. Config-sync effects call
+    // setLang with the same value on every poll — animating those caused the
+    // whole page to blink on a 3s cycle.
+    const root = document.documentElement
+    if (root.dataset.lang !== newLang) {
+      root.dataset.lang = newLang
       root.classList.remove('lang-fading')
       // Force a reflow so the animation restarts on rapid re-toggles.
       void root.offsetWidth
       root.classList.add('lang-fading')
       window.setTimeout(() => root.classList.remove('lang-fading'), 260)
-    },
-    [onLangChange]
-  )
+    }
+
+    onLangChangeRef.current?.(newLang)
+  }, [])
 
   const t = useCallback(
     (path: string, fallback?: string): string => {
