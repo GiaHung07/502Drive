@@ -790,3 +790,50 @@ pub(crate) fn watch_filter_missing_text(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::watch::service::ConflictDetails;
+
+    #[test]
+    fn renders_conflict_card_domain_snapshot_vi_and_en() {
+        let details = ConflictDetails {
+            watch_id: "w-123456789".to_string(),
+            sequence: 12,
+            file_id: "file_abc123".to_string(),
+            file_name: "report_q3.pdf".to_string(),
+            current_dest_modified: Some("14:30 15/09".to_string()),
+            new_source_size: Some(15_400_000), // ~14.7 MB
+            new_source_modified: Some("15:00 15/09".to_string()),
+            remaining: 3,
+        };
+
+        // Vietnamese domain assertions
+        let vi = render_conflict_card(keyboards::UiLanguage::Vi, &details);
+        assert!(vi.contains("report_q3.pdf"));
+        assert!(vi.contains("14:30 15/09"));
+        assert!(vi.contains("15:00 15/09"));
+        assert!(vi.contains("3 tệp"));
+
+        // English domain assertions
+        let en = render_conflict_card(keyboards::UiLanguage::En, &details);
+        assert!(en.contains("report_q3.pdf"));
+        assert!(en.contains("14:30 15/09"));
+        assert!(en.contains("15:00 15/09"));
+        assert!(en.contains("3 files"));
+    }
+
+    #[test]
+    fn renders_watch_options_domain_snapshot() {
+        let vi = render_watch_options(keyboards::UiLanguage::Vi);
+        assert!(vi.contains("Tạo bản mới"));
+        assert!(vi.contains("Thay bản cũ"));
+        assert!(vi.contains("Hỏi trước"));
+
+        let en = render_watch_options(keyboards::UiLanguage::En);
+        assert!(en.contains("New version"));
+        assert!(en.contains("Replace old"));
+        assert!(en.contains("Ask first"));
+    }
+}

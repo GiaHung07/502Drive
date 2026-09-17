@@ -564,14 +564,15 @@ pub async fn handle_callback_query(
     mut config: AppConfig,
     db: Database,
 ) -> ResponseResult<()> {
-    if let Err(err) = bot.answer_callback_query(query.id.clone()).await {
-        warn!(error = %err, "answer callback query failed");
-    }
-
     let user_id = query.from.id.0 as i64;
     apply_user_language(&mut config, &db, user_id).await;
     let chat_id = query.message.as_ref().map(|m| m.chat().id);
     if !repo::is_authorized(&db, user_id).await.unwrap_or(false) {
+        let _ = bot
+            .answer_callback_query(query.id.clone())
+            .text(access_denied_short(ui_language(&config)))
+            .show_alert(true)
+            .await;
         if let Some(chat_id) = chat_id {
             bot.send_message(chat_id, access_denied_short(ui_language(&config)))
                 .await?;
@@ -580,13 +581,41 @@ pub async fn handle_callback_query(
     }
 
     let Some(data) = query.data.as_deref() else {
+        let _ = bot.answer_callback_query(query.id.clone()).await;
         return Ok(());
     };
     let Some(chat_id) = chat_id else {
+        let _ = bot.answer_callback_query(query.id.clone()).await;
         return Ok(());
     };
 
-    let text = match parse_callback_action(data) {
+    // Immediate answerCallbackQuery right after authorization: gives instant toast feedback
+    // on fast actions (e.g. "Đã tạm dừng ✓") and prevents Telegram button spinning during Drive I/O.
+    let toast = match parse_callback_action(data) {
+        Some(("job", "pause", _)) | Some(("watch", "pause", _)) => match ui_language(&config) {
+            keyboards::UiLanguage::Vi => Some("Đã tạm dừng ✓"),
+            keyboards::UiLanguage::En => Some("Paused ✓"),
+        },
+        Some(("job", "resume", _)) | Some(("watch", "resume", _)) => match ui_language(&config) {
+            keyboards::UiLanguage::Vi => Some("Đã tiếp tục ▶"),
+            keyboards::UiLanguage::En => Some("Resumed ▶"),
+        },
+        Some(("wres", _, _)) => match ui_language(&config) {
+            keyboards::UiLanguage::Vi => Some("Đang áp dụng..."),
+            keyboards::UiLanguage::En => Some("Applying..."),
+        },
+        _ => None,
+    };
+
+    let mut answer = bot.answer_callback_query(query.id.clone());
+    if let Some(t) = toast {
+        answer = answer.text(t);
+    }
+    if let Err(err) = answer.await {
+        warn!(error = %err, "answer callback query failed");
+    }
+
+    match parse_callback_action(data) {
         Some(("menu", "open", "home")) => {
             let text = render_home_dashboard(&config, &db, user_id, ui_language(&config)).await;
             edit_or_send_with_keyboard(
@@ -1060,9 +1089,11 @@ pub async fn handle_callback_query(
                     clone_request_cancelled(ui_language(&config)),
                 )
                 .await?;
-                return Ok(());
+            } else {
+                bot.send_message(chat_id, clone_request_cancelled(ui_language(&config)))
+                    .await?;
             }
-            clone_request_cancelled(ui_language(&config)).to_string()
+            return Ok(());
         }
         Some(("wopt", "pol", rest)) => {
             let lang = ui_language(&config);
@@ -1242,9 +1273,11 @@ pub async fn handle_callback_query(
                     clone_request_cancelled(ui_language(&config)),
                 )
                 .await?;
-                return Ok(());
+            } else {
+                bot.send_message(chat_id, clone_request_cancelled(ui_language(&config)))
+                    .await?;
             }
-            clone_request_cancelled(ui_language(&config)).to_string()
+            return Ok(());
         }
         Some(("dest", "confirm", session_id)) => {
             let sess = match session::get_session(&db, user_id, chat_id.0).await {
@@ -1420,9 +1453,11 @@ pub async fn handle_callback_query(
                     clone_request_cancelled(ui_language(&config)),
                 )
                 .await?;
-                return Ok(());
+            } else {
+                bot.send_message(chat_id, clone_request_cancelled(ui_language(&config)))
+                    .await?;
             }
-            clone_request_cancelled(ui_language(&config)).to_string()
+            return Ok(());
         }
         Some(("smart", "clone", state_id)) => {
             let Some(source) =
@@ -1495,9 +1530,11 @@ pub async fn handle_callback_query(
                     clone_request_cancelled(ui_language(&config)),
                 )
                 .await?;
-                return Ok(());
+            } else {
+                bot.send_message(chat_id, clone_request_cancelled(ui_language(&config)))
+                    .await?;
             }
-            clone_request_cancelled(ui_language(&config)).to_string()
+            return Ok(());
         }
         Some(("job", "status", job_id)) => {
             let result = job_status_panel(&db, user_id, job_id, ui_language(&config)).await;
@@ -1676,10 +1713,27 @@ pub async fn handle_callback_query(
                         }
                         return Ok(());
                     }
-                    text
+                    bot.send_message(chat_id, text).await?;
+                    return Ok(());
                 }
-                Ok(false) => destination_not_found(ui_language(&config)).to_string(),
-                Err(err) => destination_switch_error(ui_language(&config), err),
+                Ok(false) => {
+                    let msg = destination_not_found(ui_language(&config));
+                    if let Some(message) = query.message.as_ref() {
+                        let _ = bot.edit_message_text(chat_id, message.id(), msg).await;
+                    } else {
+                        bot.send_message(chat_id, msg).await?;
+                    }
+                    return Ok(());
+                }
+                Err(err) => {
+                    let msg = destination_switch_error(ui_language(&config), err);
+                    if let Some(message) = query.message.as_ref() {
+                        let _ = bot.edit_message_text(chat_id, message.id(), &msg).await;
+                    } else {
+                        bot.send_message(chat_id, msg).await?;
+                    }
+                    return Ok(());
+                }
             }
         }
         Some(("browse", "open", state_id)) => {
@@ -1988,14 +2042,19 @@ pub async fn handle_callback_query(
             }
             return Ok(());
         }
-        _ => unknown_action(ui_language(&config)).to_string(),
-    };
-
-    bot.send_message(chat_id, text).await?;
-    Ok(())
+        _ => {
+            // unknown-action arm: answer-only alert, do not spam chat with a new message
+            let _ = bot
+                .answer_callback_query(query.id)
+                .text(unknown_action(ui_language(&config)))
+                .show_alert(true)
+                .await;
+            Ok(())
+        }
+    }
 }
 
-fn parse_callback_action(data: &str) -> Option<(&str, &str, &str)> {
+pub fn parse_callback_action(data: &str) -> Option<(&str, &str, &str)> {
     let mut parts = data.splitn(3, ':');
     Some((parts.next()?, parts.next()?, parts.next()?))
 }

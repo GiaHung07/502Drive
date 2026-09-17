@@ -44,9 +44,9 @@ Fingerprints (parents, name, md5, version) come from stored per-item mappings; `
 | :--- | :--- |
 | `versioned_copy` (default) | Copy the updated source item as a **new** destination item and point the mapping at it. Old copies are left in place. |
 | `replace_copy` | Copy the new version, update the mapping, then **trash the old destination item**. If trashing fails after the mapping is updated, the error is logged and the sync continues (mapping already points at the new copy). |
-| `manual_confirmation` | The watch pauses into `needs_reconcile` and notifies you via Telegram. The event is not applied and the cursor stops advancing until you respond. |
+| `manual_confirmation` | The watch pauses into `needs_reconcile` and sends an interactive conflict card via Telegram showing the file name, modification time, and size diff. You choose: `[New version]` (applies versioned copy), `[Replace old]` (replaces and trashes old copy), or `[Skip]` (ignores change). Once all pending conflicts are resolved, the watch automatically transitions back to `active`. |
 
-Per-watch override via Telegram: `/watch_policy <watch_id> <policy>`.
+Per-watch override via Telegram: `/watch_policy <watch_id> <policy>`. You can also inspect pending conflicts at any time with `/watch_status <id>` or by clicking the *Resolve conflicts* button.
 
 ## 4. Deletion policy (`deletion_policy`)
 

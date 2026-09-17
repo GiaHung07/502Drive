@@ -151,3 +151,88 @@ async fn session_fsm_helper_start_and_clear() {
     session::clear_session(&db, 555, 666).await.unwrap();
     assert!(session::get_session(&db, 555, 666).await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn session_fsm_flow_transitions_and_interleaving() {
+    let db = test_db().await;
+    let user_id = 999;
+    let chat_id = 888;
+
+    // 1. Initial: Start WAIT_SOURCE
+    let s1 = session::start_session(
+        &db,
+        user_id,
+        chat_id,
+        SessionFlow::Clone,
+        SessionStep::WaitSource,
+        "{}".to_string(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(s1.step, "wait_source");
+
+    // 2. User pastes URL -> advances to INSPECTED
+    let s2 = session::start_session(
+        &db,
+        user_id,
+        chat_id,
+        SessionFlow::Inspect,
+        SessionStep::Inspected,
+        r#"{"source_input":"https://drive.google.com/folders/123"}"#.to_string(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(s2.step, "inspected");
+    assert_eq!(s2.flow, "inspect");
+
+    // 3. User clicks "Change destination" -> advances to WAIT_DESTINATION with return_to_inspect
+    let s3 = session::start_session(
+        &db,
+        user_id,
+        chat_id,
+        SessionFlow::SetDestination,
+        SessionStep::WaitDestination,
+        r#"{"return_to_inspect":true}"#.to_string(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(s3.step, "wait_destination");
+    assert_eq!(s3.flow, "set_destination");
+
+    // 4. Interleaved command: user sends /cancel or another command -> clears session
+    session::clear_session(&db, user_id, chat_id).await.unwrap();
+    assert!(
+        session::get_session(&db, user_id, chat_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn session_enums_string_round_trip() {
+    for flow in [
+        SessionFlow::Clone,
+        SessionFlow::CloneHere,
+        SessionFlow::Watch,
+        SessionFlow::SetDestination,
+        SessionFlow::Inspect,
+        SessionFlow::Prompt("custom".to_string()),
+    ] {
+        let s = flow.as_str();
+        let parsed = SessionFlow::from_str(s);
+        assert_eq!(flow, parsed);
+    }
+
+    for step in [
+        SessionStep::WaitSource,
+        SessionStep::WaitDestination,
+        SessionStep::WaitConfirm,
+        SessionStep::Inspected,
+        SessionStep::WaitInput,
+    ] {
+        let s = step.as_str();
+        let parsed = SessionStep::from_str(s);
+        assert_eq!(step, parsed);
+    }
+}

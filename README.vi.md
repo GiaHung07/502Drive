@@ -143,6 +143,12 @@ enabled = false                        # watch realtime mặc định tắt (opt
 default_content_update_policy = "versioned_copy"
 default_deletion_policy = "preserve_destination"
 default_move_out_policy = "detach"
+
+[notifications]
+job_completed = true                   # thông báo khi job clone hoàn thành
+job_failed = true                      # thông báo khi job clone thất bại
+watch_errors = true                    # thông báo khi watch gặp lỗi hoặc degraded
+watch_activity = false                 # thông báo mỗi đợt batch đồng bộ xong
 ```
 
 Các biến môi trường chính (đều theo mẫu `GDCLONE__SECTION__KEY`):
@@ -158,12 +164,16 @@ Các biến môi trường chính (đều theo mẫu `GDCLONE__SECTION__KEY`):
 | `GDCLONE__ENGINE__MAX_ACTIVE_JOBS` | Số job chạy đồng thời tối đa |
 | `GDCLONE__ENGINE__INITIAL_WRITE_CONCURRENCY` | Độ song song khi copy |
 | `GDCLONE__ENGINE__MAX_RETRY_ATTEMPTS` | Số lần retry tối đa mỗi item |
+| `GDCLONE__NOTIFICATIONS__JOB_COMPLETED` | Bật/tắt thông báo job hoàn tất |
+| `GDCLONE__NOTIFICATIONS__JOB_FAILED` | Bật/tắt thông báo job thất bại |
+| `GDCLONE__NOTIFICATIONS__WATCH_ERRORS` | Bật/tắt thông báo lỗi watch |
+| `GDCLONE__NOTIFICATIONS__WATCH_ACTIVITY` | Bật/tắt thông báo hoạt động đồng bộ watch |
 | `GDCLONE__STORAGE__DB_PATH` | Đường dẫn database SQLite |
 | `GDCLONE__STORAGE__LOG_DIR` / `GDCLONE__STORAGE__REPORT_DIR` | Thư mục log / báo cáo |
 
 ## Lệnh Telegram
 
-Bắt đầu bằng `/start`, sau đó `/connect` để liên kết tài khoản Google. Các lệnh hữu ích nhất:
+Bắt đầu bằng `/start`, sau đó `/connect` để liên kết tài khoản Google. Bạn cũng có thể **dán bất kỳ link thư mục/file Google Drive** vào chat để hiển thị thẻ xem trước tương tác với các nút bấm 1-chạm (`[Sao chép ngay]`, `[Theo dõi realtime]`, `[Đổi thư mục đích]`).
 
 | Lệnh | Mô tả |
 | :--- | :--- |
@@ -175,6 +185,7 @@ Bắt đầu bằng `/start`, sau đó `/connect` để liên kết tài khoản
 | `/watches` · `/watch_status <id>` | Liệt kê watch · xem backlog, cursor và chính sách |
 | `/watch_pause <id>` · `/watch_resume <id>` | Tạm dừng/tiếp tục áp dụng thay đổi |
 | `/watch_policy <id> <policy>` | Đổi chính sách cập nhật (`versioned_copy` \| `replace_copy` \| `manual_confirmation`) |
+| `/watch_filter <id> [glob]` | Xem hoặc thêm glob loại trừ cho watch |
 | `/unwatch <id>` | Dừng watch và xóa đăng ký theo dõi |
 | `/set_destination <url_hoặc_id>` · `/destination` · `/clear_destination` | Quản lý thư mục đích mặc định |
 | `/jobs` · `/status [job_id]` | Liệt kê job · xem chi tiết một job |
@@ -182,6 +193,8 @@ Bắt đầu bằng `/start`, sau đó `/connect` để liên kết tài khoản
 | `/last_report` | Nhận báo cáo JSON/CSV của job gần nhất |
 | `/grant <user_id>` · `/revoke <user_id>` | Owner quản lý allowlist operator |
 | `/whoami` | Telegram ID và mức quyền của bạn |
+
+Khi watch sử dụng chính sách `manual_confirmation` phát hiện file bị sửa đổi, bot sẽ gửi thẻ xung đột tương tác kèm các nút `[Tạo bản mới]`, `[Thay thế]`, và `[Bỏ qua]`.
 
 Danh sách đầy đủ có sẵn trong bot qua `/help`.
 

@@ -6,6 +6,8 @@ pub mod progress;
 pub mod render;
 pub mod session;
 
+pub use handlers::parse_callback_action;
+
 use teloxide::prelude::*;
 use teloxide::types::BotCommand;
 

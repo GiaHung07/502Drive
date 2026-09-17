@@ -143,6 +143,12 @@ enabled = false                        # realtime watch is opt-in by default
 default_content_update_policy = "versioned_copy"
 default_deletion_policy = "preserve_destination"
 default_move_out_policy = "detach"
+
+[notifications]
+job_completed = true                   # notify when a clone job succeeds
+job_failed = true                      # notify when a clone job fails
+watch_errors = true                    # notify on watch errors/degraded states
+watch_activity = false                 # notify on each synced batch
 ```
 
 Main environment overrides (all follow the `GDCLONE__SECTION__KEY` pattern):
@@ -158,12 +164,16 @@ Main environment overrides (all follow the `GDCLONE__SECTION__KEY` pattern):
 | `GDCLONE__ENGINE__MAX_ACTIVE_JOBS` | Max concurrent jobs |
 | `GDCLONE__ENGINE__INITIAL_WRITE_CONCURRENCY` | Copy concurrency |
 | `GDCLONE__ENGINE__MAX_RETRY_ATTEMPTS` | Retry budget per item |
+| `GDCLONE__NOTIFICATIONS__JOB_COMPLETED` | Toggle job completed alerts |
+| `GDCLONE__NOTIFICATIONS__JOB_FAILED` | Toggle job failed alerts |
+| `GDCLONE__NOTIFICATIONS__WATCH_ERRORS` | Toggle watch error alerts |
+| `GDCLONE__NOTIFICATIONS__WATCH_ACTIVITY` | Toggle watch sync activity alerts |
 | `GDCLONE__STORAGE__DB_PATH` | SQLite database path |
 | `GDCLONE__STORAGE__LOG_DIR` / `GDCLONE__STORAGE__REPORT_DIR` | Log / report directories |
 
 ## Telegram commands
 
-Start with `/start`, then `/connect` to link your Google account. The most useful commands:
+Start with `/start`, then `/connect` to link your Google account. You can also simply **paste any Google Drive folder/file link** into the chat to view an interactive inspect card with one-tap actions (`[Clone now]`, `[Realtime watch]`, `[Change destination]`).
 
 | Command | Description |
 | :--- | :--- |
@@ -175,6 +185,7 @@ Start with `/start`, then `/connect` to link your Google account. The most usefu
 | `/watches` · `/watch_status <id>` | List watches · inspect backlog, cursor and policies |
 | `/watch_pause <id>` · `/watch_resume <id>` | Pause/resume applying changes |
 | `/watch_policy <id> <policy>` | Change update policy (`versioned_copy` \| `replace_copy` \| `manual_confirmation`) |
+| `/watch_filter <id> [glob]` | View or add exclusion globs for a watch |
 | `/unwatch <id>` | Stop a watch and delete its subscription |
 | `/set_destination <url_or_id>` · `/destination` · `/clear_destination` | Manage the default destination |
 | `/jobs` · `/status [job_id]` | List jobs · inspect one job |
@@ -182,6 +193,8 @@ Start with `/start`, then `/connect` to link your Google account. The most usefu
 | `/last_report` | Get JSON/CSV report of the latest job |
 | `/grant <user_id>` · `/revoke <user_id>` | Owner manages the operator allowlist |
 | `/whoami` | Your Telegram ID and authorization level |
+
+When a watch configured with `manual_confirmation` detects a modified file, the bot sends an interactive conflict card with `[New version]`, `[Replace old]`, and `[Skip]` resolution buttons.
 
 The complete list is available in the bot via `/help`.
 

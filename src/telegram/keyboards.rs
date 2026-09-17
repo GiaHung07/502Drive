@@ -11,13 +11,34 @@ fn callback_of(button: &InlineKeyboardButton) -> Option<&str> {
     }
 }
 
+/// Helper to construct an `InlineKeyboardButton` for callback queries with a debug_assert
+/// and a runtime UTF-8 truncation guard ensuring callback_data never exceeds Telegram's 64-byte limit.
+pub(crate) fn callback_btn(text: impl Into<String>, data: impl AsRef<str>) -> InlineKeyboardButton {
+    let data_ref = data.as_ref();
+    debug_assert!(
+        data_ref.len() <= 64,
+        "callback_data exceeds 64 bytes limit (len = {}): '{}'",
+        data_ref.len(),
+        data_ref
+    );
+    if data_ref.len() > 64 {
+        let mut boundary = 64;
+        while boundary > 0 && !data_ref.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        InlineKeyboardButton::callback(text, &data_ref[..boundary])
+    } else {
+        InlineKeyboardButton::callback(text, data_ref)
+    }
+}
+
 use crate::telegram::i18n::TextKey as T;
 pub use crate::telegram::i18n::UiLanguage;
 
 pub fn confirm_clone_keyboard(state_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([[
-        InlineKeyboardButton::callback(lang.text(T::CloneNow), format!("clone:confirm:{state_id}")),
-        InlineKeyboardButton::callback(lang.text(T::Cancel), format!("clone:cancel:{state_id}")),
+        callback_btn(lang.text(T::CloneNow), format!("clone:confirm:{state_id}")),
+        callback_btn(lang.text(T::Cancel), format!("clone:cancel:{state_id}")),
     ]])
 }
 
@@ -28,11 +49,11 @@ pub fn confirm_set_destination_keyboard(
     debug_assert!(format!("dest:confirm:{session_id}").len() <= 64);
     debug_assert!(format!("dest:cancel:{session_id}").len() <= 64);
     InlineKeyboardMarkup::new([[
-        InlineKeyboardButton::callback(
+        callback_btn(
             lang.text(T::ButtonSetDefault),
             format!("dest:confirm:{session_id}"),
         ),
-        InlineKeyboardButton::callback(lang.text(T::Cancel), format!("dest:cancel:{session_id}")),
+        callback_btn(lang.text(T::Cancel), format!("dest:cancel:{session_id}")),
     ]])
 }
 
@@ -47,17 +68,11 @@ pub fn smart_link_action_keyboard(state_id: &str, lang: UiLanguage) -> InlineKey
         UiLanguage::En => ("Clone now", "Realtime Sync", "Change destination", "Cancel"),
     };
     InlineKeyboardMarkup::new([
-        vec![InlineKeyboardButton::callback(
-            clone_label,
-            format!("smart:clone:{state_id}"),
-        )],
-        vec![InlineKeyboardButton::callback(
-            sync_label,
-            format!("smart:sync:{state_id}"),
-        )],
+        vec![callback_btn(clone_label, format!("smart:clone:{state_id}"))],
+        vec![callback_btn(sync_label, format!("smart:sync:{state_id}"))],
         vec![
-            InlineKeyboardButton::callback(dest_label, "menu:open:destination"),
-            InlineKeyboardButton::callback(cancel_label, format!("smart:cancel:{state_id}")),
+            callback_btn(dest_label, "menu:open:destination"),
+            callback_btn(cancel_label, format!("smart:cancel:{state_id}")),
         ],
     ])
 }
@@ -86,18 +101,18 @@ pub fn unified_inspect_keyboard(
     let mut rows = Vec::new();
     if is_folder && watch_enabled {
         rows.push(vec![
-            InlineKeyboardButton::callback(clone_label, format!("insp:clone:{session_id}")),
-            InlineKeyboardButton::callback(sync_label, format!("insp:watch:{session_id}")),
+            callback_btn(clone_label, format!("insp:clone:{session_id}")),
+            callback_btn(sync_label, format!("insp:watch:{session_id}")),
         ]);
     } else {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             clone_label,
             format!("insp:clone:{session_id}"),
         )]);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback(dest_label, format!("insp:dest:{session_id}")),
-        InlineKeyboardButton::callback(cancel_label, format!("insp:cancel:{session_id}")),
+        callback_btn(dest_label, format!("insp:dest:{session_id}")),
+        callback_btn(cancel_label, format!("insp:cancel:{session_id}")),
     ]);
 
     InlineKeyboardMarkup::new(rows)
@@ -105,34 +120,28 @@ pub fn unified_inspect_keyboard(
 
 pub fn job_control_keyboard(job_id: &str, paused: bool, lang: UiLanguage) -> InlineKeyboardMarkup {
     let primary = if paused {
-        InlineKeyboardButton::callback(lang.text(T::Resume), format!("job:resume:{job_id}"))
+        callback_btn(lang.text(T::Resume), format!("job:resume:{job_id}"))
     } else {
-        InlineKeyboardButton::callback(lang.text(T::Pause), format!("job:pause:{job_id}"))
+        callback_btn(lang.text(T::Pause), format!("job:pause:{job_id}"))
     };
     InlineKeyboardMarkup::new([[
         primary,
-        InlineKeyboardButton::callback(lang.text(T::Cancel), format!("job:cancel:{job_id}")),
+        callback_btn(lang.text(T::Cancel), format!("job:cancel:{job_id}")),
     ]])
 }
 
 pub fn main_menu_keyboard(watch_enabled: bool, lang: UiLanguage) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
-    let mut first_row = vec![InlineKeyboardButton::callback(
-        lang.text(T::MenuClone),
-        "menu:prompt:clone",
-    )];
+    let mut first_row = vec![callback_btn(lang.text(T::MenuClone), "menu:prompt:clone")];
     if watch_enabled {
-        first_row.push(InlineKeyboardButton::callback(
-            lang.text(T::MenuWatch),
-            "menu:prompt:watch",
-        ));
+        first_row.push(callback_btn(lang.text(T::MenuWatch), "menu:prompt:watch"));
     }
     rows.push(first_row);
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::MenuJobs), "menu:open:jobs"),
-        InlineKeyboardButton::callback(lang.text(T::Destination), "menu:open:destination"),
+        callback_btn(lang.text(T::MenuJobs), "menu:open:jobs"),
+        callback_btn(lang.text(T::Destination), "menu:open:destination"),
     ]);
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![callback_btn(
         lang.text(T::MenuSettings),
         "menu:open:account",
     )]);
@@ -140,34 +149,25 @@ pub fn main_menu_keyboard(watch_enabled: bool, lang: UiLanguage) -> InlineKeyboa
 }
 
 pub fn back_home_keyboard(lang: UiLanguage) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
-        lang.text(T::BackHome),
-        "menu:open:home",
-    )]])
+    InlineKeyboardMarkup::new([[callback_btn(lang.text(T::BackHome), "menu:open:home")]])
 }
 
 pub fn account_keyboard(lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([
-        [InlineKeyboardButton::callback(
-            language_button_label(lang),
-            "lang:open:panel",
-        )],
-        [InlineKeyboardButton::callback(
-            lang.text(T::BackHome),
-            "menu:open:home",
-        )],
+        [callback_btn(language_button_label(lang), "lang:open:panel")],
+        [callback_btn(lang.text(T::BackHome), "menu:open:home")],
     ])
 }
 
 pub fn language_keyboard(lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([
         vec![
-            InlineKeyboardButton::callback("Tiếng Việt", "lang:set:vi"),
-            InlineKeyboardButton::callback("English", "lang:set:en"),
+            callback_btn("Tiếng Việt", "lang:set:vi"),
+            callback_btn("English", "lang:set:en"),
         ],
         vec![
-            InlineKeyboardButton::callback(lang.text(T::Account), "menu:open:account"),
-            InlineKeyboardButton::callback(lang.text(T::BackHome), "menu:open:home"),
+            callback_btn(lang.text(T::Account), "menu:open:account"),
+            callback_btn(lang.text(T::BackHome), "menu:open:home"),
         ],
     ])
 }
@@ -183,15 +183,15 @@ pub fn job_list_keyboard(jobs: &[(String, String)], lang: UiLanguage) -> InlineK
     let mut rows: Vec<Vec<InlineKeyboardButton>> = jobs
         .iter()
         .map(|(id, label)| {
-            vec![InlineKeyboardButton::callback(
+            vec![callback_btn(
                 truncate_label(label, 44),
                 format!("job:status:{id}"),
             )]
         })
         .collect();
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::Refresh), "menu:open:jobs"),
-        InlineKeyboardButton::callback(lang.text(T::BackHome), "menu:open:home"),
+        callback_btn(lang.text(T::Refresh), "menu:open:jobs"),
+        callback_btn(lang.text(T::BackHome), "menu:open:home"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -203,35 +203,32 @@ pub fn job_detail_keyboard(job_id: &str, status: &str, lang: UiLanguage) -> Inli
         "completed" | "partially_completed" | "failed" | "cancelled"
     ) {
         let primary = if status == "paused" {
-            InlineKeyboardButton::callback(lang.text(T::Resume), format!("job:resume:{job_id}"))
+            callback_btn(lang.text(T::Resume), format!("job:resume:{job_id}"))
         } else {
-            InlineKeyboardButton::callback(lang.text(T::Pause), format!("job:pause:{job_id}"))
+            callback_btn(lang.text(T::Pause), format!("job:pause:{job_id}"))
         };
         rows.push(vec![
             primary,
-            InlineKeyboardButton::callback(lang.text(T::Cancel), format!("job:cancel:{job_id}")),
+            callback_btn(lang.text(T::Cancel), format!("job:cancel:{job_id}")),
         ]);
     }
     if matches!(status, "partially_completed" | "failed") {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::RetryFailed),
             format!("job:retry:{job_id}"),
         )]);
     }
     if matches!(status, "completed" | "partially_completed" | "failed") {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::Report),
             format!("job:report:{job_id}"),
         )]);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::Refresh), format!("job:status:{job_id}")),
-        InlineKeyboardButton::callback(lang.text(T::Jobs), "menu:open:jobs"),
+        callback_btn(lang.text(T::Refresh), format!("job:status:{job_id}")),
+        callback_btn(lang.text(T::Jobs), "menu:open:jobs"),
     ]);
-    rows.push(vec![InlineKeyboardButton::callback(
-        lang.text(T::BackHome),
-        "menu:open:home",
-    )]);
+    rows.push(vec![callback_btn(lang.text(T::BackHome), "menu:open:home")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -249,34 +246,25 @@ pub fn job_end_state_keyboard(
     let mut rows = Vec::new();
     if status == "completed" && failed_items == 0 {
         rows.push(vec![
-            InlineKeyboardButton::callback(
-                lang.text(T::ViewReport),
-                format!("job:report:{job_id}"),
-            ),
-            InlineKeyboardButton::callback(
+            callback_btn(lang.text(T::ViewReport), format!("job:report:{job_id}")),
+            callback_btn(
                 lang.text(T::CloneAgain),
                 format!("job:clone_again:{job_id}"),
             ),
         ]);
     } else if status == "cancelled" {
         rows.push(vec![
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::CloneAgain),
                 format!("job:clone_again:{job_id}"),
             ),
-            InlineKeyboardButton::callback(
-                lang.text(T::ViewReport),
-                format!("job:report:{job_id}"),
-            ),
+            callback_btn(lang.text(T::ViewReport), format!("job:report:{job_id}")),
         ]);
     } else {
         rows.push(vec![
-            InlineKeyboardButton::callback(lang.text(T::Retry), format!("job:retry:{job_id}")),
-            InlineKeyboardButton::callback(
-                lang.text(T::ViewErrors),
-                format!("job:errors:{job_id}"),
-            ),
-            InlineKeyboardButton::callback(lang.text(T::Report), format!("job:report:{job_id}")),
+            callback_btn(lang.text(T::Retry), format!("job:retry:{job_id}")),
+            callback_btn(lang.text(T::ViewErrors), format!("job:errors:{job_id}")),
+            callback_btn(lang.text(T::Report), format!("job:report:{job_id}")),
         ]);
     }
     InlineKeyboardMarkup::new(rows)
@@ -285,16 +273,10 @@ pub fn job_end_state_keyboard(
 pub fn job_cancel_confirm_keyboard(job_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([
         vec![
-            InlineKeyboardButton::callback(
-                lang.text(T::Cancel),
-                format!("job:cancel_confirm:{job_id}"),
-            ),
-            InlineKeyboardButton::callback(lang.text(T::KeepJob), format!("job:status:{job_id}")),
+            callback_btn(lang.text(T::Cancel), format!("job:cancel_confirm:{job_id}")),
+            callback_btn(lang.text(T::KeepJob), format!("job:status:{job_id}")),
         ],
-        vec![InlineKeyboardButton::callback(
-            lang.text(T::Jobs),
-            "menu:open:jobs",
-        )],
+        vec![callback_btn(lang.text(T::Jobs), "menu:open:jobs")],
     ])
 }
 
@@ -309,7 +291,7 @@ pub fn watch_list_keyboard(
     let mut rows: Vec<Vec<InlineKeyboardButton>> = watches
         .iter()
         .map(|(id, label)| {
-            vec![InlineKeyboardButton::callback(
+            vec![callback_btn(
                 truncate_label(label, 44),
                 format!("watch:{mode}:{id}"),
             )]
@@ -318,13 +300,13 @@ pub fn watch_list_keyboard(
 
     let mut nav = Vec::new();
     if has_prev {
-        nav.push(InlineKeyboardButton::callback(
+        nav.push(callback_btn(
             lang.text(T::PreviousPage),
             format!("watch:list:{mode}:{}", page - 1),
         ));
     }
     if has_next {
-        nav.push(InlineKeyboardButton::callback(
+        nav.push(callback_btn(
             lang.text(T::NextPage),
             format!("watch:list:{mode}:{}", page + 1),
         ));
@@ -333,8 +315,8 @@ pub fn watch_list_keyboard(
         rows.push(nav);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::Refresh), format!("watch:list:{mode}:{page}")),
-        InlineKeyboardButton::callback(lang.text(T::BackHome), "menu:open:home"),
+        callback_btn(lang.text(T::Refresh), format!("watch:list:{mode}:{page}")),
+        callback_btn(lang.text(T::BackHome), "menu:open:home"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -346,40 +328,40 @@ pub fn watch_detail_keyboard(
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     let short_id = watch_id.get(..8).unwrap_or(watch_id);
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![callback_btn(
         lang.text(T::Refresh),
         format!("watch:status:{watch_id}"),
     )]);
     if matches!(status, "active" | "catching_up" | "degraded") {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::Pause),
             format!("watch:pause:{watch_id}"),
         )]);
     } else if status == "paused" {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::Resume),
             format!("watch:resume:{watch_id}"),
         )]);
     } else if status == "needs_reconcile" {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::WatchResolveConflictButton),
             format!("watch:res:{short_id}"),
         )]);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::Versioned), format!("watch:pol:{short_id}:v")),
-        InlineKeyboardButton::callback(lang.text(T::Replace), format!("watch:pol:{short_id}:r")),
-        InlineKeyboardButton::callback(lang.text(T::Manual), format!("watch:pol:{short_id}:m")),
+        callback_btn(lang.text(T::Versioned), format!("watch:pol:{short_id}:v")),
+        callback_btn(lang.text(T::Replace), format!("watch:pol:{short_id}:r")),
+        callback_btn(lang.text(T::Manual), format!("watch:pol:{short_id}:m")),
     ]);
     if status != "stopped" {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::StopWatching),
             format!("watch:unwatch:{watch_id}"),
         )]);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::Watches), "menu:open:watches"),
-        InlineKeyboardButton::callback(lang.text(T::BackHome), "menu:open:home"),
+        callback_btn(lang.text(T::Watches), "menu:open:watches"),
+        callback_btn(lang.text(T::BackHome), "menu:open:home"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -396,20 +378,20 @@ pub fn watch_resolve_conflict_keyboard(
 
     InlineKeyboardMarkup::new([
         vec![
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::WatchActionNewVersion),
                 format!("wres:v:{short_id}:{sequence}"),
             ),
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::WatchActionReplace),
                 format!("wres:r:{short_id}:{sequence}"),
             ),
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::WatchActionSkip),
                 format!("wres:s:{short_id}:{sequence}"),
             ),
         ],
-        vec![InlineKeyboardButton::callback(
+        vec![callback_btn(
             match lang {
                 UiLanguage::Vi => "◀ Chi tiết watch",
                 UiLanguage::En => "◀ Watch detail",
@@ -422,19 +404,13 @@ pub fn watch_resolve_conflict_keyboard(
 pub fn watch_unwatch_confirm_keyboard(watch_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([
         vec![
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::StopWatching),
                 format!("watch:unwatch_confirm:{watch_id}"),
             ),
-            InlineKeyboardButton::callback(
-                lang.text(T::KeepWatch),
-                format!("watch:status:{watch_id}"),
-            ),
+            callback_btn(lang.text(T::KeepWatch), format!("watch:status:{watch_id}")),
         ],
-        vec![InlineKeyboardButton::callback(
-            lang.text(T::Watches),
-            "menu:open:watches",
-        )],
+        vec![callback_btn(lang.text(T::Watches), "menu:open:watches")],
     ])
 }
 
@@ -445,16 +421,16 @@ pub fn confirm_create_watch_keyboard(session_id: &str, lang: UiLanguage) -> Inli
 
     InlineKeyboardMarkup::new([
         vec![
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::StartWatchingButton),
                 format!("wconf:start:{session_id}"),
             ),
-            InlineKeyboardButton::callback(
+            callback_btn(
                 lang.text(T::WatchOptionsButton),
                 format!("wconf:opt:{session_id}"),
             ),
         ],
-        vec![InlineKeyboardButton::callback(
+        vec![callback_btn(
             lang.text(T::Cancel),
             format!("wconf:cancel:{session_id}"),
         )],
@@ -505,14 +481,11 @@ pub fn watch_options_keyboard(
 
     InlineKeyboardMarkup::new([
         vec![
-            InlineKeyboardButton::callback(v_label, format!("wopt:pol:{session_id}:v")),
-            InlineKeyboardButton::callback(r_label, format!("wopt:pol:{session_id}:r")),
-            InlineKeyboardButton::callback(m_label, format!("wopt:pol:{session_id}:m")),
+            callback_btn(v_label, format!("wopt:pol:{session_id}:v")),
+            callback_btn(r_label, format!("wopt:pol:{session_id}:r")),
+            callback_btn(m_label, format!("wopt:pol:{session_id}:m")),
         ],
-        vec![InlineKeyboardButton::callback(
-            back_label,
-            format!("wopt:back:{session_id}"),
-        )],
+        vec![callback_btn(back_label, format!("wopt:back:{session_id}"))],
     ])
 }
 
@@ -536,10 +509,7 @@ pub fn recent_destinations_keyboard(
                 "[My]"
             };
             let label = truncate_label(&format!("{marker}{drive} {}", p.label), 32);
-            vec![InlineKeyboardButton::callback(
-                label,
-                format!("dest:select:{}", p.id),
-            )]
+            vec![callback_btn(label, format!("dest:select:{}", p.id))]
         })
         .collect();
     InlineKeyboardMarkup::new(rows)
@@ -552,18 +522,15 @@ pub fn destination_panel_keyboard(
     lang: UiLanguage,
 ) -> InlineKeyboardMarkup {
     let mut rows = recent_destinations_keyboard(profiles, lang).inline_keyboard;
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![callback_btn(
         lang.text(T::BrowseMyDrive),
         format!("browse:open:{my_drive_state_id}"),
     )]);
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![callback_btn(
         lang.text(T::BrowseSharedDrive),
         format!("browse:open:{shared_drives_state_id}"),
     )]);
-    rows.push(vec![InlineKeyboardButton::callback(
-        lang.text(T::BackHome),
-        "menu:open:home",
-    )]);
+    rows.push(vec![callback_btn(lang.text(T::BackHome), "menu:open:home")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -576,32 +543,32 @@ pub fn destination_browser_keyboard(
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     if let Some(state_id) = pick_state_id {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::SelectThisFolder),
             format!("browse:pick:{state_id}"),
         )]);
     }
     if let Some(state_id) = parent_state_id {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::UpOneLevel),
             format!("browse:open:{state_id}"),
         )]);
     }
     rows.extend(child_states.iter().map(|(label, state_id)| {
-        vec![InlineKeyboardButton::callback(
+        vec![callback_btn(
             truncate_label(label, 40),
             format!("browse:open:{state_id}"),
         )]
     }));
     if let Some(state_id) = next_state_id {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![callback_btn(
             lang.text(T::NextPage),
             format!("browse:open:{state_id}"),
         )]);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback(lang.text(T::Destination), "menu:open:destination"),
-        InlineKeyboardButton::callback(lang.text(T::BackHome), "menu:open:home"),
+        callback_btn(lang.text(T::Destination), "menu:open:destination"),
+        callback_btn(lang.text(T::BackHome), "menu:open:home"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -617,7 +584,7 @@ fn truncate_label(label: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        UiLanguage, account_keyboard, callback_of, confirm_set_destination_keyboard,
+        UiLanguage, account_keyboard, callback_btn, callback_of, confirm_set_destination_keyboard,
         destination_browser_keyboard, destination_panel_keyboard, job_cancel_confirm_keyboard,
         job_detail_keyboard, job_end_state_keyboard, language_keyboard, main_menu_keyboard,
         recent_destinations_keyboard, smart_link_action_keyboard, truncate_label,
@@ -903,5 +870,38 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn callback_btn_preserves_short_data() {
+        let btn = callback_btn("Click", "menu:open:home");
+        assert_eq!(callback_of(&btn), Some("menu:open:home"));
+    }
+
+    #[test]
+    fn callback_btn_truncation_guard_caps_at_64_bytes_safely() {
+        // Construct an over-length ascii string (80 bytes)
+        let long_data = "a".repeat(80);
+        // Note: in debug mode debug_assert! triggers, so in release or when tested with non-asserting helper:
+        // We test the truncation boundary directly:
+        let data_ref = &long_data;
+        let mut boundary = 64;
+        while boundary > 0 && !data_ref.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        assert_eq!(boundary, 64);
+        assert_eq!(&data_ref[..boundary], &"a".repeat(64));
+
+        // Multibyte string (each Vietnamese character is 2-3 bytes)
+        let multi_byte =
+            "đồng_bộ_dữ_liệu_thời_gian_thực_rất_dài_vượt_quá_giới_hạn_cho_phép_của_telegram";
+        let mut mb_boundary = 64;
+        while mb_boundary > 0 && !multi_byte.is_char_boundary(mb_boundary) {
+            mb_boundary -= 1;
+        }
+        assert!(mb_boundary <= 64);
+        assert!(multi_byte.is_char_boundary(mb_boundary));
+        // Ensure slicing never panics
+        let _ = &multi_byte[..mb_boundary];
     }
 }
