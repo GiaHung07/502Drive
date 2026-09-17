@@ -1,5 +1,7 @@
 //! Job detail, progress rendering, job action messages and job status labels.
 
+use crate::engine::services::JobService;
+use crate::state::db::now_ms;
 use crate::state::repo;
 use crate::telegram::i18n::TextKey as T;
 use crate::telegram::keyboards;
@@ -11,6 +13,13 @@ pub(crate) fn render_job_progress(
     elapsed_secs: u64,
     lang: keyboards::UiLanguage,
 ) -> String {
+    let progress = JobService::progress(job, now_ms());
+    let elapsed = if elapsed_secs > 0 {
+        elapsed_secs
+    } else {
+        progress.elapsed_seconds
+    };
+
     let total = if matches!(
         job.status.as_str(),
         "running" | "completed" | "partially_completed" | "failed"
@@ -21,16 +30,25 @@ pub(crate) fn render_job_progress(
         None
     };
 
-    let done = job.completed_items as u64;
+    let done = job.completed_items.max(0) as u64;
 
-    let rate_str = if elapsed_secs > 0 {
-        progress_rate_value(lang, done as f64 / elapsed_secs as f64)
+    let rate_str = if elapsed > 0 {
+        progress_rate_value(lang, done as f64 / elapsed as f64)
     } else {
-        "--".to_string()
+        progress
+            .items_per_second
+            .map(|r| progress_rate_value(lang, r))
+            .unwrap_or_else(|| "--".to_string())
     };
 
     let eta_str = total
-        .and_then(|t| estimate_eta_secs(done, t, elapsed_secs))
+        .and_then(|t| {
+            if elapsed > 0 {
+                estimate_eta_secs(done, t, elapsed)
+            } else {
+                progress.eta_seconds
+            }
+        })
         .map(format_duration_secs)
         .unwrap_or_else(|| "--".to_string());
 
@@ -46,7 +64,7 @@ pub(crate) fn render_job_progress(
         format!(
             "• {}: {}",
             progress_elapsed_field(lang),
-            format_duration_secs(elapsed_secs)
+            format_duration_secs(elapsed)
         ),
         format!("• {}: {rate_str}", progress_rate_field(lang)),
         format!("• {}: {eta_str}", progress_eta_field(lang)),
@@ -60,6 +78,88 @@ pub(crate) fn render_job_progress(
         render_progress(lang, total, done, job.failed_items as u64),
     ]
     .join("\n")
+}
+
+/// Clean up error strings for display in Telegram without stack traces or raw panic lines.
+pub(crate) fn sanitize_error_summary(raw: &str) -> String {
+    let mut cleaned = raw.trim();
+    // Strip common prefixes
+    if let Some(rest) = cleaned.strip_prefix("Error:") {
+        cleaned = rest.trim();
+    } else if let Some(rest) = cleaned.strip_prefix("error:") {
+        cleaned = rest.trim();
+    }
+    // Take only the first non-empty line
+    let first_line = cleaned
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or(cleaned);
+    // Ignore lines that look like stack backtrace indicators
+    if first_line.starts_with("stack backtrace:") || first_line.starts_with("at ") {
+        return String::new();
+    }
+    // Truncate to reasonable length for Telegram UI
+    if first_line.chars().count() > 160 {
+        let keep: String = first_line.chars().take(157).collect();
+        format!("{keep}...")
+    } else {
+        first_line.to_string()
+    }
+}
+
+pub(crate) fn render_job_end_state(
+    job: &repo::JobDetail,
+    elapsed_secs: u64,
+    lang: keyboards::UiLanguage,
+) -> String {
+    let mut lines = Vec::new();
+    let title = if job.status == "completed" && job.failed_items == 0 {
+        lang.text(T::CloneCompletedTitle)
+    } else if job.status == "cancelled" {
+        lang.text(T::CloneCancelledTitle)
+    } else {
+        lang.text(T::CloneIncompleteTitle)
+    };
+    lines.push(title.to_string());
+    lines.push("━━━━━━━━━━━━━━".to_string());
+    push_field(&mut lines, "Job", short_job_id(&job.id));
+    push_field(
+        &mut lines,
+        progress_status_field(lang),
+        job_status_label(lang, &job.status),
+    );
+    push_field(
+        &mut lines,
+        job_detail_completed_field(lang),
+        &job.completed_items.to_string(),
+    );
+    if job.failed_items > 0 {
+        push_field(
+            &mut lines,
+            job_detail_failed_field(lang),
+            &job.failed_items.to_string(),
+        );
+    }
+    if job.skipped_items > 0 {
+        push_field(
+            &mut lines,
+            progress_skipped_field(lang),
+            &job.skipped_items.to_string(),
+        );
+    }
+    push_field(
+        &mut lines,
+        progress_elapsed_field(lang),
+        &format_duration_secs(elapsed_secs),
+    );
+    if let Some(err) = &job.error_summary {
+        let clean_err = sanitize_error_summary(err);
+        if !clean_err.is_empty() {
+            push_field(&mut lines, job_detail_error_field(lang), &clean_err);
+        }
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn progress_title(lang: keyboards::UiLanguage) -> &'static str {
@@ -76,6 +176,7 @@ pub(crate) fn progress_status_field(lang: keyboards::UiLanguage) -> &'static str
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn progress_queued_label(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => "đang xếp hàng",
@@ -432,5 +533,66 @@ pub(crate) fn job_status_label(lang: keyboards::UiLanguage, status: &str) -> &st
         "partially_completed" => "partially completed",
         "failed" => "failed",
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_error_summary_strips_prefixes_and_backtraces() {
+        assert_eq!(
+            sanitize_error_summary("Error: Rate limit exceeded (429)"),
+            "Rate limit exceeded (429)"
+        );
+        assert_eq!(
+            sanitize_error_summary("error: Network timeout\nstack backtrace:\n   0: ..."),
+            "Network timeout"
+        );
+        assert_eq!(sanitize_error_summary("stack backtrace:\n 0: foo"), "");
+    }
+
+    #[test]
+    fn render_job_end_state_formats_success_and_failure() {
+        let success = repo::JobDetail {
+            id: "job-123456789".to_string(),
+            kind: "one_shot".to_string(),
+            status: "completed".to_string(),
+            source_root_id: "src-id".to_string(),
+            destination_parent_id: "dst-id".to_string(),
+            total_discovered: 42,
+            completed_items: 42,
+            failed_items: 0,
+            skipped_items: 0,
+            error_summary: None,
+            created_at_ms: 1000,
+            updated_at_ms: 15000,
+        };
+        let text_vi = render_job_end_state(&success, 14, keyboards::UiLanguage::Vi);
+        assert!(text_vi.contains("✓ Đã sao chép"));
+        assert!(text_vi.contains("Job: job-1234"));
+        assert!(text_vi.contains("Hoàn tất: 42"));
+        assert!(text_vi.contains("Thời gian: 00:14"));
+
+        let failed = repo::JobDetail {
+            id: "job-123456789".to_string(),
+            kind: "one_shot".to_string(),
+            status: "failed".to_string(),
+            source_root_id: "src-id".to_string(),
+            destination_parent_id: "dst-id".to_string(),
+            total_discovered: 42,
+            completed_items: 40,
+            failed_items: 2,
+            skipped_items: 0,
+            error_summary: Some("Error: Permission denied on 2 items".to_string()),
+            created_at_ms: 1000,
+            updated_at_ms: 15000,
+        };
+        let text_en = render_job_end_state(&failed, 14, keyboards::UiLanguage::En);
+        assert!(text_en.contains("⚠ Clone incomplete"));
+        assert!(text_en.contains("Completed: 40"));
+        assert!(text_en.contains("Failed: 2"));
+        assert!(text_en.contains("Latest error: Permission denied on 2 items"));
     }
 }

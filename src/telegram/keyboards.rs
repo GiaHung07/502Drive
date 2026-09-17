@@ -235,6 +235,53 @@ pub fn job_detail_keyboard(job_id: &str, status: &str, lang: UiLanguage) -> Inli
     InlineKeyboardMarkup::new(rows)
 }
 
+pub fn job_end_state_keyboard(
+    job_id: &str,
+    status: &str,
+    failed_items: i64,
+    lang: UiLanguage,
+) -> InlineKeyboardMarkup {
+    debug_assert!(format!("job:report:{job_id}").len() <= 64);
+    debug_assert!(format!("job:clone_again:{job_id}").len() <= 64);
+    debug_assert!(format!("job:retry:{job_id}").len() <= 64);
+    debug_assert!(format!("job:errors:{job_id}").len() <= 64);
+
+    let mut rows = Vec::new();
+    if status == "completed" && failed_items == 0 {
+        rows.push(vec![
+            InlineKeyboardButton::callback(
+                lang.text(T::ViewReport),
+                format!("job:report:{job_id}"),
+            ),
+            InlineKeyboardButton::callback(
+                lang.text(T::CloneAgain),
+                format!("job:clone_again:{job_id}"),
+            ),
+        ]);
+    } else if status == "cancelled" {
+        rows.push(vec![
+            InlineKeyboardButton::callback(
+                lang.text(T::CloneAgain),
+                format!("job:clone_again:{job_id}"),
+            ),
+            InlineKeyboardButton::callback(
+                lang.text(T::ViewReport),
+                format!("job:report:{job_id}"),
+            ),
+        ]);
+    } else {
+        rows.push(vec![
+            InlineKeyboardButton::callback(lang.text(T::Retry), format!("job:retry:{job_id}")),
+            InlineKeyboardButton::callback(
+                lang.text(T::ViewErrors),
+                format!("job:errors:{job_id}"),
+            ),
+            InlineKeyboardButton::callback(lang.text(T::Report), format!("job:report:{job_id}")),
+        ]);
+    }
+    InlineKeyboardMarkup::new(rows)
+}
+
 pub fn job_cancel_confirm_keyboard(job_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new([
         vec![
@@ -454,9 +501,10 @@ mod tests {
     use super::{
         UiLanguage, account_keyboard, callback_of, confirm_set_destination_keyboard,
         destination_browser_keyboard, destination_panel_keyboard, job_cancel_confirm_keyboard,
-        job_detail_keyboard, language_keyboard, main_menu_keyboard, recent_destinations_keyboard,
-        smart_link_action_keyboard, truncate_label, unified_inspect_keyboard,
-        watch_detail_keyboard, watch_list_keyboard, watch_unwatch_confirm_keyboard,
+        job_detail_keyboard, job_end_state_keyboard, language_keyboard, main_menu_keyboard,
+        recent_destinations_keyboard, smart_link_action_keyboard, truncate_label,
+        unified_inspect_keyboard, watch_detail_keyboard, watch_list_keyboard,
+        watch_unwatch_confirm_keyboard,
     };
 
     #[test]
@@ -686,6 +734,54 @@ mod tests {
             for btn in row {
                 if let Some(cb) = callback_of(btn) {
                     assert!(cb.len() <= 64, "Callback data exceeds 64 bytes: {cb}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn job_end_state_keyboard_for_completed_and_failed() {
+        let success = job_end_state_keyboard("job-123", "completed", 0, UiLanguage::Vi);
+        assert_eq!(success.inline_keyboard[0][0].text, "Xem báo cáo");
+        assert_eq!(
+            callback_of(&success.inline_keyboard[0][0]),
+            Some("job:report:job-123")
+        );
+        assert_eq!(success.inline_keyboard[0][1].text, "Sao chép lại");
+        assert_eq!(
+            callback_of(&success.inline_keyboard[0][1]),
+            Some("job:clone_again:job-123")
+        );
+
+        let failed = job_end_state_keyboard("job-123", "failed", 3, UiLanguage::Vi);
+        assert_eq!(failed.inline_keyboard[0][0].text, "Thử lại");
+        assert_eq!(
+            callback_of(&failed.inline_keyboard[0][0]),
+            Some("job:retry:job-123")
+        );
+        assert_eq!(failed.inline_keyboard[0][1].text, "Xem lỗi");
+        assert_eq!(
+            callback_of(&failed.inline_keyboard[0][1]),
+            Some("job:errors:job-123")
+        );
+        assert_eq!(failed.inline_keyboard[0][2].text, "Report");
+        assert_eq!(
+            callback_of(&failed.inline_keyboard[0][2]),
+            Some("job:report:job-123")
+        );
+
+        let failed_en = job_end_state_keyboard("job-123", "failed", 3, UiLanguage::En);
+        assert_eq!(failed_en.inline_keyboard[0][0].text, "Retry");
+        assert_eq!(failed_en.inline_keyboard[0][1].text, "View errors");
+        assert_eq!(failed_en.inline_keyboard[0][2].text, "Report");
+
+        // Verify all callbacks <= 64 bytes
+        for kb in [&success, &failed, &failed_en] {
+            for row in &kb.inline_keyboard {
+                for btn in row {
+                    if let Some(cb) = callback_of(btn) {
+                        assert!(cb.len() <= 64, "Callback exceeds 64 bytes: {cb}");
+                    }
                 }
             }
         }

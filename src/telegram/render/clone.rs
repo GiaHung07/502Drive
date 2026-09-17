@@ -347,6 +347,7 @@ pub(crate) fn clone_request_expired(lang: keyboards::UiLanguage) -> &'static str
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn clone_starting(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => "Đang bắt đầu clone...",
@@ -361,6 +362,7 @@ pub(crate) fn clone_request_cancelled(lang: keyboards::UiLanguage) -> &'static s
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn clone_job_accepted_text(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => "Đã nhận job clone. Theo dõi bằng /jobs hoặc mở lại /menu.",

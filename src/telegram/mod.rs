@@ -21,6 +21,10 @@ pub async fn run(config: AppConfig, db: Database) -> anyhow::Result<()> {
     bot.set_my_commands(bot_commands(config.watch.enabled, lang))
         .await?;
 
+    if let Err(err) = handlers::resume_running_job_progress_updaters(&bot, &db, &config).await {
+        tracing::warn!(error = %err, "failed to resume running job progress updaters");
+    }
+
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint({
             let db = db.clone();

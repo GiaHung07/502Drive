@@ -295,7 +295,7 @@ async fn handle_session_input(
         }
         (session::SessionFlow::CloneHere, session::SessionStep::WaitSource) => {
             let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
-            spawn_clone_now(bot, msg.chat.id, config, db, user_id, input).await?;
+            spawn_clone_now(bot, msg.chat.id, config, db, user_id, input, None).await?;
         }
         (session::SessionFlow::Watch, session::SessionStep::WaitSource) => {
             let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
@@ -816,11 +816,6 @@ pub async fn handle_callback_query(
                 return Ok(());
             };
             let _ = session::clear_session(&db, user_id, chat_id.0).await;
-            if let Some(message) = query.message.as_ref() {
-                let _ = bot
-                    .edit_message_text(chat_id, message.id(), clone_starting(ui_language(&config)))
-                    .await;
-            }
             spawn_clone_now(
                 bot.clone(),
                 chat_id,
@@ -828,6 +823,7 @@ pub async fn handle_callback_query(
                 db,
                 user_id,
                 payload.source_input,
+                query.message.as_ref().map(|m| m.id()),
             )
             .await?;
             return Ok(());
@@ -1095,12 +1091,16 @@ pub async fn handle_callback_query(
                 }
                 return Ok(());
             };
-            if let Some(message) = query.message.as_ref() {
-                let _ = bot
-                    .edit_message_text(chat_id, message.id(), clone_starting(ui_language(&config)))
-                    .await;
-            }
-            spawn_clone_now(bot.clone(), chat_id, config, db, user_id, source).await?;
+            spawn_clone_now(
+                bot.clone(),
+                chat_id,
+                config,
+                db,
+                user_id,
+                source,
+                query.message.as_ref().map(|m| m.id()),
+            )
+            .await?;
             return Ok(());
         }
         Some(("clone", "cancel", state_id)) => {
@@ -1133,12 +1133,16 @@ pub async fn handle_callback_query(
                 }
                 return Ok(());
             };
-            if let Some(message) = query.message.as_ref() {
-                let _ = bot
-                    .edit_message_text(chat_id, message.id(), clone_starting(ui_language(&config)))
-                    .await;
-            }
-            spawn_clone_now(bot.clone(), chat_id, config, db, user_id, source).await?;
+            spawn_clone_now(
+                bot.clone(),
+                chat_id,
+                config,
+                db,
+                user_id,
+                source,
+                query.message.as_ref().map(|m| m.id()),
+            )
+            .await?;
             return Ok(());
         }
         Some(("smart", "sync", state_id)) => {
@@ -1261,6 +1265,60 @@ pub async fn handle_callback_query(
         }
         Some(("job", "report", job_id)) => {
             send_report_for_job_id(&bot, chat_id, &config, &db, user_id, job_id).await?;
+            return Ok(());
+        }
+        Some(("job", "clone_again", job_id)) => {
+            let job = repo::job_detail_for_user(&db, user_id, job_id)
+                .await
+                .ok()
+                .flatten();
+            let Some(job) = job else {
+                let msg_text = job_not_found_text(ui_language(&config));
+                bot.send_message(chat_id, msg_text).await?;
+                return Ok(());
+            };
+            let reference =
+                parse_drive_reference(&job.source_root_id).unwrap_or_else(|_| DriveReference {
+                    file_id: job.source_root_id.clone(),
+                    resource_key: None,
+                    hinted_kind: None,
+                });
+            handle_inspect_flow(
+                bot.clone(),
+                chat_id,
+                config.clone(),
+                db.clone(),
+                user_id,
+                reference,
+                job.source_root_id,
+            )
+            .await?;
+            return Ok(());
+        }
+        Some(("job", "errors", job_id)) => {
+            let result = job_status_panel(&db, user_id, job_id, ui_language(&config)).await;
+            match result {
+                Ok((text, keyboard)) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        text,
+                        Some(keyboard),
+                    )
+                    .await?;
+                }
+                Err(err) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        err.to_string(),
+                        Some(keyboards::back_home_keyboard(ui_language(&config))),
+                    )
+                    .await?;
+                }
+            }
             return Ok(());
         }
         Some(("job", "cancel", job_id)) => {
@@ -1640,7 +1698,7 @@ async fn handle_command(
                 .await?;
                 return Ok(());
             }
-            spawn_clone_now(bot, msg.chat.id, config, db, user_id, input).await?;
+            spawn_clone_now(bot, msg.chat.id, config, db, user_id, input, None).await?;
         }
         Command::Whoami => {
             let lang = ui_language(&config);
@@ -2160,10 +2218,23 @@ async fn send_clone_outcome(
     outcome: CloneOutcome,
     progress_message_id: Option<MessageId>,
 ) -> ResponseResult<()> {
-    let message = render_clone_outcome(db, telegram_user_id, lang, &outcome)
-        .await
-        .unwrap_or_else(|_| outcome.message.clone());
-    send_or_edit_clone_message(bot, chat_id, progress_message_id, message).await?;
+    let (message, keyboard) =
+        match repo::job_detail_for_user(db, telegram_user_id, &outcome.job_id).await {
+            Ok(Some(job)) => {
+                let elapsed = ((job.updated_at_ms - job.created_at_ms) / 1000).max(0) as u64;
+                let text = render_job_end_state(&job, elapsed, lang);
+                let kb =
+                    keyboards::job_end_state_keyboard(&job.id, &job.status, job.failed_items, lang);
+                (text, Some(kb))
+            }
+            _ => (
+                render_clone_outcome(db, telegram_user_id, lang, &outcome)
+                    .await
+                    .unwrap_or_else(|_| outcome.message.clone()),
+                None,
+            ),
+        };
+    edit_or_send_with_keyboard(bot, chat_id, progress_message_id, message, keyboard).await?;
     if let Some(paths) = outcome.report_paths {
         bot.send_document(chat_id, InputFile::file(paths.json))
             .await?;
@@ -2341,6 +2412,7 @@ async fn spawn_clone_now(
     db: Database,
     telegram_user_id: i64,
     input: String,
+    target_message_id: Option<MessageId>,
 ) -> ResponseResult<()> {
     let source = match parse_drive_reference(&input) {
         Ok(source) => source,
@@ -2352,18 +2424,25 @@ async fn spawn_clone_now(
     };
 
     let lang = ui_language(&config);
-    let progress_message = bot
-        .send_message(
-            chat_id,
-            format!(
-                "{}: {}\n{}",
-                progress_status_field(lang),
-                progress_queued_label(lang),
-                render_progress(lang, None, 0, 0)
-            ),
-        )
-        .await?;
-    let progress_message_id = progress_message.id;
+    let initial_text = format!(
+        "{}: {}\n{}",
+        progress_status_field(lang),
+        progress_preparing_label(lang),
+        render_progress(lang, None, 0, 0)
+    );
+
+    let progress_message_id = if let Some(target_id) = target_message_id {
+        match bot
+            .edit_message_text(chat_id, target_id, &initial_text)
+            .await
+        {
+            Ok(msg) => msg.id,
+            Err(_) => bot.send_message(chat_id, &initial_text).await?.id,
+        }
+    } else {
+        bot.send_message(chat_id, &initial_text).await?.id
+    };
+
     let (progress_done_tx, progress_done_rx) = oneshot::channel();
     spawn_progress_updater(
         bot.clone(),
@@ -2375,9 +2454,6 @@ async fn spawn_clone_now(
         progress_done_rx,
         lang,
     );
-
-    bot.send_message(chat_id, clone_job_accepted_text(lang))
-        .await?;
 
     let outcome_db = db.clone();
     let outcome_lang = ui_language(&config);
@@ -2436,7 +2512,7 @@ async fn handle_clone_request(
     input: String,
 ) -> ResponseResult<()> {
     if config.destination.auto_confirm_clone {
-        return spawn_clone_now(bot, chat_id, config, db, telegram_user_id, input).await;
+        return spawn_clone_now(bot, chat_id, config, db, telegram_user_id, input, None).await;
     }
 
     let loading = bot
@@ -2513,12 +2589,15 @@ fn spawn_progress_updater(
     tokio::spawn(async move {
         let started_at = Instant::now();
         let mut last_text = String::new();
+        let mut last_status: Option<String> = None;
+        let mut last_pct: f64 = 0.0;
+        let mut last_edit_instant: Option<Instant> = None;
         // Current wait before the next edit attempt.  Grows on 429, resets on
         // success.  Never exceeds 60 s so the loop stays responsive.
         let mut current_interval = base_interval;
 
         loop {
-            if !last_text.is_empty() {
+            if last_edit_instant.is_some() {
                 tokio::select! {
                     _ = &mut done_rx => break,
                     _ = tokio::time::sleep(current_interval) => {}
@@ -2542,10 +2621,15 @@ fn spawn_progress_updater(
                         );
                         if text != last_text {
                             last_text = text.clone();
+                            last_edit_instant = Some(Instant::now());
                             if let Err(err) = bot.edit_message_text(chat_id, message_id, text).await
                             {
-                                current_interval =
-                                    handle_edit_error(err, base_interval, current_interval);
+                                let (next_interval, should_stop) =
+                                    handle_edit_error(&err, base_interval, current_interval);
+                                if should_stop {
+                                    break;
+                                }
+                                current_interval = next_interval;
                             }
                         }
                         continue;
@@ -2556,19 +2640,51 @@ fn spawn_progress_updater(
                     }
                 };
 
-            let text = render_job_progress(&detail, elapsed_secs, lang);
-            if text == last_text {
+            let is_terminal = is_terminal_status(&detail.status);
+            let progress = JobService::progress(&detail, crate::state::db::now_ms());
+            let current_pct = progress.progress_pct.unwrap_or(0.0);
+
+            let status_changed = last_status.as_deref() != Some(detail.status.as_str());
+            let pct_changed = (current_pct - last_pct).abs() >= 5.0;
+            let time_elapsed =
+                last_edit_instant.map_or(true, |t| t.elapsed() >= Duration::from_secs(7));
+
+            let should_edit = is_terminal || status_changed || pct_changed || time_elapsed;
+            if !should_edit {
                 continue;
             }
-            last_text = text.clone();
 
-            let paused = detail.status == "paused";
-            let edit_result = if is_terminal_status(&detail.status) {
-                bot.edit_message_text(chat_id, message_id, text).await
+            let (text, keyboard) = if is_terminal {
+                let end_text = render_job_end_state(&detail, elapsed_secs, lang);
+                let end_kb = keyboards::job_end_state_keyboard(
+                    &detail.id,
+                    &detail.status,
+                    detail.failed_items,
+                    lang,
+                );
+                (end_text, Some(end_kb))
             } else {
+                let prog_text = render_job_progress(&detail, elapsed_secs, lang);
+                let paused = detail.status == "paused";
+                let prog_kb = keyboards::job_control_keyboard(&detail.id, paused, lang);
+                (prog_text, Some(prog_kb))
+            };
+
+            if text == last_text && !is_terminal {
+                continue;
+            }
+
+            last_text = text.clone();
+            last_status = Some(detail.status.clone());
+            last_pct = current_pct;
+            last_edit_instant = Some(Instant::now());
+
+            let edit_result = if let Some(kb) = keyboard {
                 bot.edit_message_text(chat_id, message_id, text)
-                    .reply_markup(keyboards::job_control_keyboard(&detail.id, paused, lang))
+                    .reply_markup(kb)
                     .await
+            } else {
+                bot.edit_message_text(chat_id, message_id, text).await
             };
 
             match edit_result {
@@ -2576,31 +2692,37 @@ fn spawn_progress_updater(
                     current_interval = base_interval;
                 }
                 Err(err) => {
-                    current_interval = handle_edit_error(err, base_interval, current_interval);
+                    let (next_interval, should_stop) =
+                        handle_edit_error(&err, base_interval, current_interval);
+                    if should_stop {
+                        break;
+                    }
+                    current_interval = next_interval;
                 }
             }
 
-            if is_terminal_status(&detail.status) {
+            if is_terminal {
                 break;
             }
         }
     });
 }
 
-/// Map a Telegram edit error to the next polling interval.
+/// Map a Telegram edit error to the next polling interval and a stop flag.
 ///
 /// - 429 RetryAfter(n): wait n seconds then resume.
 /// - MessageNotModified: harmless, keep current cadence.
+/// - MessageToEditNotFound: message was deleted or gone, stop updater immediately.
 /// - Other: exponential back-off, capped at 60 s.
 fn handle_edit_error(
-    err: teloxide::RequestError,
+    err: &teloxide::RequestError,
     base_interval: Duration,
     current_interval: Duration,
-) -> Duration {
+) -> (Duration, bool) {
     use teloxide::ApiError;
     use teloxide::RequestError;
 
-    match &err {
+    match err {
         // Telegram 429 — exact retry_after + base_interval buffer.
         RequestError::RetryAfter(secs) => {
             let wait = secs.duration().as_secs().max(1);
@@ -2608,20 +2730,53 @@ fn handle_edit_error(
                 retry_after_secs = wait,
                 "Telegram 429 — backing off progress edit"
             );
-            Duration::from_secs(wait) + base_interval
+            (Duration::from_secs(wait) + base_interval, false)
         }
         // Identical text — Telegram refuses to edit; keep same cadence.
-        RequestError::Api(ApiError::MessageNotModified) => current_interval,
+        RequestError::Api(ApiError::MessageNotModified) => (current_interval, false),
         // Message already gone (deleted by user, bot kicked, etc.) — stop loop.
         RequestError::Api(ApiError::MessageToEditNotFound) => {
             warn!("progress message deleted — stopping updater");
-            Duration::from_secs(3600) // very long = effectively stop
+            (Duration::ZERO, true)
         }
         _ => {
             warn!(error = %err, "edit progress message failed");
-            (current_interval * 2).min(Duration::from_secs(60))
+            ((current_interval * 2).min(Duration::from_secs(60)), false)
         }
     }
+}
+
+pub async fn resume_running_job_progress_updaters(
+    bot: &Bot,
+    db: &Database,
+    config: &AppConfig,
+) -> anyhow::Result<usize> {
+    let max_age_ms = 24 * 3600 * 1000;
+    let running = repo::list_running_jobs_with_progress_message(db, max_age_ms).await?;
+    let count = running.len();
+    for job in running {
+        let (_done_tx, done_rx) = oneshot::channel();
+        let mut user_config = config.clone();
+        apply_user_language(&mut user_config, db, job.telegram_user_id).await;
+        let lang = ui_language(&user_config);
+        spawn_progress_updater(
+            bot.clone(),
+            ChatId(job.chat_id),
+            MessageId(job.progress_message_id),
+            db.clone(),
+            job.telegram_user_id,
+            Duration::from_millis(config.telegram.progress_edit_min_interval_ms),
+            done_rx,
+            lang,
+        );
+    }
+    if count > 0 {
+        tracing::info!(
+            resumed_updaters = count,
+            "re-attached live job progress updaters"
+        );
+    }
+    Ok(count)
 }
 
 // ── Job detail / control ─────────────────────────────────────────────────────
@@ -4131,7 +4286,7 @@ async fn manage_watch_filter(
 mod tests {
     use super::*;
     use crate::drive::client::DriveApiError;
-    use crate::drive::types::{DriveFile, FOLDER_MIME_TYPE, SHORTCUT_MIME_TYPE};
+    use crate::drive::types::{DriveFile, FOLDER_MIME_TYPE};
     use crate::watch::errors::format_drive_error;
     use reqwest::StatusCode;
 

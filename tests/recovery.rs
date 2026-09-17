@@ -388,3 +388,43 @@ async fn owner_can_grant_and_revoke_operator() {
     assert!(!repo::revoke_operator(&db, 10).await.unwrap());
     assert!(repo::is_authorized(&db, 10).await.unwrap());
 }
+
+#[tokio::test]
+async fn list_running_jobs_with_progress_message_filters_terminal_and_stale() {
+    let (db, _initial_job) = test_db().await;
+    let job_id = repo::create_job_with_metadata(
+        &db,
+        repo::NewJob {
+            chat_id: 999,
+            telegram_user_id: 2,
+            google_account_id: "default".to_string(),
+            source_root_id: "source-root".to_string(),
+            source_resource_key: None,
+            source_drive_id: None,
+            destination_parent_id: "dest-parent".to_string(),
+            destination_drive_id: None,
+            progress_message_id: Some(12345),
+            duplicate_policy: "keep_both".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let max_age_ms = 24 * 3600 * 1000;
+    let list = repo::list_running_jobs_with_progress_message(&db, max_age_ms)
+        .await
+        .unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, job_id);
+    assert_eq!(list[0].progress_message_id, 12345);
+    assert_eq!(list[0].chat_id, 999);
+
+    // Terminal job should be excluded
+    repo::update_job_status(&db, &job_id, repo::JobStatusValue::Completed, None)
+        .await
+        .unwrap();
+    let list_after = repo::list_running_jobs_with_progress_message(&db, max_age_ms)
+        .await
+        .unwrap();
+    assert!(list_after.is_empty());
+}

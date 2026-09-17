@@ -618,6 +618,54 @@ pub async fn job_detail_for_progress_message(
         .await?)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningJobProgressInfo {
+    pub id: String,
+    pub telegram_user_id: i64,
+    pub chat_id: i64,
+    pub progress_message_id: i32,
+    pub status: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+pub async fn list_running_jobs_with_progress_message(
+    db: &Database,
+    max_age_ms: i64,
+) -> anyhow::Result<Vec<RunningJobProgressInfo>> {
+    let min_updated_at = now_ms() - max_age_ms;
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, telegram_user_id, chat_id, progress_message_id, status, created_at_ms, updated_at_ms
+                 FROM jobs
+                 WHERE progress_message_id IS NOT NULL
+                   AND chat_id > 0
+                   AND status NOT IN ('completed', 'partially_completed', 'failed', 'cancelled')
+                   AND updated_at_ms >= ?1
+                 ORDER BY created_at_ms ASC",
+            )?;
+            let rows = stmt.query_map(params![min_updated_at], |row| {
+                Ok(RunningJobProgressInfo {
+                    id: row.get(0)?,
+                    telegram_user_id: row.get(1)?,
+                    chat_id: row.get(2)?,
+                    progress_message_id: row.get(3)?,
+                    status: row.get(4)?,
+                    created_at_ms: row.get(5)?,
+                    updated_at_ms: row.get(6)?,
+                })
+            })?;
+            let mut result = Vec::new();
+            for r in rows {
+                result.push(r?);
+            }
+            Ok::<_, rusqlite::Error>(result)
+        })
+        .await?)
+}
+
 pub async fn recover_interrupted_state(db: &Database) -> anyhow::Result<StartupRecoverySummary> {
     Ok(db
         .conn()
