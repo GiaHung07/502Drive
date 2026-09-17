@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # 502Drive — Universal Linux Installer
-# Local-first Telegram Bot for Google Drive Cloning & Realtime Sync
+# Local-first Google Drive Cloning & Realtime Sync Tool
 #
 # Usage:
 #   Local: bash packaging/install.sh
