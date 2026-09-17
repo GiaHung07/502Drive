@@ -1044,7 +1044,7 @@ async fn handle_command(
                 .await?;
         }
         Command::Help => {
-            let text = render_help_text(ui_language(&config), config.watch.enabled);
+            let text = render_help_text(ui_language(&config));
             bot.send_message(msg.chat.id, text)
                 .reply_markup(keyboards::main_menu_keyboard(
                     config.watch.enabled,
@@ -3990,21 +3990,19 @@ mod tests {
     }
 
     #[test]
-    fn help_text_follows_language_and_watch_config() {
-        let en = render_help_text(keyboards::UiLanguage::En, false);
-        assert!(en.contains("MAIN COMMANDS"));
+    fn help_text_follows_language() {
+        let en = render_help_text(keyboards::UiLanguage::En);
+        assert!(en.contains("502Drive"));
         assert!(en.contains("/connect"));
         assert!(en.contains("/clone_here"));
         assert!(en.contains("/watch_filter"));
-        assert!(en.contains("Watch is DISABLED in config"));
-        assert!(en.contains("Admin: /whoami"));
-        assert!(!en.contains("LỆNH CHÍNH"));
+        assert!(en.contains("Admin: /grant /revoke"));
+        assert!(!en.contains("Bạn có thể"));
 
-        let vi = render_help_text(keyboards::UiLanguage::Vi, true);
-        assert!(vi.contains("LỆNH CHÍNH"));
-        assert!(vi.contains("/watch <nguồn> <đích>"));
+        let vi = render_help_text(keyboards::UiLanguage::Vi);
+        assert!(vi.contains("Bạn có thể"));
         assert!(vi.contains("/watch_filter"));
-        assert!(vi.contains("Quản trị: /whoami"));
+        assert!(vi.contains("Quản trị: /grant /revoke"));
     }
 
     #[test]
@@ -4017,18 +4015,18 @@ mod tests {
             account_status_label(keyboards::UiLanguage::Vi, "connected"),
             "Đã kết nối"
         );
+        let en = keyboards::UiLanguage::En;
+        assert_eq!(en.text(T::HomeDefaultDestination), "Default destination");
+        assert_eq!(en.text(T::HomeStatusConnected), "Connected");
+        assert_eq!(en.text(T::HomeStatusNotConnected), "Not connected");
+        assert_eq!(en.text(T::HomeStatusReconnect), "Reconnect needed");
+        assert_eq!(en.text(T::HomeBotReady), "Ready");
+        assert_eq!(en.text(T::HomeJobsRunning), "Running");
+        assert_eq!(en.text(T::HomeWatching), "Watching");
+        assert_eq!(en.text(T::HomeNeedsAttention), "Needs attention");
         assert_eq!(
-            home_destination_label(keyboards::UiLanguage::En),
-            "Default destination"
-        );
-        assert_eq!(home_jobs_label(keyboards::UiLanguage::En), "Active jobs");
-        assert_eq!(
-            home_watch_disabled(keyboards::UiLanguage::En),
-            "Disabled in config"
-        );
-        assert_eq!(
-            home_hint(keyboards::UiLanguage::En),
-            "Choose an item below to continue."
+            en.text(T::HomeHint),
+            "Send a Google Drive link to get started quickly."
         );
     }
 

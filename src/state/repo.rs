@@ -396,6 +396,25 @@ pub async fn active_job_count_for_user(
         .await?)
 }
 
+pub async fn failed_job_count_for_user(
+    db: &Database,
+    telegram_user_id: i64,
+) -> anyhow::Result<i64> {
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*)
+                 FROM jobs
+                 WHERE telegram_user_id = ?1
+                   AND status = 'failed'",
+                params![telegram_user_id],
+                |row| row.get(0),
+            )
+        })
+        .await?)
+}
+
 pub async fn active_job_count(db: &Database) -> anyhow::Result<i64> {
     Ok(db
         .conn()

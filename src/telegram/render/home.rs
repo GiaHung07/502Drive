@@ -1,8 +1,8 @@
 //! Home dashboard, account panel and language panel texts.
 
 use crate::state::{db::Database, repo};
+use crate::telegram::i18n::TextKey as T;
 use crate::telegram::keyboards;
-use crate::telegram::render::push_field;
 
 pub(crate) async fn render_home_dashboard(
     config: &crate::config::AppConfig,
@@ -14,7 +14,7 @@ pub(crate) async fn render_home_dashboard(
         .await?
         .unwrap_or_else(|| "chưa kết nối".to_string());
     let destination = repo::default_destination_profile(db, "default").await?;
-    let jobs = repo::list_active_jobs_for_user(db, telegram_user_id, 5).await?;
+    let running_jobs = repo::active_job_count_for_user(db, telegram_user_id).await?;
     let watches = if config.watch.enabled {
         repo::list_watches_for_user(db, telegram_user_id).await?
     } else {
@@ -24,86 +24,63 @@ pub(crate) async fn render_home_dashboard(
         .iter()
         .filter(|w| matches!(w.status.as_str(), "active" | "catching_up" | "degraded"))
         .count();
-    let watch_paused = watches.iter().filter(|w| w.status == "paused").count();
+    let failed_jobs = repo::failed_job_count_for_user(db, telegram_user_id).await?;
+    let needs_attention = failed_jobs as usize
+        + watches
+            .iter()
+            .filter(|w| w.status == "needs_reconcile")
+            .count();
 
-    let mut lines = vec![
-        home_title(lang).to_string(),
-        "━━━━━━━━━━━━━━━━━━━━".to_string(),
-    ];
-    push_field(&mut lines, "Google", account_status_label(lang, &account));
-    match destination {
-        Some(dest) => push_field(&mut lines, home_destination_label(lang), &dest.label),
-        None => push_field(
-            &mut lines,
-            home_destination_label(lang),
-            home_destination_missing(lang),
-        ),
-    }
-    push_field(&mut lines, home_jobs_label(lang), &jobs.len().to_string());
+    let drive_label = lang.text(T::HomeDriveLabel);
+    let bot_label = lang.text(T::HomeBotLabel);
+    let dest_label = lang.text(T::HomeDefaultDestination);
+    let width = [drive_label, bot_label, dest_label]
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let drive_status = match account.as_str() {
+        "connected" => lang.text(T::HomeStatusConnected),
+        "reconnect_required" => lang.text(T::HomeStatusReconnect),
+        _ => lang.text(T::HomeStatusNotConnected),
+    };
+    let destination = match &destination {
+        Some(dest) => dest.label.clone(),
+        None => lang.text(T::HomeNoDestination).to_string(),
+    };
+
+    let mut lines = vec!["🚀 502Drive".to_string(), String::new()];
+    lines.push(status_row(width, drive_label, drive_status));
+    lines.push(status_row(width, bot_label, lang.text(T::HomeBotReady)));
+    lines.push(status_row(width, dest_label, &destination));
+    lines.push(String::new());
+    lines.push(status_row(
+        width,
+        lang.text(T::HomeJobsRunning),
+        &running_jobs.to_string(),
+    ));
     if config.watch.enabled {
-        let watch_summary = match lang {
-            keyboards::UiLanguage::Vi => format!(
-                "{} tổng · {} hoạt động · {} tạm dừng",
-                watches.len(),
-                watch_active,
-                watch_paused
-            ),
-            keyboards::UiLanguage::En => format!(
-                "{} total · {} active · {} paused",
-                watches.len(),
-                watch_active,
-                watch_paused
-            ),
-        };
-        push_field(&mut lines, "Watch", &watch_summary);
-    } else {
-        push_field(&mut lines, "Watch", home_watch_disabled(lang));
+        lines.push(status_row(
+            width,
+            lang.text(T::HomeWatching),
+            &watch_active.to_string(),
+        ));
+        lines.push(status_row(
+            width,
+            lang.text(T::HomeNeedsAttention),
+            &needs_attention.to_string(),
+        ));
     }
     lines.push(String::new());
-    lines.push(home_hint(lang).to_string());
+    lines.push(lang.text(T::HomeHint).to_string());
     Ok(lines.join("\n"))
 }
 
-pub(crate) fn home_title(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "502DRIVE CONTROL CENTER",
-        keyboards::UiLanguage::En => "502DRIVE CONTROL CENTER",
-    }
-}
-
-pub(crate) fn home_destination_label(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Đích mặc định",
-        keyboards::UiLanguage::En => "Default destination",
-    }
-}
-
-pub(crate) fn home_destination_missing(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Chưa đặt",
-        keyboards::UiLanguage::En => "Not set",
-    }
-}
-
-pub(crate) fn home_jobs_label(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Job đang chạy",
-        keyboards::UiLanguage::En => "Active jobs",
-    }
-}
-
-pub(crate) fn home_watch_disabled(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Đang tắt trong config",
-        keyboards::UiLanguage::En => "Disabled in config",
-    }
-}
-
-pub(crate) fn home_hint(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Chọn một mục bên dưới để xem tiếp.",
-        keyboards::UiLanguage::En => "Choose an item below to continue.",
-    }
+/// `label` padded to `width` chars, then ` ● value`.
+fn status_row(width: usize, label: &str, value: &str) -> String {
+    let padding = " ".repeat(width.saturating_sub(label.chars().count()));
+    format!("{label}{padding} ● {value}")
 }
 
 pub(crate) fn account_title(lang: keyboards::UiLanguage) -> &'static str {

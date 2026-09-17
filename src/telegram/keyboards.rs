@@ -1,4 +1,12 @@
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup};
+
+/// Callback data of a button, if it is a callback button.
+fn callback_of(button: &InlineKeyboardButton) -> Option<&str> {
+    match &button.kind {
+        InlineKeyboardButtonKind::CallbackData(data) => Some(data.as_ref()),
+        _ => None,
+    }
+}
 
 use crate::telegram::i18n::TextKey as T;
 pub use crate::telegram::i18n::UiLanguage;
@@ -49,32 +57,26 @@ pub fn job_control_keyboard(job_id: &str, paused: bool, lang: UiLanguage) -> Inl
 }
 
 pub fn main_menu_keyboard(watch_enabled: bool, lang: UiLanguage) -> InlineKeyboardMarkup {
-    let mut rows = vec![
-        vec![
-            InlineKeyboardButton::callback(lang.text(T::Clone), "menu:prompt:clone"),
-            InlineKeyboardButton::callback(
-                lang.text(T::CloneToDestination),
-                "menu:prompt:clone_here",
-            ),
-        ],
-        vec![
-            InlineKeyboardButton::callback(lang.text(T::Destination), "menu:open:destination"),
-            InlineKeyboardButton::callback(lang.text(T::Jobs), "menu:open:jobs"),
-        ],
-        vec![
-            InlineKeyboardButton::callback(lang.text(T::Account), "menu:open:account"),
-            InlineKeyboardButton::callback(lang.text(T::Refresh), "menu:open:home"),
-        ],
-    ];
+    let mut rows = Vec::new();
+    let mut first_row = vec![InlineKeyboardButton::callback(
+        lang.text(T::MenuClone),
+        "menu:prompt:clone",
+    )];
     if watch_enabled {
-        rows.insert(
-            2,
-            vec![
-                InlineKeyboardButton::callback(lang.text(T::Watches), "menu:open:watches"),
-                InlineKeyboardButton::callback(lang.text(T::NewWatch), "menu:prompt:watch"),
-            ],
-        );
+        first_row.push(InlineKeyboardButton::callback(
+            lang.text(T::MenuWatch),
+            "menu:prompt:watch",
+        ));
     }
+    rows.push(first_row);
+    rows.push(vec![
+        InlineKeyboardButton::callback(lang.text(T::MenuJobs), "menu:open:jobs"),
+        InlineKeyboardButton::callback(lang.text(T::Destination), "menu:open:destination"),
+    ]);
+    rows.push(vec![InlineKeyboardButton::callback(
+        lang.text(T::MenuSettings),
+        "menu:open:account",
+    )]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -391,10 +393,11 @@ fn truncate_label(label: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        UiLanguage, account_keyboard, destination_browser_keyboard, destination_panel_keyboard,
-        job_cancel_confirm_keyboard, job_detail_keyboard, language_keyboard, main_menu_keyboard,
-        recent_destinations_keyboard, smart_link_action_keyboard, truncate_label,
-        watch_detail_keyboard, watch_list_keyboard, watch_unwatch_confirm_keyboard,
+        UiLanguage, account_keyboard, callback_of, destination_browser_keyboard,
+        destination_panel_keyboard, job_cancel_confirm_keyboard, job_detail_keyboard,
+        language_keyboard, main_menu_keyboard, recent_destinations_keyboard,
+        smart_link_action_keyboard, truncate_label, watch_detail_keyboard, watch_list_keyboard,
+        watch_unwatch_confirm_keyboard,
     };
 
     #[test]
@@ -471,13 +474,40 @@ mod tests {
 
     #[test]
     fn main_menu_can_hide_watch_actions() {
-        let keyboard = main_menu_keyboard(false, UiLanguage::Vi);
+        let disabled = main_menu_keyboard(false, UiLanguage::Vi);
         assert!(
-            !keyboard
+            !disabled
                 .inline_keyboard
                 .iter()
                 .flatten()
-                .any(|button| button.text == "Watches")
+                .any(|button| button.text == "⟳ Theo dõi")
+        );
+
+        let enabled = main_menu_keyboard(true, UiLanguage::Vi);
+        assert_eq!(enabled.inline_keyboard[0][0].text, "＋ Sao chép");
+        assert_eq!(enabled.inline_keyboard[0][1].text, "⟳ Theo dõi");
+        assert_eq!(enabled.inline_keyboard[1][0].text, "Công việc");
+        assert_eq!(enabled.inline_keyboard[1][1].text, "Thư mục đích");
+        assert_eq!(enabled.inline_keyboard[2][0].text, "Cài đặt");
+        assert_eq!(
+            callback_of(&enabled.inline_keyboard[0][0]),
+            Some("menu:prompt:clone")
+        );
+        assert_eq!(
+            callback_of(&enabled.inline_keyboard[0][1]),
+            Some("menu:prompt:watch")
+        );
+        assert_eq!(
+            callback_of(&enabled.inline_keyboard[1][0]),
+            Some("menu:open:jobs")
+        );
+        assert_eq!(
+            callback_of(&enabled.inline_keyboard[1][1]),
+            Some("menu:open:destination")
+        );
+        assert_eq!(
+            callback_of(&enabled.inline_keyboard[2][0]),
+            Some("menu:open:account")
         );
     }
 

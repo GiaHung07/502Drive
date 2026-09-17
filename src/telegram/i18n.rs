@@ -64,10 +64,27 @@ pub enum TextKey {
     CommandWatches,
     CommandWhoami,
     Destination,
+    HelpText,
+    HomeBotLabel,
+    HomeBotReady,
+    HomeDefaultDestination,
+    HomeDriveLabel,
+    HomeHint,
+    HomeJobsRunning,
+    HomeNeedsAttention,
+    HomeNoDestination,
+    HomeStatusConnected,
+    HomeStatusNotConnected,
+    HomeStatusReconnect,
+    HomeWatching,
     Jobs,
     KeepJob,
     KeepWatch,
     Manual,
+    MenuClone,
+    MenuJobs,
+    MenuSettings,
+    MenuWatch,
     NewWatch,
     NextPage,
     Pause,
@@ -175,10 +192,27 @@ impl TextKey {
         Self::CommandWatches,
         Self::CommandWhoami,
         Self::Destination,
+        Self::HelpText,
+        Self::HomeBotLabel,
+        Self::HomeBotReady,
+        Self::HomeDefaultDestination,
+        Self::HomeDriveLabel,
+        Self::HomeHint,
+        Self::HomeJobsRunning,
+        Self::HomeNeedsAttention,
+        Self::HomeNoDestination,
+        Self::HomeStatusConnected,
+        Self::HomeStatusNotConnected,
+        Self::HomeStatusReconnect,
+        Self::HomeWatching,
         Self::Jobs,
         Self::KeepJob,
         Self::KeepWatch,
         Self::Manual,
+        Self::MenuClone,
+        Self::MenuJobs,
+        Self::MenuSettings,
+        Self::MenuWatch,
         Self::NewWatch,
         Self::NextPage,
         Self::Pause,
@@ -345,6 +379,58 @@ impl TextKey {
             (UiLanguage::En, Self::CommandWhoami) => "Show your Telegram user id and role",
             (UiLanguage::Vi, Self::Destination) => "Thư mục đích",
             (UiLanguage::En, Self::Destination) => "Destination",
+            (UiLanguage::Vi, Self::HelpText) => {
+                "502Drive\n\
+                 \n\
+                 Bạn có thể:\n\
+                 • Dán link Google Drive để sao chép hoặc theo dõi\n\
+                 • Mở /menu để điều khiển\n\
+                 • Dùng lệnh nhanh nếu muốn\n\
+                 \n\
+                 Lệnh: /clone /clone_here /sync /watch /watches /jobs /status\n\
+                 Đích: /destination /set_destination /clear_destination\n\
+                 Tài khoản: /account /connect /disconnect /whoami\n\
+                 Nâng cao: /watch_status /watch_pause /watch_resume /watch_policy /watch_filter /unwatch /retry /last_report\n\
+                 Quản trị: /grant /revoke (chỉ owner)"
+            }
+            (UiLanguage::En, Self::HelpText) => {
+                "502Drive\n\
+                 \n\
+                 You can:\n\
+                 • Paste a Google Drive link to clone or watch\n\
+                 • Open /menu to control the bot\n\
+                 • Use quick commands if you prefer\n\
+                 \n\
+                 Commands: /clone /clone_here /sync /watch /watches /jobs /status\n\
+                 Destination: /destination /set_destination /clear_destination\n\
+                 Account: /account /connect /disconnect /whoami\n\
+                 Advanced: /watch_status /watch_pause /watch_resume /watch_policy /watch_filter /unwatch /retry /last_report\n\
+                 Admin: /grant /revoke (owner only)"
+            }
+            (UiLanguage::Vi, Self::HomeBotLabel) => "Bot",
+            (UiLanguage::En, Self::HomeBotLabel) => "Bot",
+            (UiLanguage::Vi, Self::HomeBotReady) => "Sẵn sàng",
+            (UiLanguage::En, Self::HomeBotReady) => "Ready",
+            (UiLanguage::Vi, Self::HomeDefaultDestination) => "Đích mặc định",
+            (UiLanguage::En, Self::HomeDefaultDestination) => "Default destination",
+            (UiLanguage::Vi, Self::HomeDriveLabel) => "Google Drive",
+            (UiLanguage::En, Self::HomeDriveLabel) => "Google Drive",
+            (UiLanguage::Vi, Self::HomeHint) => "Gửi link Google Drive để bắt đầu nhanh.",
+            (UiLanguage::En, Self::HomeHint) => "Send a Google Drive link to get started quickly.",
+            (UiLanguage::Vi, Self::HomeJobsRunning) => "Đang chạy",
+            (UiLanguage::En, Self::HomeJobsRunning) => "Running",
+            (UiLanguage::Vi, Self::HomeNeedsAttention) => "Cần chú ý",
+            (UiLanguage::En, Self::HomeNeedsAttention) => "Needs attention",
+            (UiLanguage::Vi, Self::HomeNoDestination) => "—",
+            (UiLanguage::En, Self::HomeNoDestination) => "—",
+            (UiLanguage::Vi, Self::HomeStatusConnected) => "Đã kết nối",
+            (UiLanguage::En, Self::HomeStatusConnected) => "Connected",
+            (UiLanguage::Vi, Self::HomeStatusNotConnected) => "Chưa kết nối",
+            (UiLanguage::En, Self::HomeStatusNotConnected) => "Not connected",
+            (UiLanguage::Vi, Self::HomeStatusReconnect) => "Cần kết nối lại",
+            (UiLanguage::En, Self::HomeStatusReconnect) => "Reconnect needed",
+            (UiLanguage::Vi, Self::HomeWatching) => "Đang theo dõi",
+            (UiLanguage::En, Self::HomeWatching) => "Watching",
             (UiLanguage::Vi, Self::Jobs) => "Jobs",
             (UiLanguage::En, Self::Jobs) => "Jobs",
             (UiLanguage::Vi, Self::KeepJob) => "Giữ job",
@@ -353,6 +439,14 @@ impl TextKey {
             (UiLanguage::En, Self::KeepWatch) => "Keep watch",
             (UiLanguage::Vi, Self::Manual) => "Xác nhận tay",
             (UiLanguage::En, Self::Manual) => "Manual",
+            (UiLanguage::Vi, Self::MenuClone) => "＋ Sao chép",
+            (UiLanguage::En, Self::MenuClone) => "＋ Clone",
+            (UiLanguage::Vi, Self::MenuJobs) => "Công việc",
+            (UiLanguage::En, Self::MenuJobs) => "Jobs",
+            (UiLanguage::Vi, Self::MenuSettings) => "Cài đặt",
+            (UiLanguage::En, Self::MenuSettings) => "Settings",
+            (UiLanguage::Vi, Self::MenuWatch) => "⟳ Theo dõi",
+            (UiLanguage::En, Self::MenuWatch) => "⟳ Watch",
             (UiLanguage::Vi, Self::NewWatch) => "Đồng bộ mới",
             (UiLanguage::En, Self::NewWatch) => "New sync",
             (UiLanguage::Vi, Self::NextPage) => "Trang sau",
