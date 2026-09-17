@@ -129,6 +129,17 @@ pub struct CloneSourceInspect {
     pub default_destination: Option<repo::DestinationProfile>,
 }
 
+static GLOBAL_NOTIFY_SENDER: std::sync::OnceLock<crate::watch::NotifySender> =
+    std::sync::OnceLock::new();
+
+pub fn set_global_notify_sender(sender: crate::watch::NotifySender) {
+    let _ = GLOBAL_NOTIFY_SENDER.set(sender);
+}
+
+pub fn global_notify_sender() -> Option<crate::watch::NotifySender> {
+    GLOBAL_NOTIFY_SENDER.get().cloned()
+}
+
 #[derive(Clone)]
 pub struct CloneService {
     config: AppConfig,
@@ -136,6 +147,7 @@ pub struct CloneService {
     drive: DriveClient,
     token_manager: TokenManager,
     copy_limiter: CopyLimiter,
+    notify_tx: Option<crate::watch::NotifySender>,
 }
 
 impl CloneService {
@@ -153,7 +165,13 @@ impl CloneService {
             db,
             token_manager,
             copy_limiter: CopyLimiter::new(write_concurrency),
+            notify_tx: global_notify_sender(),
         }
+    }
+
+    pub fn with_notify_sender(mut self, notify_tx: crate::watch::NotifySender) -> Self {
+        self.notify_tx = Some(notify_tx);
+        self
     }
 
     /// Inspect a clone source reference: fetches Drive metadata, checks
@@ -370,6 +388,12 @@ impl CloneService {
         match result {
             Ok(message) => {
                 let report_paths = self.write_report_best_effort(&job_id).await;
+                if let Some(tx) = &self.notify_tx {
+                    let _ = tx.try_send(crate::watch::NotificationEvent::job_completed(
+                        request.chat_id,
+                        format!("✅ Job {} completed: {}", job_id, message),
+                    ));
+                }
                 Ok(CloneOutcome {
                     job_id,
                     message,
@@ -391,6 +415,12 @@ impl CloneService {
                     Some(&err.to_string()),
                 )
                 .await;
+                if let Some(tx) = &self.notify_tx {
+                    let _ = tx.try_send(crate::watch::NotificationEvent::job_failed(
+                        request.chat_id,
+                        format!("❌ Job {} failed: {}", job_id, err),
+                    ));
+                }
                 Err(err)
             }
         }
@@ -542,6 +572,12 @@ impl CloneService {
             .await?
         };
 
+        if let Some(tx) = &self.notify_tx {
+            let _ = tx.try_send(crate::watch::NotificationEvent::job_completed(
+                job.chat_id,
+                format!("✅ Job {} completed: {}", job.id, message),
+            ));
+        }
         Ok(CloneOutcome {
             job_id: job.id.clone(),
             message,

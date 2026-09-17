@@ -269,7 +269,7 @@ pub async fn resolve_pending(
             }
 
             let token_manager = TokenManager::new(config.clone(), db.clone());
-            let (tx, _rx) = tokio::sync::mpsc::channel(1);
+            let (tx, _rx) = tokio::sync::mpsc::channel::<crate::watch::NotificationEvent>(1);
             let classification = super::classifier::Classification::from_str(&event.classification)
                 .unwrap_or(super::classifier::Classification::ContentChanged);
 

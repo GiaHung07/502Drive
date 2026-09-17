@@ -62,3 +62,13 @@ allow_operators = false
 
 [platform]
 startup_mode = "manual"
+
+[notifications]
+# Send Telegram notification when a clone job finishes successfully.
+job_completed = true
+# Send Telegram notification when a clone job fails.
+job_failed = true
+# Send Telegram notification when a watch enters degraded or needs_reconcile state.
+watch_errors = true
+# Send Telegram notification for routine watch sync activity summaries (can be noisy).
+watch_activity = false

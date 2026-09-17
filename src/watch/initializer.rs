@@ -33,7 +33,7 @@ use crate::{
         db::Database,
         repo::{self, WatchSubscription},
     },
-    watch::poller::NotifySender,
+    watch::poller::{NotificationEvent, NotifySender},
 };
 
 use super::dispatcher::{DispatchState, dispatch_pending};
@@ -43,9 +43,7 @@ use super::dispatcher::{DispatchState, dispatch_pending};
 type NotifyFn = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Run the full watch initialization flow for a newly created subscription.
-///
-/// Must be called from a spawned task, not directly from the Telegram handler.
-/// Reports progress back via the provided `notify_fn`.
+/// Callers can pass a closure to forward stage updates to a chat/channel.
 pub async fn run_initial_clone(
     config: AppConfig,
     db: Database,
@@ -56,7 +54,7 @@ pub async fn run_initial_clone(
     // Wrap in Arc so it can cross await points.
     let notify: NotifyFn = Arc::new(notify_fn);
     // Local mpsc channel for catch-up dispatch_pending calls.
-    let (notify_tx, _notify_rx) = mpsc::channel::<(i64, String)>(32);
+    let (notify_tx, _notify_rx) = mpsc::channel::<NotificationEvent>(32);
     run_initial_clone_inner(config, db, drive, watch_id, notify, notify_tx).await
 }
 

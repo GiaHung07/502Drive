@@ -24,20 +24,77 @@ use super::retention::prune_old_events;
 /// Shutdown signal sent to all pollers.
 pub type StopSignal = broadcast::Sender<()>;
 
-/// (chat_id, message_text) notification sent from the watch subsystem to the
-/// Telegram layer. The bot task drains this channel and calls send_message.
-pub type NotifySender = mpsc::Sender<(i64, String)>;
-pub type NotifyReceiver = mpsc::Receiver<(i64, String)>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationKind {
+    JobCompleted,
+    JobFailed,
+    WatchError,
+    WatchActivity,
+}
+
+#[derive(Debug, Clone)]
+pub struct NotificationEvent {
+    pub chat_id: i64,
+    pub kind: NotificationKind,
+    pub text: String,
+}
+
+impl NotificationEvent {
+    pub fn job_completed(chat_id: i64, text: String) -> Self {
+        Self {
+            chat_id,
+            kind: NotificationKind::JobCompleted,
+            text,
+        }
+    }
+
+    pub fn job_failed(chat_id: i64, text: String) -> Self {
+        Self {
+            chat_id,
+            kind: NotificationKind::JobFailed,
+            text,
+        }
+    }
+
+    pub fn watch_error(chat_id: i64, text: String) -> Self {
+        Self {
+            chat_id,
+            kind: NotificationKind::WatchError,
+            text,
+        }
+    }
+
+    pub fn watch_activity(chat_id: i64, text: String) -> Self {
+        Self {
+            chat_id,
+            kind: NotificationKind::WatchActivity,
+            text,
+        }
+    }
+
+    pub fn should_send(&self, config: &crate::config::NotificationsConfig) -> bool {
+        match self.kind {
+            NotificationKind::JobCompleted => config.job_completed,
+            NotificationKind::JobFailed => config.job_failed,
+            NotificationKind::WatchError => config.watch_errors,
+            NotificationKind::WatchActivity => config.watch_activity,
+        }
+    }
+}
+
+/// Notification sent from watch/job subsystems to the Telegram forwarder.
+pub type NotifySender = mpsc::Sender<NotificationEvent>;
+pub type NotifyReceiver = mpsc::Receiver<NotificationEvent>;
 
 /// Spawn one poller task per cursor already in the DB, plus start a dispatch
-/// loop. Returns the stop signal, task handles, and the notification receiver.
+/// loop. Returns the stop signal and task handles.
 pub fn spawn_all_pollers(
     config: AppConfig,
     db: Database,
     drive: DriveClient,
-) -> (StopSignal, Vec<JoinHandle<()>>, NotifyReceiver) {
+    notify_tx: NotifySender,
+) -> (StopSignal, Vec<JoinHandle<()>>) {
     let (stop_tx, _) = broadcast::channel::<()>(1);
-    let (notify_tx, notify_rx) = mpsc::channel::<(i64, String)>(256);
     // Realtime dispatch trigger: the poll loop notifies after committing a
     // page with events; the dispatch loop wakes immediately instead of
     // waiting for its next interval tick.
@@ -59,7 +116,7 @@ pub fn spawn_all_pollers(
             dispatch_notify,
         ),
     ];
-    (stop_tx, handles, notify_rx)
+    (stop_tx, handles)
 }
 
 /// One task that loads all cursors from DB and polls them in sequence.

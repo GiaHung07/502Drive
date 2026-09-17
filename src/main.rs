@@ -11,7 +11,7 @@ use gdclone_bot::{
     platform, report,
     state::db::Database,
     telegram,
-    watch::{NotifyReceiver, spawn_all_pollers},
+    watch::{NotificationEvent, spawn_all_pollers},
 };
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -113,7 +113,9 @@ async fn run_bot(config: AppConfig) -> anyhow::Result<()> {
 
     // Start watch/sync infrastructure.
     let (_stop_tx, _poller_handles) = if config.watch.enabled {
-        let (tx, handles, notify_rx) = spawn_all_pollers(config.clone(), db.clone(), drive.clone());
+        let (notify_tx, notify_rx) = tokio::sync::mpsc::channel::<NotificationEvent>(256);
+        gdclone_bot::engine::copy::set_global_notify_sender(notify_tx.clone());
+        let (tx, handles) = spawn_all_pollers(config.clone(), db.clone(), drive.clone(), notify_tx);
         tracing::info!("watch pollers started");
         // Forward watch notifications to Telegram in a background task.
         // The actual Bot handle is created by the telegram layer; we route via
@@ -141,10 +143,19 @@ async fn run_bot(config: AppConfig) -> anyhow::Result<()> {
 
 /// Drain the watch notification channel and send messages via Telegram.
 /// This uses a simple reqwest call to avoid circular bot dependency in main.
-fn spawn_notify_forwarder(mut notify_rx: NotifyReceiver, config: &AppConfig) {
+fn spawn_notify_forwarder(
+    mut notify_rx: tokio::sync::mpsc::Receiver<NotificationEvent>,
+    config: &AppConfig,
+) {
     let bot_token = config.telegram.bot_token.clone();
+    let notifications = config.notifications.clone();
     tokio::spawn(async move {
-        while let Some((chat_id, text)) = notify_rx.recv().await {
+        while let Some(event) = notify_rx.recv().await {
+            // Skip suppressed notification kinds based on config flags.
+            if !event.should_send(&notifications) {
+                continue;
+            }
+            let chat_id = event.chat_id;
             // GUI-initiated watches (chat_id = 0) have no Telegram chat —
             // skip instead of hammering the API with invalid requests.
             if chat_id <= 0 {
@@ -153,7 +164,7 @@ fn spawn_notify_forwarder(mut notify_rx: NotifyReceiver, config: &AppConfig) {
             let url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
             let body = serde_json::json!({
                 "chat_id": chat_id,
-                "text": text,
+                "text": event.text,
             });
             // Best-effort; ignore errors (bot may not be running yet).
             let _ = reqwest::Client::new().post(&url).json(&body).send().await;

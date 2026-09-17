@@ -8,5 +8,8 @@ pub mod retention;
 pub mod service;
 
 pub use initializer::run_initial_clone;
-pub use poller::{NotifyReceiver, StopSignal, spawn_all_pollers};
+pub use poller::{
+    NotificationEvent, NotificationKind, NotifyReceiver, NotifySender, StopSignal,
+    spawn_all_pollers,
+};
 pub use service::{CreateWatchError, CreateWatchParams, CreatedWatch, create_watch};

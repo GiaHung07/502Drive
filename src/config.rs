@@ -17,6 +17,31 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub security: SecurityConfig,
     pub platform: PlatformConfig,
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct NotificationsConfig {
+    #[serde(default = "default_true")]
+    pub job_completed: bool,
+    #[serde(default = "default_true")]
+    pub job_failed: bool,
+    #[serde(default = "default_true")]
+    pub watch_errors: bool,
+    #[serde(default = "default_false")]
+    pub watch_activity: bool,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            job_completed: true,
+            job_failed: true,
+            watch_errors: true,
+            watch_activity: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -348,7 +373,31 @@ fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {
         "GDCLONE__STORAGE__REPORT_DIR",
         &mut config.storage.report_dir,
     );
+    env_parse(
+        "GDCLONE__NOTIFICATIONS__JOB_COMPLETED",
+        &mut config.notifications.job_completed,
+    )?;
+    env_parse(
+        "GDCLONE__NOTIFICATIONS__JOB_FAILED",
+        &mut config.notifications.job_failed,
+    )?;
+    env_parse(
+        "GDCLONE__NOTIFICATIONS__WATCH_ERRORS",
+        &mut config.notifications.watch_errors,
+    )?;
+    env_parse(
+        "GDCLONE__NOTIFICATIONS__WATCH_ACTIVITY",
+        &mut config.notifications.watch_activity,
+    )?;
     Ok(())
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_telegram_language() -> String {
