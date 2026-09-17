@@ -37,6 +37,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0009_ui_resume_kind",
         include_str!("../../migrations/0009_ui_resume_kind.sql"),
     ),
+    (
+        "0010_telegram_sessions",
+        include_str!("../../migrations/0010_telegram_sessions.sql"),
+    ),
 ];
 
 #[derive(Clone)]

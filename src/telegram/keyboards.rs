@@ -1,6 +1,9 @@
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup};
+#[cfg(test)]
+use teloxide::types::InlineKeyboardButtonKind;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 /// Callback data of a button, if it is a callback button.
+#[cfg(test)]
 fn callback_of(button: &InlineKeyboardButton) -> Option<&str> {
     match &button.kind {
         InlineKeyboardButtonKind::CallbackData(data) => Some(data.as_ref()),
@@ -42,6 +45,47 @@ pub fn smart_link_action_keyboard(state_id: &str, lang: UiLanguage) -> InlineKey
             InlineKeyboardButton::callback(cancel_label, format!("smart:cancel:{state_id}")),
         ],
     ])
+}
+
+pub fn unified_inspect_keyboard(
+    session_id: &str,
+    is_folder: bool,
+    watch_enabled: bool,
+    lang: UiLanguage,
+) -> InlineKeyboardMarkup {
+    let (clone_label, sync_label, dest_label, cancel_label) = match lang {
+        UiLanguage::Vi => (
+            "Sao chép ngay",
+            "⟳ Theo dõi realtime",
+            "Đổi thư mục đích",
+            "Hủy",
+        ),
+        UiLanguage::En => (
+            "Clone now",
+            "⟳ Realtime Sync",
+            "Change destination",
+            "Cancel",
+        ),
+    };
+
+    let mut rows = Vec::new();
+    if is_folder && watch_enabled {
+        rows.push(vec![
+            InlineKeyboardButton::callback(clone_label, format!("insp:clone:{session_id}")),
+            InlineKeyboardButton::callback(sync_label, format!("insp:watch:{session_id}")),
+        ]);
+    } else {
+        rows.push(vec![InlineKeyboardButton::callback(
+            clone_label,
+            format!("insp:clone:{session_id}"),
+        )]);
+    }
+    rows.push(vec![
+        InlineKeyboardButton::callback(dest_label, format!("insp:dest:{session_id}")),
+        InlineKeyboardButton::callback(cancel_label, format!("insp:cancel:{session_id}")),
+    ]);
+
+    InlineKeyboardMarkup::new(rows)
 }
 
 pub fn job_control_keyboard(job_id: &str, paused: bool, lang: UiLanguage) -> InlineKeyboardMarkup {

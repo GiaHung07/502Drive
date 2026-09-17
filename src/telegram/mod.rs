@@ -4,6 +4,7 @@ pub mod i18n;
 pub mod keyboards;
 pub mod progress;
 pub mod render;
+pub mod session;
 
 use teloxide::prelude::*;
 use teloxide::types::BotCommand;

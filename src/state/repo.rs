@@ -1,5 +1,5 @@
 use rusqlite::{Connection, OptionalExtension, Row, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::db::{Database, now_ms};
@@ -60,6 +60,18 @@ pub struct NewCallbackState {
     pub action: String,
     pub payload: String,
     pub ttl_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramSession {
+    pub id: String,
+    pub user_id: i64,
+    pub chat_id: i64,
+    pub flow: String,
+    pub step: String,
+    pub payload_json: String,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
 }
 
 impl RetryFailedSummary {
@@ -207,6 +219,102 @@ pub async fn delete_expired_callback_states(db: &Database) -> anyhow::Result<usi
             conn.execute(
                 "DELETE FROM telegram_callback_states WHERE expires_at_ms <= ?1",
                 params![now_ms()],
+            )
+        })
+        .await?)
+}
+
+pub async fn get_telegram_session(
+    db: &Database,
+    user_id: i64,
+    chat_id: i64,
+) -> anyhow::Result<Option<TelegramSession>> {
+    let now = now_ms();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT id, user_id, chat_id, flow, step, payload_json, created_at_ms, expires_at_ms
+                 FROM telegram_sessions
+                 WHERE user_id = ?1 AND chat_id = ?2 AND expires_at_ms > ?3",
+                params![user_id, chat_id, now],
+                |row| {
+                    Ok(TelegramSession {
+                        id: row.get(0)?,
+                        user_id: row.get(1)?,
+                        chat_id: row.get(2)?,
+                        flow: row.get(3)?,
+                        step: row.get(4)?,
+                        payload_json: row.get(5)?,
+                        created_at_ms: row.get(6)?,
+                        expires_at_ms: row.get(7)?,
+                    })
+                },
+            )
+            .optional()
+        })
+        .await?)
+}
+
+pub async fn upsert_telegram_session(
+    db: &Database,
+    session: TelegramSession,
+) -> anyhow::Result<()> {
+    db.conn()
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO telegram_sessions (
+                    id, user_id, chat_id, flow, step, payload_json, created_at_ms, expires_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(user_id, chat_id) DO UPDATE SET
+                    id = excluded.id,
+                    flow = excluded.flow,
+                    step = excluded.step,
+                    payload_json = excluded.payload_json,
+                    created_at_ms = excluded.created_at_ms,
+                    expires_at_ms = excluded.expires_at_ms",
+                params![
+                    session.id,
+                    session.user_id,
+                    session.chat_id,
+                    session.flow,
+                    session.step,
+                    session.payload_json,
+                    session.created_at_ms,
+                    session.expires_at_ms,
+                ],
+            )?;
+            Ok::<(), rusqlite::Error>(())
+        })
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_telegram_session(
+    db: &Database,
+    user_id: i64,
+    chat_id: i64,
+) -> anyhow::Result<()> {
+    db.conn()
+        .call(move |conn| {
+            conn.execute(
+                "DELETE FROM telegram_sessions WHERE user_id = ?1 AND chat_id = ?2",
+                params![user_id, chat_id],
+            )?;
+            Ok::<(), rusqlite::Error>(())
+        })
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_expired_telegram_sessions(db: &Database) -> anyhow::Result<usize> {
+    let now = now_ms();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.execute(
+                "DELETE FROM telegram_sessions WHERE expires_at_ms <= ?1",
+                params![now],
             )
         })
         .await?)
@@ -1526,7 +1634,7 @@ pub async fn existing_dest_for_source(
         .await?)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DestinationProfile {
     pub id: String,
     pub google_account_id: String,
@@ -1537,7 +1645,7 @@ pub struct DestinationProfile {
     pub is_default: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewDestinationProfile {
     pub google_account_id: String,
     pub label: String,

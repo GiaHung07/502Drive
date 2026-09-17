@@ -1,6 +1,8 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 use tokio::task::JoinSet;
@@ -112,6 +114,21 @@ pub enum JobControlStop {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloneSourceInspect {
+    pub file: DriveFile,
+    pub is_folder: bool,
+    pub total_files: u64,
+    pub total_folders: u64,
+    pub total_bytes: u64,
+    pub plan_truncated: bool,
+    pub can_copy_or_list: bool,
+    pub copy_requires_writer: bool,
+    pub resource_key: Option<String>,
+    pub account_email: Option<String>,
+    pub default_destination: Option<repo::DestinationProfile>,
+}
+
 #[derive(Clone)]
 pub struct CloneService {
     config: AppConfig,
@@ -137,6 +154,109 @@ impl CloneService {
             token_manager,
             copy_limiter: CopyLimiter::new(write_concurrency),
         }
+    }
+
+    /// Inspect a clone source reference: fetches Drive metadata, checks
+    /// permissions/capabilities, and traverses folders up to 2,000 items
+    /// to derive item counts, folder counts, and total byte size.
+    pub async fn inspect(&self, source_ref: &DriveReference) -> anyhow::Result<CloneSourceInspect> {
+        let token = self.token_manager.access_token("default").await?;
+        let source = self.drive.get_reference(token.as_str(), source_ref).await?;
+        let account_email = self
+            .drive
+            .about_get(token.as_str())
+            .await
+            .ok()
+            .and_then(|about| about.user)
+            .and_then(|user| user.email_address);
+
+        let default_destination = repo::default_destination_profile(&self.db, "default")
+            .await
+            .ok()
+            .flatten();
+
+        let is_folder = source.is_folder();
+        let caps = source.capabilities.as_ref();
+        let can_copy_or_list = if is_folder {
+            caps.and_then(|c| c.can_list_children).unwrap_or(true)
+        } else {
+            caps.and_then(|c| c.can_copy).unwrap_or(true)
+        };
+        let copy_requires_writer = source.copy_requires_writer_permission.unwrap_or(false);
+
+        let mut total_files = 0u64;
+        let mut total_folders = 0u64;
+        let mut total_bytes = 0u64;
+        let mut plan_truncated = false;
+
+        if is_folder {
+            let mut scanned = 0usize;
+            let mut queue = VecDeque::from([(
+                source.id.clone(),
+                source_ref
+                    .resource_key
+                    .clone()
+                    .or_else(|| source.resource_key.clone()),
+            )]);
+
+            'traversal: while let Some((folder_id, folder_res_key)) = queue.pop_front() {
+                let mut page_token = None;
+                loop {
+                    let page = self
+                        .drive
+                        .list_children(
+                            token.as_str(),
+                            &folder_id,
+                            folder_res_key.as_deref(),
+                            page_token.as_deref(),
+                        )
+                        .await?;
+                    for child in page.files {
+                        scanned += 1;
+                        if scanned >= 2_000 {
+                            plan_truncated = true;
+                            break 'traversal;
+                        }
+                        if child.is_folder() {
+                            total_folders += 1;
+                            queue.push_back((child.id.clone(), child.resource_key.clone()));
+                        } else {
+                            total_files += 1;
+                            if let Some(size) = &child.size
+                                && let Ok(bytes) = size.parse::<u64>()
+                            {
+                                total_bytes = total_bytes.saturating_add(bytes);
+                            }
+                        }
+                    }
+                    let Some(next) = page.next_page_token else {
+                        break;
+                    };
+                    page_token = Some(next);
+                }
+            }
+        } else {
+            total_files = 1;
+            if let Some(size) = &source.size
+                && let Ok(bytes) = size.parse::<u64>()
+            {
+                total_bytes = bytes;
+            }
+        }
+
+        Ok(CloneSourceInspect {
+            file: source,
+            is_folder,
+            total_files,
+            total_folders,
+            total_bytes,
+            plan_truncated,
+            can_copy_or_list,
+            copy_requires_writer,
+            resource_key: source_ref.resource_key.clone(),
+            account_email,
+            default_destination,
+        })
     }
 
     pub async fn start_one_shot(&self, request: CloneRequest) -> anyhow::Result<CloneOutcome> {

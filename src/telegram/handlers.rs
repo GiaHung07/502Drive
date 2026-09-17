@@ -37,6 +37,7 @@ use crate::{
         keyboards,
         progress::{format_duration_secs, render_progress},
         render::*,
+        session,
     },
     watch::{glob, run_initial_clone},
 };
@@ -56,6 +57,7 @@ async fn apply_user_language(config: &mut AppConfig, db: &Database, telegram_use
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ReplyPrompt {
     Clone,
@@ -106,34 +108,73 @@ impl WatchListMode {
 }
 
 impl ReplyPrompt {
-    fn marker_key(self) -> T {
+    pub(crate) fn to_session_flow_step(self) -> (session::SessionFlow, session::SessionStep) {
         match self {
-            Self::Clone => T::PromptMarkerClone,
-            Self::CloneHere => T::PromptMarkerCloneHere,
-            Self::SetDestination => T::PromptMarkerSetDestination,
-            Self::Status => T::PromptMarkerStatus,
-            Self::Pause => T::PromptMarkerPause,
-            Self::Resume => T::PromptMarkerResume,
-            Self::Cancel => T::PromptMarkerCancel,
-            Self::Retry => T::PromptMarkerRetry,
-            Self::Grant => T::PromptMarkerGrant,
-            Self::Revoke => T::PromptMarkerRevoke,
-            Self::Watch => T::PromptMarkerWatch,
-            Self::WatchStatus => T::PromptMarkerWatchStatus,
-            Self::WatchPause => T::PromptMarkerWatchPause,
-            Self::WatchResume => T::PromptMarkerWatchResume,
-            Self::WatchPolicy => T::PromptMarkerWatchPolicy,
-            Self::Unwatch => T::PromptMarkerUnwatch,
+            Self::Clone => (
+                session::SessionFlow::Clone,
+                session::SessionStep::WaitSource,
+            ),
+            Self::CloneHere => (
+                session::SessionFlow::CloneHere,
+                session::SessionStep::WaitSource,
+            ),
+            Self::SetDestination => (
+                session::SessionFlow::SetDestination,
+                session::SessionStep::WaitDestination,
+            ),
+            Self::Watch => (
+                session::SessionFlow::Watch,
+                session::SessionStep::WaitSource,
+            ),
+            Self::Status => (
+                session::SessionFlow::Prompt("status".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Pause => (
+                session::SessionFlow::Prompt("pause".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Resume => (
+                session::SessionFlow::Prompt("resume".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Cancel => (
+                session::SessionFlow::Prompt("cancel".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Retry => (
+                session::SessionFlow::Prompt("retry".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Grant => (
+                session::SessionFlow::Prompt("grant".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Revoke => (
+                session::SessionFlow::Prompt("revoke".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::WatchStatus => (
+                session::SessionFlow::Prompt("watch_status".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::WatchPause => (
+                session::SessionFlow::Prompt("watch_pause".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::WatchResume => (
+                session::SessionFlow::Prompt("watch_resume".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::WatchPolicy => (
+                session::SessionFlow::Prompt("watch_policy".into()),
+                session::SessionStep::WaitInput,
+            ),
+            Self::Unwatch => (
+                session::SessionFlow::Prompt("unwatch".into()),
+                session::SessionStep::WaitInput,
+            ),
         }
-    }
-
-    pub(crate) fn marker(self, lang: keyboards::UiLanguage) -> &'static str {
-        lang.text(self.marker_key())
-    }
-
-    fn matches_marker(self, text: &str) -> bool {
-        text.contains(self.marker(keyboards::UiLanguage::Vi))
-            || text.contains(self.marker(keyboards::UiLanguage::En))
     }
 
     fn placeholder_key(self) -> T {
@@ -180,182 +221,308 @@ pub async fn handle_message(
     };
 
     if let Ok(command) = Command::parse(&text, "gdclone_bot") {
+        let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
         return handle_command(bot, msg, config, db, user_id, command).await;
     }
 
-    if let Some(prompt) = reply_prompt_kind(&msg) {
-        return handle_reply_prompt(
+    if let Ok(Some(active_session)) = session::get_session(&db, user_id, msg.chat.id.0).await {
+        return handle_session_input(
             bot,
             msg,
             config,
             db,
             user_id,
-            prompt,
+            active_session,
             text.trim().to_string(),
         )
         .await;
     }
 
-    match parse_drive_reference(&text) {
-        Ok(reference) => {
-            if matches!(
-                reference.hinted_kind,
-                Some(crate::drive::links::DriveItemKindHint::Folder)
-            ) {
-                handle_folder_link_detected(bot, msg.chat.id, config, db, user_id, text, reference)
-                    .await?;
-            } else {
-                handle_clone_request(bot, msg.chat.id, config, db, user_id, text).await?;
-            }
-        }
-        Err(err) => {
-            bot.send_message(
-                msg.chat.id,
-                invalid_drive_link_text(ui_language(&config), &err),
-            )
-            .await?;
-        }
+    if let Some(reference) = crate::drive::id_parser::detect_drive_reference(&text) {
+        return handle_inspect_flow(
+            bot,
+            msg.chat.id,
+            config,
+            db,
+            user_id,
+            reference,
+            text.trim().to_string(),
+        )
+        .await;
     }
+
+    bot.send_message(
+        msg.chat.id,
+        match ui_language(&config) {
+            keyboards::UiLanguage::Vi => {
+                "Để sao chép hoặc theo dõi, hãy gửi liên kết Google Drive hoặc dùng /menu."
+            }
+            keyboards::UiLanguage::En => "To clone or sync, send a Google Drive link or use /menu.",
+        },
+    )
+    .await?;
+
     Ok(())
 }
 
-async fn handle_reply_prompt(
+async fn handle_session_input(
     bot: Bot,
     msg: Message,
     config: AppConfig,
     db: Database,
     user_id: i64,
-    prompt: ReplyPrompt,
+    active_session: repo::TelegramSession,
     input: String,
 ) -> ResponseResult<()> {
-    if input.trim().is_empty() {
-        send_reply_prompt(
-            &bot,
-            msg.chat.id,
-            prompt_text(prompt, ui_language(&config)),
-            prompt,
-            ui_language(&config),
-        )
-        .await?;
-        return Ok(());
-    }
+    let flow = session::SessionFlow::from_str(&active_session.flow);
+    let step = session::SessionStep::from_str(&active_session.step);
 
-    match prompt {
-        ReplyPrompt::Clone => {
-            handle_clone_request(bot, msg.chat.id, config, db, user_id, input).await?;
+    match (flow, step) {
+        (session::SessionFlow::Clone, session::SessionStep::WaitSource) => {
+            let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
+            if let Some(reference) = crate::drive::id_parser::detect_drive_reference(&input) {
+                handle_inspect_flow(bot, msg.chat.id, config, db, user_id, reference, input)
+                    .await?;
+            } else {
+                bot.send_message(
+                    msg.chat.id,
+                    invalid_drive_link_text(
+                        ui_language(&config),
+                        &anyhow::anyhow!("Không tìm thấy liên kết Google Drive hợp lệ"),
+                    ),
+                )
+                .await?;
+            }
         }
-        ReplyPrompt::CloneHere => {
+        (session::SessionFlow::CloneHere, session::SessionStep::WaitSource) => {
+            let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
             spawn_clone_now(bot, msg.chat.id, config, db, user_id, input).await?;
         }
-        ReplyPrompt::SetDestination => {
-            let text = set_destination(&config, &db, &input).await;
-            bot.send_message(
-                msg.chat.id,
-                text.unwrap_or_else(|err| format_error_for_user(&err, ui_language(&config))),
-            )
-            .await?;
+        (session::SessionFlow::Watch, session::SessionStep::WaitSource) => {
+            let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
+            if let Some(reference) = crate::drive::id_parser::detect_drive_reference(&input) {
+                handle_inspect_flow(bot, msg.chat.id, config, db, user_id, reference, input)
+                    .await?;
+            } else {
+                let text = start_watch(
+                    &bot,
+                    &config,
+                    &db,
+                    msg.chat.id.0,
+                    user_id,
+                    &input,
+                    ui_language(&config),
+                )
+                .await;
+                bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                    .await?;
+            }
         }
-        ReplyPrompt::Status => {
-            let text = show_job_status(&db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
+        (session::SessionFlow::SetDestination, session::SessionStep::WaitDestination) => {
+            let payload: Option<session::DestinationSessionPayload> =
+                serde_json::from_str(&active_session.payload_json).ok();
+            let return_to_inspect = payload.and_then(|p| p.return_to_inspect);
+
+            match crate::engine::services::DestinationService::set_default(&config, &db, &input)
+                .await
+            {
+                Ok(dest_file) => {
+                    let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
+                    let success_msg = match ui_language(&config) {
+                        keyboards::UiLanguage::Vi => {
+                            format!("✓ Đã đặt thư mục đích mặc định: {}", dest_file.name)
+                        }
+                        keyboards::UiLanguage::En => {
+                            format!("✓ Default destination set: {}", dest_file.name)
+                        }
+                    };
+                    bot.send_message(msg.chat.id, success_msg).await?;
+
+                    if let Some(inspect_payload) = return_to_inspect {
+                        if let Some(reference) = crate::drive::id_parser::detect_drive_reference(
+                            &inspect_payload.source_input,
+                        ) {
+                            handle_inspect_flow(
+                                bot,
+                                msg.chat.id,
+                                config,
+                                db,
+                                user_id,
+                                reference,
+                                inspect_payload.source_input,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+                Err(err) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        format_error_for_user(&err, ui_language(&config)),
+                    )
+                    .await?;
+                }
+            }
         }
-        ReplyPrompt::Pause => {
-            let text = pause_job(&db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
+        (session::SessionFlow::Prompt(action), session::SessionStep::WaitInput) => {
+            let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
+            handle_prompt_action(bot, msg, config, db, user_id, &action, input).await?;
         }
-        ReplyPrompt::Resume => {
-            let text = resume_job(&config, &db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::Cancel => {
-            let text = cancel_job(&db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::Retry => {
-            let text = retry_job(&config, &db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::Grant => {
-            let text = grant_user(&db, user_id, &input).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::Revoke => {
-            let text = revoke_user(&db, user_id, &input).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::Watch => {
-            let text = start_watch(
-                &bot,
-                &config,
-                &db,
-                msg.chat.id.0,
-                user_id,
-                &input,
-                ui_language(&config),
-            )
-            .await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::WatchStatus => {
-            let text =
-                watch_status_detail(&config, &db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::WatchPause => {
-            let text = pause_watch(&db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::WatchResume => {
-            let text = resume_watch(&config, &db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::WatchPolicy => {
-            let text = set_watch_policy(&db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
-        }
-        ReplyPrompt::Unwatch => {
-            let text = stop_watch(&db, user_id, &input, ui_language(&config)).await;
-            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
-                .await?;
+        _ => {
+            let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
+            if let Some(reference) = crate::drive::id_parser::detect_drive_reference(&input) {
+                handle_inspect_flow(bot, msg.chat.id, config, db, user_id, reference, input)
+                    .await?;
+            }
         }
     }
     Ok(())
 }
 
-fn reply_prompt_kind(msg: &Message) -> Option<ReplyPrompt> {
-    let text = msg.reply_to_message()?.text()?;
-    [
-        ReplyPrompt::Clone,
-        ReplyPrompt::CloneHere,
-        ReplyPrompt::SetDestination,
-        ReplyPrompt::Status,
-        ReplyPrompt::Pause,
-        ReplyPrompt::Resume,
-        ReplyPrompt::Cancel,
-        ReplyPrompt::Retry,
-        ReplyPrompt::Grant,
-        ReplyPrompt::Revoke,
-        ReplyPrompt::Watch,
-        ReplyPrompt::WatchStatus,
-        ReplyPrompt::WatchPause,
-        ReplyPrompt::WatchResume,
-        ReplyPrompt::WatchPolicy,
-        ReplyPrompt::Unwatch,
-    ]
-    .into_iter()
-    .find(|prompt| prompt.matches_marker(text))
+async fn handle_prompt_action(
+    bot: Bot,
+    msg: Message,
+    config: AppConfig,
+    db: Database,
+    user_id: i64,
+    action: &str,
+    input: String,
+) -> ResponseResult<()> {
+    match action {
+        "status" => {
+            let text = show_job_status(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "pause" => {
+            let text = pause_job(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "resume" => {
+            let text = resume_job(&config, &db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "cancel" => {
+            let text = cancel_job(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "retry" => {
+            let text = retry_job(&config, &db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "grant" => {
+            let text = grant_user(&db, user_id, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "revoke" => {
+            let text = revoke_user(&db, user_id, &input).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "watch_status" => {
+            let text =
+                watch_status_detail(&config, &db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "watch_pause" => {
+            let text = pause_watch(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "watch_resume" => {
+            let text = resume_watch(&config, &db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "watch_policy" => {
+            let text = set_watch_policy(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        "unwatch" => {
+            let text = stop_watch(&db, user_id, &input, ui_language(&config)).await;
+            bot.send_message(msg.chat.id, text.unwrap_or_else(|err| err.to_string()))
+                .await?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn handle_inspect_flow(
+    bot: Bot,
+    chat_id: ChatId,
+    config: AppConfig,
+    db: Database,
+    user_id: i64,
+    reference: DriveReference,
+    source_input: String,
+) -> ResponseResult<()> {
+    let lang = ui_language(&config);
+    let loading = bot.send_message(chat_id, clone_loading_text(lang)).await?;
+
+    let clone_service = CloneService::new(
+        config.clone(),
+        db.clone(),
+        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds)),
+    );
+
+    match clone_service.inspect(&reference).await {
+        Ok(inspect) => {
+            let dest_label = inspect
+                .default_destination
+                .as_ref()
+                .map(|d| d.label.as_str());
+            let card_text = render_unified_inspect_card(&inspect, dest_label, lang);
+
+            let payload = serde_json::to_string(&session::InspectSessionPayload {
+                inspect: inspect.clone(),
+                source_input: source_input.clone(),
+                message_id: Some(loading.id.0),
+            })
+            .unwrap_or_default();
+
+            let sess = match session::start_session(
+                &db,
+                user_id,
+                chat_id.0,
+                session::SessionFlow::Inspect,
+                session::SessionStep::Inspected,
+                payload,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(err) => {
+                    bot.edit_message_text(chat_id, loading.id, format_error_for_user(&err, lang))
+                        .await?;
+                    return Ok(());
+                }
+            };
+
+            let keyboard = keyboards::unified_inspect_keyboard(
+                &sess.id,
+                inspect.is_folder,
+                config.watch.enabled,
+                lang,
+            );
+
+            bot.edit_message_text(chat_id, loading.id, card_text)
+                .reply_markup(keyboard)
+                .await?;
+        }
+        Err(err) => {
+            bot.edit_message_text(chat_id, loading.id, clone_inspect_error(lang, &err))
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn handle_callback_query(
@@ -540,6 +707,8 @@ pub async fn handle_callback_query(
         Some(("menu", "prompt", "clone")) => {
             send_reply_prompt(
                 &bot,
+                &db,
+                user_id,
                 chat_id,
                 clone_prompt(ui_language(&config)),
                 ReplyPrompt::Clone,
@@ -551,6 +720,8 @@ pub async fn handle_callback_query(
         Some(("menu", "prompt", "clone_here")) => {
             send_reply_prompt(
                 &bot,
+                &db,
+                user_id,
                 chat_id,
                 clone_here_prompt(ui_language(&config)),
                 ReplyPrompt::CloneHere,
@@ -562,6 +733,8 @@ pub async fn handle_callback_query(
         Some(("menu", "prompt", "watch")) => {
             send_reply_prompt(
                 &bot,
+                &db,
+                user_id,
                 chat_id,
                 watch_prompt(ui_language(&config)),
                 ReplyPrompt::Watch,
@@ -573,6 +746,8 @@ pub async fn handle_callback_query(
         Some(("menu", "prompt", "set_destination")) => {
             send_reply_prompt(
                 &bot,
+                &db,
+                user_id,
                 chat_id,
                 set_destination_prompt(ui_language(&config)),
                 ReplyPrompt::SetDestination,
@@ -580,6 +755,159 @@ pub async fn handle_callback_query(
             )
             .await?;
             return Ok(());
+        }
+        Some(("insp", "clone", session_id)) => {
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s)) if s.id == session_id => s,
+                _ => {
+                    let msg_text = clone_request_expired(ui_language(&config));
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: Option<session::InspectSessionPayload> =
+                serde_json::from_str(&sess.payload_json).ok();
+            let Some(payload) = payload else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            };
+            let _ = session::clear_session(&db, user_id, chat_id.0).await;
+            if let Some(message) = query.message.as_ref() {
+                let _ = bot
+                    .edit_message_text(chat_id, message.id(), clone_starting(ui_language(&config)))
+                    .await;
+            }
+            spawn_clone_now(
+                bot.clone(),
+                chat_id,
+                config,
+                db,
+                user_id,
+                payload.source_input,
+            )
+            .await?;
+            return Ok(());
+        }
+        Some(("insp", "watch", session_id)) => {
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s)) if s.id == session_id => s,
+                _ => {
+                    let msg_text = clone_request_expired(ui_language(&config));
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: Option<session::InspectSessionPayload> =
+                serde_json::from_str(&sess.payload_json).ok();
+            let Some(payload) = payload else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            };
+            let _ = session::clear_session(&db, user_id, chat_id.0).await;
+            let res = start_watch(
+                &bot,
+                &config,
+                &db,
+                chat_id.0,
+                user_id,
+                &payload.source_input,
+                ui_language(&config),
+            )
+            .await;
+            let msg_text = res.unwrap_or_else(|err| err.to_string());
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), msg_text)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, msg_text).await?;
+            }
+            return Ok(());
+        }
+        Some(("insp", "dest", session_id)) => {
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s)) if s.id == session_id => s,
+                _ => {
+                    let msg_text = clone_request_expired(ui_language(&config));
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: Option<session::InspectSessionPayload> =
+                serde_json::from_str(&sess.payload_json).ok();
+            let Some(payload) = payload else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            };
+            let dest_payload = serde_json::to_string(&session::DestinationSessionPayload {
+                return_to_inspect: Some(payload),
+            })
+            .unwrap_or_default();
+            let _ = session::start_session(
+                &db,
+                user_id,
+                chat_id.0,
+                session::SessionFlow::SetDestination,
+                session::SessionStep::WaitDestination,
+                dest_payload,
+            )
+            .await;
+            send_reply_prompt(
+                &bot,
+                &db,
+                user_id,
+                chat_id,
+                set_destination_prompt(ui_language(&config)),
+                ReplyPrompt::SetDestination,
+                ui_language(&config),
+            )
+            .await?;
+            return Ok(());
+        }
+        Some(("insp", "cancel", _session_id)) => {
+            let _ = session::clear_session(&db, user_id, chat_id.0).await;
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(
+                    chat_id,
+                    message.id(),
+                    clone_request_cancelled(ui_language(&config)),
+                )
+                .await?;
+                return Ok(());
+            }
+            clone_request_cancelled(ui_language(&config)).to_string()
         }
         Some(("clone", "confirm", source)) => {
             let Some(source) =
@@ -1006,11 +1334,23 @@ fn parse_callback_action(data: &str) -> Option<(&str, &str, &str)> {
 
 async fn send_reply_prompt(
     bot: &Bot,
+    db: &Database,
+    user_id: i64,
     chat_id: ChatId,
     text: impl Into<String>,
     prompt: ReplyPrompt,
     lang: keyboards::UiLanguage,
 ) -> ResponseResult<()> {
+    let (flow, step) = prompt.to_session_flow_step();
+    let existing = session::get_session(db, user_id, chat_id.0)
+        .await
+        .ok()
+        .flatten();
+    let payload = match existing {
+        Some(s) if s.flow == flow.as_str() && s.step == step.as_str() => s.payload_json,
+        _ => "{}".to_string(),
+    };
+    let _ = session::start_session(db, user_id, chat_id.0, flow, step, payload).await;
     bot.send_message(chat_id, text)
         .reply_markup(
             ForceReply::new()
@@ -1098,6 +1438,8 @@ async fn handle_command(
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     clone_prompt(ui_language(&config)),
                     ReplyPrompt::Clone,
@@ -1106,12 +1448,19 @@ async fn handle_command(
                 .await?;
                 return Ok(());
             }
-            handle_clone_request(bot, msg.chat.id, config, db, user_id, input).await?;
+            if let Some(reference) = crate::drive::id_parser::detect_drive_reference(&input) {
+                handle_inspect_flow(bot, msg.chat.id, config, db, user_id, reference, input)
+                    .await?;
+            } else {
+                handle_clone_request(bot, msg.chat.id, config, db, user_id, input).await?;
+            }
         }
         Command::CloneHere(input) => {
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     clone_here_prompt(ui_language(&config)),
                     ReplyPrompt::CloneHere,
@@ -1178,6 +1527,8 @@ async fn handle_command(
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     set_destination_prompt(ui_language(&config)),
                     ReplyPrompt::SetDestination,
@@ -1296,6 +1647,8 @@ async fn handle_command(
             if job_id.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     job_id_prompt("/retry", ui_language(&config)),
                     ReplyPrompt::Retry,
@@ -1315,6 +1668,8 @@ async fn handle_command(
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     user_id_prompt("/grant", ui_language(&config)),
                     ReplyPrompt::Grant,
@@ -1331,6 +1686,8 @@ async fn handle_command(
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     user_id_prompt("/revoke", ui_language(&config)),
                     ReplyPrompt::Revoke,
@@ -1348,6 +1705,8 @@ async fn handle_command(
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     watch_prompt(ui_language(&config)),
                     ReplyPrompt::Watch,
@@ -1373,6 +1732,8 @@ async fn handle_command(
             if input.trim().is_empty() {
                 send_reply_prompt(
                     &bot,
+                    &db,
+                    user_id,
                     msg.chat.id,
                     watch_prompt(ui_language(&config)),
                     ReplyPrompt::Watch,
@@ -1896,77 +2257,6 @@ async fn spawn_clone_now(
             }
         }
     });
-    Ok(())
-}
-
-async fn handle_folder_link_detected(
-    bot: Bot,
-    chat_id: ChatId,
-    config: AppConfig,
-    db: Database,
-    telegram_user_id: i64,
-    input: String,
-    reference: crate::drive::links::DriveReference,
-) -> ResponseResult<()> {
-    let lang = ui_language(&config);
-    let default_dest = repo::default_destination_profile(&db, "default")
-        .await
-        .ok()
-        .flatten();
-
-    let dest_info = match &default_dest {
-        Some(p) => format!("{} (ID: {})", p.label, p.destination_parent_id),
-        None => match lang {
-            keyboards::UiLanguage::Vi => {
-                "Chưa đặt (dùng /set_destination hoặc nút bên dưới)".to_string()
-            }
-            keyboards::UiLanguage::En => {
-                "Not set (use /set_destination or button below)".to_string()
-            }
-        },
-    };
-
-    let text = match lang {
-        keyboards::UiLanguage::Vi => format!(
-            "Phát hiện liên kết thư mục Google Drive:
-• Nguồn: {}
-• Thư mục đích: {}
-
-Chọn tác vụ bạn muốn thực hiện:",
-            reference.file_id, dest_info
-        ),
-        keyboards::UiLanguage::En => format!(
-            "Detected Google Drive folder link:
-• Source: {}
-• Destination: {}
-
-Select an action:",
-            reference.file_id, dest_info
-        ),
-    };
-
-    let _ = repo::delete_expired_callback_states(&db).await;
-    match repo::create_callback_state(
-        &db,
-        repo::NewCallbackState {
-            telegram_user_id,
-            chat_id: chat_id.0,
-            action: "smart_link".to_string(),
-            payload: input,
-            ttl_ms: CALLBACK_STATE_TTL_MS,
-        },
-    )
-    .await
-    {
-        Ok(state_id) => {
-            bot.send_message(chat_id, text)
-                .reply_markup(keyboards::smart_link_action_keyboard(&state_id, lang))
-                .await?;
-        }
-        Err(err) => {
-            bot.send_message(chat_id, err.to_string()).await?;
-        }
-    }
     Ok(())
 }
 
@@ -4159,13 +4449,10 @@ mod tests {
         let en = keyboards::UiLanguage::En;
 
         assert!(clone_prompt(vi).contains("ô trả lời"));
-        assert!(clone_prompt(vi).contains(ReplyPrompt::Clone.marker(vi)));
         assert!(set_destination_prompt(vi).contains("Đích là folder"));
         assert!(watch_prompt(vi).contains("nguồn rồi đích"));
-        assert!(watch_prompt(vi).contains(ReplyPrompt::Watch.marker(vi)));
         assert!(watch_id_prompt("/watch_status", vi).contains("/watches"));
         assert!(watch_policy_prompt(vi).contains("versioned_copy"));
-        assert!(watch_policy_prompt(vi).contains(ReplyPrompt::WatchPolicy.marker(vi)));
         assert_eq!(ReplyPrompt::Clone.placeholder(vi), "Dán link nguồn Drive");
 
         assert!(clone_prompt(en).contains("reply to this message"));
@@ -4177,7 +4464,7 @@ mod tests {
     }
 
     #[test]
-    fn reply_prompt_markers_are_unique() {
+    fn reply_prompt_session_mapping_is_defined() {
         let prompts = [
             ReplyPrompt::Clone,
             ReplyPrompt::CloneHere,
@@ -4196,20 +4483,10 @@ mod tests {
             ReplyPrompt::WatchPolicy,
             ReplyPrompt::Unwatch,
         ];
-        for (idx, prompt) in prompts.iter().enumerate() {
-            assert!(!prompt.marker(keyboards::UiLanguage::Vi).is_empty());
-            assert!(!prompt.marker(keyboards::UiLanguage::En).is_empty());
-            assert_eq!(
-                prompts
-                    .iter()
-                    .filter(|other| {
-                        other.marker(keyboards::UiLanguage::Vi)
-                            == prompt.marker(keyboards::UiLanguage::Vi)
-                    })
-                    .count(),
-                1,
-                "duplicate marker at index {idx}"
-            );
+        for prompt in prompts {
+            let (flow, step) = prompt.to_session_flow_step();
+            assert!(!flow.as_str().is_empty());
+            assert!(!step.as_str().is_empty());
         }
     }
 
