@@ -196,7 +196,7 @@ The complete list is available in the bot via `/help`.
 - **Keyboard-first** — `⌘K` opens the command palette.
 
 <div align="center">
-<img src="docs/assets/screenshot-dashboard-light.png" alt="502Drive desktop dashboard (light theme)" width="800">
+<!-- Light-theme screenshot omitted intentionally; the app ships dark-first -->
 </div>
 
 ## Security & privacy

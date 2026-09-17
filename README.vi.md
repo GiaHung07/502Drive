@@ -196,7 +196,7 @@ Danh sách đầy đủ có sẵn trong bot qua `/help`.
 - **Ưu tiên bàn phím** — `⌘K` mở command palette.
 
 <div align="center">
-<img src="docs/assets/screenshot-dashboard-light.png" alt="Dashboard desktop của 502Drive (giao diện sáng)" width="800">
+<!-- Ảnh giao diện sáng được lược bỏ có chủ đích; ứng dụng mặc định dark-first -->
 </div>
 
 ## Bảo mật & quyền riêng tư

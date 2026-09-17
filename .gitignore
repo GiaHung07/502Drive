@@ -28,3 +28,4 @@ dist/
 .video_agent/
 *.tsbuildinfo
 .local-notes/
+.zcode/
