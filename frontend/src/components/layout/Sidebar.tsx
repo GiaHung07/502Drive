@@ -96,16 +96,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     : 'text-text-secondary hover:text-text-primary hover:bg-bg-input/70'
                 )}
               >
-                {/* Active indicator pill */}
+                {/* Active indicator — inset, vertically centered, slides between items */}
                 {isActive && (
                   <motion.span
                     layoutId="sidebar-active-pill"
-                    className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-accent"
+                    transition={{ type: 'spring', stiffness: 500, damping: 34 }}
+                    className="absolute left-1.5 top-1/2 -translate-y-1/2 h-4 w-[3px] rounded-full bg-accent"
                   />
                 )}
                 <Icon
                   className={cn(
-                    'h-4.5 w-4.5 shrink-0 stroke-[1.8]',
+                    'h-4.5 w-4.5 shrink-0 stroke-[1.8] transition-transform duration-200 motion-safe:group-hover:scale-110 motion-safe:group-active:scale-90',
                     isActive ? 'text-accent' : 'text-text-secondary group-hover:text-text-primary'
                   )}
                 />
