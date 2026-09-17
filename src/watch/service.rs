@@ -43,6 +43,8 @@ pub struct CreateWatchParams {
     /// Exclude globs applied to the watch (JSON-serialized into the
     /// `exclude_globs` column). Invalid globs are rejected.
     pub exclude_globs: Vec<String>,
+    /// Optional content update policy override (defaults to config default).
+    pub content_update_policy: Option<String>,
 }
 
 pub struct CreatedWatch {
@@ -127,11 +129,15 @@ pub async fn create_watch(
             source_drive_id: source.drive_id.clone(),
             destination_root_id: dest.id.clone(),
             destination_drive_id: dest.drive_id.clone(),
-            content_update_policy: config.watch.default_content_update_policy.clone(),
+            content_update_policy: params
+                .content_update_policy
+                .unwrap_or_else(|| config.watch.default_content_update_policy.clone()),
             deletion_policy: config.watch.default_deletion_policy.clone(),
             move_out_policy: config.watch.default_move_out_policy.clone(),
             exclude_globs: super::glob::serialize_glob_list(&params.exclude_globs),
             baseline_sequence: cursor.last_event_sequence,
+            source_name: Some(source.name.clone()),
+            destination_name: Some(dest.name.clone()),
         },
     )
     .await

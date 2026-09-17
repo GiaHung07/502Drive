@@ -246,6 +246,9 @@ mod tests {
             last_consumed_sequence: 0,
             created_at_ms: 0,
             updated_at_ms: 0,
+            source_name: None,
+            destination_name: None,
+            last_consumed_at_ms: None,
         }
     }
 

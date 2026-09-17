@@ -390,6 +390,8 @@ pub struct JobDetail {
     pub error_summary: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    pub source_name: Option<String>,
+    pub destination_name: Option<String>,
 }
 
 fn job_detail_from_row(row: &Row<'_>) -> rusqlite::Result<JobDetail> {
@@ -406,6 +408,8 @@ fn job_detail_from_row(row: &Row<'_>) -> rusqlite::Result<JobDetail> {
         error_summary: row.get(9)?,
         created_at_ms: row.get(10)?,
         updated_at_ms: row.get(11)?,
+        source_name: row.get(12)?,
+        destination_name: row.get(13)?,
     })
 }
 
@@ -553,7 +557,8 @@ pub async fn job_detail_for_user(
             conn.query_row(
                 "SELECT id, kind, status, source_root_id, destination_parent_id,
                         total_discovered, completed_items, failed_items, skipped_items,
-                        error_summary, created_at_ms, updated_at_ms
+                        error_summary, created_at_ms, updated_at_ms,
+                        source_name, destination_name
                  FROM jobs
                  WHERE telegram_user_id = ?1 AND id = ?2",
                 params![telegram_user_id, job_id],
@@ -577,7 +582,8 @@ pub async fn job_details_for_user_prefix(
             let mut stmt = conn.prepare(
                 "SELECT id, kind, status, source_root_id, destination_parent_id,
                         total_discovered, completed_items, failed_items, skipped_items,
-                        error_summary, created_at_ms, updated_at_ms
+                        error_summary, created_at_ms, updated_at_ms,
+                        source_name, destination_name
                  FROM jobs
                  WHERE telegram_user_id = ?1 AND id LIKE ?2
                  ORDER BY updated_at_ms DESC, id
@@ -605,7 +611,8 @@ pub async fn job_detail_for_progress_message(
             conn.query_row(
                 "SELECT id, kind, status, source_root_id, destination_parent_id,
                         total_discovered, completed_items, failed_items, skipped_items,
-                        error_summary, created_at_ms, updated_at_ms
+                        error_summary, created_at_ms, updated_at_ms,
+                        source_name, destination_name
                  FROM jobs
                  WHERE telegram_user_id = ?1 AND progress_message_id = ?2
                  ORDER BY created_at_ms DESC
@@ -962,6 +969,8 @@ pub async fn create_job(
             destination_drive_id: None,
             progress_message_id: None,
             duplicate_policy: "skip_same_source".to_string(),
+            source_name: None,
+            destination_name: None,
         },
     )
     .await
@@ -979,6 +988,8 @@ pub struct NewJob {
     pub destination_drive_id: Option<String>,
     pub progress_message_id: Option<i32>,
     pub duplicate_policy: String,
+    pub source_name: Option<String>,
+    pub destination_name: Option<String>,
 }
 
 pub async fn create_job_with_metadata(db: &Database, job: NewJob) -> anyhow::Result<String> {
@@ -992,12 +1003,14 @@ pub async fn create_job_with_metadata(db: &Database, job: NewJob) -> anyhow::Res
                     id, kind, telegram_user_id, chat_id, google_account_id,
                     source_root_id, source_resource_key, source_drive_id,
                     destination_parent_id, destination_drive_id, status,
-                    duplicate_policy, shortcut_policy, progress_message_id, created_at_ms, updated_at_ms
+                    duplicate_policy, shortcut_policy, progress_message_id,
+                    source_name, destination_name, created_at_ms, updated_at_ms
                  ) VALUES (
                     ?1, 'one_shot', ?2, ?3, ?4,
                     ?5, ?6, ?7,
                     ?8, ?9, 'queued',
-                    ?10, 'preserve', ?11, ?12, ?12
+                    ?10, 'preserve', ?11,
+                    ?12, ?13, ?14, ?14
                  )",
                 params![
                     id_for_db,
@@ -1011,6 +1024,8 @@ pub async fn create_job_with_metadata(db: &Database, job: NewJob) -> anyhow::Res
                     job.destination_drive_id,
                     job.duplicate_policy,
                     job.progress_message_id,
+                    job.source_name,
+                    job.destination_name,
                     now,
                 ],
             )?;
@@ -2294,6 +2309,9 @@ pub struct WatchSubscription {
     pub last_consumed_sequence: i64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    pub source_name: Option<String>,
+    pub destination_name: Option<String>,
+    pub last_consumed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -2313,6 +2331,8 @@ pub struct NewWatchSubscription {
     /// JSON string array of exclude globs, e.g. `["*.tmp", "~$*"]`.
     pub exclude_globs: String,
     pub baseline_sequence: i64,
+    pub source_name: Option<String>,
+    pub destination_name: Option<String>,
 }
 
 pub async fn create_watch_subscription(
@@ -2330,13 +2350,17 @@ pub async fn create_watch_subscription(
                     source_root_id, source_resource_key, source_drive_id,
                     destination_root_id, destination_drive_id,
                     status, content_update_policy, deletion_policy, move_out_policy,
-                    exclude_globs, baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms
+                    exclude_globs, baseline_sequence, last_consumed_sequence,
+                    source_name, destination_name, last_consumed_at_ms,
+                    created_at_ms, updated_at_ms
                  ) VALUES (
                     ?1, ?2, ?3, ?4, ?5,
                     ?6, ?7, ?8,
                     ?9, ?10,
                     'initializing', ?11, ?12, ?13,
-                    ?14, ?15, ?15, ?16, ?16
+                    ?14, ?15, ?15,
+                    ?16, ?17, NULL,
+                    ?18, ?18
                  )",
                 params![
                     id_for_db,
@@ -2354,6 +2378,8 @@ pub async fn create_watch_subscription(
                     sub.move_out_policy,
                     sub.exclude_globs,
                     sub.baseline_sequence,
+                    sub.source_name,
+                    sub.destination_name,
                     now,
                 ],
             )?;
@@ -2384,6 +2410,9 @@ fn row_to_watch(row: &rusqlite::Row<'_>) -> rusqlite::Result<WatchSubscription> 
         last_consumed_sequence: row.get(16)?,
         created_at_ms: row.get(17)?,
         updated_at_ms: row.get(18)?,
+        source_name: row.get(19)?,
+        destination_name: row.get(20)?,
+        last_consumed_at_ms: row.get(21)?,
     })
 }
 
@@ -2391,7 +2420,8 @@ const WATCH_COLS: &str = "id, google_account_id, cursor_id, telegram_user_id, ch
     source_root_id, source_resource_key, source_drive_id,
     destination_root_id, destination_drive_id, status,
     content_update_policy, deletion_policy, move_out_policy,
-    exclude_globs, baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms";
+    exclude_globs, baseline_sequence, last_consumed_sequence, created_at_ms, updated_at_ms,
+    source_name, destination_name, last_consumed_at_ms";
 
 pub async fn list_watches_for_user(
     db: &Database,
@@ -2555,6 +2585,9 @@ pub struct WatchSummaryRow {
     pub last_consumed_sequence: i64,
     pub cursor_last_event_sequence: i64,
     pub updated_at_ms: i64,
+    pub source_name: Option<String>,
+    pub destination_name: Option<String>,
+    pub last_consumed_at_ms: Option<i64>,
 }
 
 pub fn watch_summaries_sync(conn: &Connection) -> rusqlite::Result<Vec<WatchSummaryRow>> {
@@ -2562,7 +2595,7 @@ pub fn watch_summaries_sync(conn: &Connection) -> rusqlite::Result<Vec<WatchSumm
         "SELECT w.id, w.source_root_id, w.destination_root_id, w.status, w.exclude_globs,
                 w.baseline_sequence, w.last_consumed_sequence,
                 COALESCE(c.last_event_sequence, w.last_consumed_sequence),
-                w.updated_at_ms
+                w.updated_at_ms, w.source_name, w.destination_name, w.last_consumed_at_ms
          FROM watch_subscriptions w
          LEFT JOIN change_cursors c ON c.id = w.cursor_id
          ORDER BY w.updated_at_ms DESC",
@@ -2582,6 +2615,9 @@ pub fn watch_summaries_sync(conn: &Connection) -> rusqlite::Result<Vec<WatchSumm
                 cursor_last_event_sequence: cursor_last,
                 backlog_count: (cursor_last - last_consumed).max(0),
                 updated_at_ms: row.get(8)?,
+                source_name: row.get(9)?,
+                destination_name: row.get(10)?,
+                last_consumed_at_ms: row.get(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -2628,16 +2664,35 @@ pub async fn advance_watch_consumed_sequence(
     let watch_id = watch_id.to_string();
     db.conn()
         .call(move |conn| {
+            let now = now_ms();
             conn.execute(
                 "UPDATE watch_subscriptions
-                 SET last_consumed_sequence = ?1, updated_at_ms = ?2
+                 SET last_consumed_sequence = ?1, last_consumed_at_ms = ?2, updated_at_ms = ?2
                  WHERE id = ?3",
-                params![last_consumed_sequence, now_ms(), watch_id],
+                params![last_consumed_sequence, now, watch_id],
             )?;
             Ok::<(), rusqlite::Error>(())
         })
         .await?;
     Ok(())
+}
+
+pub async fn count_active_source_mappings_for_watch(
+    db: &Database,
+    watch_id: &str,
+) -> anyhow::Result<i64> {
+    let watch_id = watch_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM source_mappings WHERE scope_type = 'watch' AND scope_id = ?1 AND status = 'active'",
+                params![watch_id],
+                |row| row.get(0),
+            )?;
+            Ok::<i64, rusqlite::Error>(count)
+        })
+        .await?)
 }
 
 pub async fn pause_watch_for_user(

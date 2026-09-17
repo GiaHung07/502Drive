@@ -2,6 +2,7 @@
 
 use crate::state::repo;
 use crate::telegram::handlers::WatchListMode;
+use crate::telegram::i18n::TextKey as T;
 use crate::telegram::keyboards;
 use crate::telegram::render::{progress_status_field, push_field, short_id};
 
@@ -28,13 +29,15 @@ pub(crate) fn render_watch_detail(
     destination: &str,
     cursor_seq: i64,
     pending_events: i64,
+    mapped_files: i64,
+    now_ms: i64,
 ) -> String {
     let mut lines = vec![watch_title().to_string(), "━━━━━━━━━━".to_string()];
     push_field(&mut lines, watch_id_field(lang), &watch.id);
     push_field(
         &mut lines,
         progress_status_field(lang),
-        watch_status_label(lang, &watch.status),
+        &format!("● {}", watch_status_label(lang, &watch.status)),
     );
     push_field(
         &mut lines,
@@ -45,6 +48,30 @@ pub(crate) fn render_watch_detail(
         &mut lines,
         watch_destination_field(lang),
         &format!("{destination} ({})", watch.destination_root_id),
+    );
+
+    let sync_time = match watch.last_consumed_at_ms {
+        Some(ts) => {
+            let elapsed_secs = (now_ms.saturating_sub(ts) / 1000).max(0);
+            format_sync_elapsed(lang, elapsed_secs as u64)
+        }
+        None => match lang {
+            keyboards::UiLanguage::Vi => "Chưa có sự kiện nào".to_string(),
+            keyboards::UiLanguage::En => "No events yet".to_string(),
+        },
+    };
+    push_field(&mut lines, watch_last_synced_field(lang), &sync_time);
+
+    let mapped_label = match lang {
+        keyboards::UiLanguage::Vi => format!("{mapped_files} tệp"),
+        keyboards::UiLanguage::En => format!("{mapped_files} files"),
+    };
+    push_field(&mut lines, watch_mapped_files_field(lang), &mapped_label);
+
+    push_field(
+        &mut lines,
+        watch_pending_field(lang),
+        &pending_events.to_string(),
     );
     push_field(
         &mut lines,
@@ -75,11 +102,6 @@ pub(crate) fn render_watch_detail(
         &mut lines,
         watch_cursor_field(lang),
         &cursor_seq.to_string(),
-    );
-    push_field(
-        &mut lines,
-        watch_pending_field(lang),
-        &pending_events.to_string(),
     );
     lines.join("\n")
 }
@@ -181,13 +203,44 @@ pub(crate) fn watch_pending_field(lang: keyboards::UiLanguage) -> &'static str {
     }
 }
 
+pub(crate) fn format_sync_elapsed(lang: keyboards::UiLanguage, secs: u64) -> String {
+    match lang {
+        keyboards::UiLanguage::Vi => {
+            if secs < 60 {
+                format!("Vừa đồng bộ {secs} giây trước")
+            } else if secs < 3600 {
+                format!("Đồng bộ {} phút trước", secs / 60)
+            } else {
+                format!("Đồng bộ {} giờ trước", secs / 3600)
+            }
+        }
+        keyboards::UiLanguage::En => {
+            if secs < 60 {
+                format!("Synced {secs}s ago")
+            } else if secs < 3600 {
+                format!("Synced {}m ago", secs / 60)
+            } else {
+                format!("Synced {}h ago", secs / 3600)
+            }
+        }
+    }
+}
+
+pub(crate) fn watch_last_synced_field(lang: keyboards::UiLanguage) -> &'static str {
+    lang.text(T::WatchLastSynced)
+}
+
+pub(crate) fn watch_mapped_files_field(lang: keyboards::UiLanguage) -> &'static str {
+    lang.text(T::WatchMappedFiles)
+}
+
 pub(crate) fn vi_watch_status(status: &str) -> &str {
     match status {
-        "active" => "hoạt động",
+        "active" => "đang theo dõi",
         "paused" => "tạm dừng",
         "initializing" => "đang khởi tạo",
         "catching_up" => "đang bắt kịp",
-        "degraded" => "bi lỗi",
+        "degraded" => "bị lỗi",
         "needs_reconcile" => "cần đồng bộ lại",
         "stopped" => "đã dừng",
         other => other,
@@ -199,7 +252,7 @@ pub(crate) fn watch_status_label(lang: keyboards::UiLanguage, status: &str) -> &
         return vi_watch_status(status);
     }
     match status {
-        "active" => "active",
+        "active" => "watching",
         "paused" => "paused",
         "initializing" => "initializing",
         "catching_up" => "catching up",
@@ -212,9 +265,9 @@ pub(crate) fn watch_status_label(lang: keyboards::UiLanguage, status: &str) -> &
 
 pub(crate) fn vi_content_update_policy(policy: &str) -> &str {
     match policy {
-        "versioned_copy" => "tạo bản copy mới",
-        "replace_copy" => "copy mới rồi đưa bản cũ vào thùng rác",
-        "manual_confirmation" => "dừng để xác nhận thủ công",
+        "versioned_copy" => "Tạo phiên bản mới",
+        "replace_copy" => "Thay thế bản cũ",
+        "manual_confirmation" => "Hỏi trước khi cập nhật",
         other => other,
     }
 }
@@ -224,17 +277,17 @@ pub(crate) fn content_update_policy_label(lang: keyboards::UiLanguage, policy: &
         return vi_content_update_policy(policy);
     }
     match policy {
-        "versioned_copy" => "create a new copy",
-        "replace_copy" => "copy new, then trash old copy",
-        "manual_confirmation" => "stop for manual confirmation",
+        "versioned_copy" => "Create new version",
+        "replace_copy" => "Replace old copy",
+        "manual_confirmation" => "Ask before updating",
         other => other,
     }
 }
 
 pub(crate) fn vi_deletion_policy(policy: &str) -> &str {
     match policy {
-        "preserve_destination" => "giữ bản copy ở đích",
-        "manual_confirmation" => "dừng để xác nhận thủ công",
+        "preserve_destination" => "Giữ bản ở đích",
+        "manual_confirmation" => "Hỏi trước khi xóa",
         other => other,
     }
 }
@@ -244,16 +297,16 @@ pub(crate) fn deletion_policy_label(lang: keyboards::UiLanguage, policy: &str) -
         return vi_deletion_policy(policy);
     }
     match policy {
-        "preserve_destination" => "keep destination copy",
-        "manual_confirmation" => "stop for manual confirmation",
+        "preserve_destination" => "Keep destination copy",
+        "manual_confirmation" => "Ask before deleting",
         other => other,
     }
 }
 
 pub(crate) fn vi_move_out_policy(policy: &str) -> &str {
     match policy {
-        "detach" => "tách khỏi watch, không xoá bản copy",
-        "keep_following" => "tiếp tục theo dõi file đó",
+        "detach" => "Ngừng theo dõi file",
+        "keep_following" => "Tiếp tục theo dõi",
         other => other,
     }
 }
@@ -263,12 +316,75 @@ pub(crate) fn move_out_policy_label(lang: keyboards::UiLanguage, policy: &str) -
         return vi_move_out_policy(policy);
     }
     match policy {
-        "detach" => "detach from watch, keep copy",
-        "keep_following" => "keep following this file",
+        "detach" => "Stop tracking file",
+        "keep_following" => "Keep following",
         other => other,
     }
 }
 
+pub(crate) fn render_watch_create_confirm(
+    lang: keyboards::UiLanguage,
+    source_name: &str,
+    source_id: &str,
+    dest_name: &str,
+    dest_id: &str,
+    content_policy: &str,
+    deletion_policy: &str,
+) -> String {
+    let title = lang.text(T::ConfirmWatchTitle);
+    let flow_label = lang.text(T::WatchDirectionOneWay);
+    let mut lines = vec![title.to_string(), "━━━━━━━━━━".to_string()];
+    push_field(
+        &mut lines,
+        watch_source_field(lang),
+        &format!("{source_name} ({})", short_id(source_id)),
+    );
+    push_field(
+        &mut lines,
+        watch_destination_field(lang),
+        &format!("{dest_name} ({})", short_id(dest_id)),
+    );
+    lines.push(flow_label.to_string());
+    lines.push(String::new());
+    push_field(
+        &mut lines,
+        watch_content_policy_field(lang),
+        content_update_policy_label(lang, content_policy),
+    );
+    push_field(
+        &mut lines,
+        watch_deletion_policy_field(lang),
+        deletion_policy_label(lang, deletion_policy),
+    );
+    lines.join("\n")
+}
+
+pub(crate) fn render_watch_options(lang: keyboards::UiLanguage) -> String {
+    let title = lang.text(T::WatchOptionsTitle);
+    let help = lang.text(T::WatchOptionsHelp);
+    let (v_desc, r_desc, m_desc) = match lang {
+        keyboards::UiLanguage::Vi => (
+            "• Tạo bản mới: Giữ cả 2 bản, đánh số phiên bản",
+            "• Thay bản cũ: Copy bản mới, đưa bản cũ vào thùng rác",
+            "• Hỏi trước: Tạm dừng để bạn quyết định",
+        ),
+        keyboards::UiLanguage::En => (
+            "• New version: Keep both, add version suffix",
+            "• Replace old: Copy new, move old to trash",
+            "• Ask first: Pause and ask for manual decision",
+        ),
+    };
+    vec![
+        title.to_string(),
+        "━━━━━━━━━━".to_string(),
+        help.to_string(),
+        String::new(),
+        v_desc.to_string(),
+        r_desc.to_string(),
+        m_desc.to_string(),
+    ]
+    .join("\n")
+}
 pub(crate) fn watch_disabled_text(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => {

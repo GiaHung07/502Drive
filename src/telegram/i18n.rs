@@ -152,6 +152,16 @@ pub enum TextKey {
     ViewErrors,
     ViewReport,
     Watches,
+    ConfirmWatchTitle,
+    WatchDirectionOneWay,
+    StartWatchingButton,
+    WatchOptionsButton,
+    WatchOptionsTitle,
+    WatchOptionsHelp,
+    WatchCreatedTitle,
+    WatchCreatedSummary,
+    WatchLastSynced,
+    WatchMappedFiles,
 }
 
 impl TextKey {
@@ -289,6 +299,16 @@ impl TextKey {
         Self::ViewErrors,
         Self::ViewReport,
         Self::Watches,
+        Self::ConfirmWatchTitle,
+        Self::WatchDirectionOneWay,
+        Self::StartWatchingButton,
+        Self::WatchOptionsButton,
+        Self::WatchOptionsTitle,
+        Self::WatchOptionsHelp,
+        Self::WatchCreatedTitle,
+        Self::WatchCreatedSummary,
+        Self::WatchLastSynced,
+        Self::WatchMappedFiles,
     ];
 
     fn text(self, lang: UiLanguage) -> &'static str {
@@ -715,6 +735,38 @@ impl TextKey {
             (UiLanguage::En, Self::ViewReport) => "View report",
             (UiLanguage::Vi, Self::Watches) => "Đồng bộ (Sync)",
             (UiLanguage::En, Self::Watches) => "Sync",
+            (UiLanguage::Vi, Self::ConfirmWatchTitle) => "XÁC NHẬN THEO DÕI REALTIME",
+            (UiLanguage::En, Self::ConfirmWatchTitle) => "CONFIRM REALTIME WATCH",
+            (UiLanguage::Vi, Self::WatchDirectionOneWay) => {
+                "Chiều đồng bộ: Nguồn ↓ một chiều → Đích"
+            }
+            (UiLanguage::En, Self::WatchDirectionOneWay) => {
+                "Direction: Source ↓ one-way → Destination"
+            }
+            (UiLanguage::Vi, Self::StartWatchingButton) => "✓ Bắt đầu theo dõi",
+            (UiLanguage::En, Self::StartWatchingButton) => "✓ Start watching",
+            (UiLanguage::Vi, Self::WatchOptionsButton) => "⚙ Tuỳ chọn",
+            (UiLanguage::En, Self::WatchOptionsButton) => "⚙ Options",
+            (UiLanguage::Vi, Self::WatchOptionsTitle) => "TÙY CHỌN THEO DÕI REALTIME",
+            (UiLanguage::En, Self::WatchOptionsTitle) => "REALTIME WATCH OPTIONS",
+            (UiLanguage::Vi, Self::WatchOptionsHelp) => {
+                "Chọn chính sách khi nội dung tệp ở nguồn thay đổi:"
+            }
+            (UiLanguage::En, Self::WatchOptionsHelp) => {
+                "Choose policy when source file content changes:"
+            }
+            (UiLanguage::Vi, Self::WatchCreatedTitle) => "✓ ĐÃ BẬT THEO DÕI REALTIME",
+            (UiLanguage::En, Self::WatchCreatedTitle) => "✓ REALTIME WATCH ENABLED",
+            (UiLanguage::Vi, Self::WatchCreatedSummary) => {
+                "Đã thiết lập theo dõi một chiều. Engine sẽ tự động đồng bộ khi nguồn có thay đổi."
+            }
+            (UiLanguage::En, Self::WatchCreatedSummary) => {
+                "One-way watch configured. Engine will automatically sync changes from source."
+            }
+            (UiLanguage::Vi, Self::WatchLastSynced) => "Đồng bộ",
+            (UiLanguage::En, Self::WatchLastSynced) => "Sync status",
+            (UiLanguage::Vi, Self::WatchMappedFiles) => "Đã ánh xạ",
+            (UiLanguage::En, Self::WatchMappedFiles) => "Mapped files",
         }
     }
 }

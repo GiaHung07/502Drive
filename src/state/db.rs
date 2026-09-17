@@ -41,6 +41,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0010_telegram_sessions",
         include_str!("../../migrations/0010_telegram_sessions.sql"),
     ),
+    (
+        "0011_watch_names_sync_time",
+        include_str!("../../migrations/0011_watch_names_sync_time.sql"),
+    ),
 ];
 
 #[derive(Clone)]

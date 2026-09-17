@@ -97,6 +97,18 @@ pub struct DestinationSessionPayload {
     pub resource_key: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchCreateSessionPayload {
+    pub source_input: String,
+    pub source_name: String,
+    pub source_id: String,
+    pub dest_name: String,
+    pub dest_id: String,
+    pub content_policy: String,
+    pub deletion_policy: String,
+    pub message_id: Option<i32>,
+}
+
 pub async fn get_session(
     db: &Database,
     user_id: i64,

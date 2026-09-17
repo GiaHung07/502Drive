@@ -398,6 +398,84 @@ pub fn watch_unwatch_confirm_keyboard(watch_id: &str, lang: UiLanguage) -> Inlin
     ])
 }
 
+pub fn confirm_create_watch_keyboard(session_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
+    debug_assert!(format!("wconf:start:{session_id}").len() <= 64);
+    debug_assert!(format!("wconf:opt:{session_id}").len() <= 64);
+    debug_assert!(format!("wconf:cancel:{session_id}").len() <= 64);
+
+    InlineKeyboardMarkup::new([
+        vec![
+            InlineKeyboardButton::callback(
+                lang.text(T::StartWatchingButton),
+                format!("wconf:start:{session_id}"),
+            ),
+            InlineKeyboardButton::callback(
+                lang.text(T::WatchOptionsButton),
+                format!("wconf:opt:{session_id}"),
+            ),
+        ],
+        vec![InlineKeyboardButton::callback(
+            lang.text(T::Cancel),
+            format!("wconf:cancel:{session_id}"),
+        )],
+    ])
+}
+
+pub fn watch_options_keyboard(
+    session_id: &str,
+    current_policy: &str,
+    lang: UiLanguage,
+) -> InlineKeyboardMarkup {
+    debug_assert!(format!("wopt:pol:{session_id}:v").len() <= 64);
+    debug_assert!(format!("wopt:back:{session_id}").len() <= 64);
+
+    let v_mark = if current_policy == "versioned_copy" {
+        "● "
+    } else {
+        "○ "
+    };
+    let r_mark = if current_policy == "replace_copy" {
+        "● "
+    } else {
+        "○ "
+    };
+    let m_mark = if current_policy == "manual_confirmation" {
+        "● "
+    } else {
+        "○ "
+    };
+
+    let (v_label, r_label, m_label) = match lang {
+        UiLanguage::Vi => (
+            format!("{v_mark}Tạo bản mới"),
+            format!("{r_mark}Thay bản cũ"),
+            format!("{m_mark}Hỏi trước"),
+        ),
+        UiLanguage::En => (
+            format!("{v_mark}New version"),
+            format!("{r_mark}Replace old"),
+            format!("{m_mark}Ask first"),
+        ),
+    };
+
+    let back_label = match lang {
+        UiLanguage::Vi => "◀ Quay lại",
+        UiLanguage::En => "◀ Back",
+    };
+
+    InlineKeyboardMarkup::new([
+        vec![
+            InlineKeyboardButton::callback(v_label, format!("wopt:pol:{session_id}:v")),
+            InlineKeyboardButton::callback(r_label, format!("wopt:pol:{session_id}:r")),
+            InlineKeyboardButton::callback(m_label, format!("wopt:pol:{session_id}:m")),
+        ],
+        vec![InlineKeyboardButton::callback(
+            back_label,
+            format!("wopt:back:{session_id}"),
+        )],
+    ])
+}
+
 /// One row per destination, label truncated to 32 chars.
 /// Callback: `dest:select:<profile_id>`
 pub fn recent_destinations_keyboard(

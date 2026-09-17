@@ -301,6 +301,7 @@ async fn process_watch(
             telegram_user_id: 0,
             chat_id: 0,
             exclude_globs: payload.exclude_globs.clone(),
+            content_update_policy: None,
         },
     )
     .await

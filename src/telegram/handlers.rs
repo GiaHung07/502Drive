@@ -829,10 +829,21 @@ pub async fn handle_callback_query(
             return Ok(());
         }
         Some(("insp", "watch", session_id)) => {
+            let lang = ui_language(&config);
+            if !config.watch.enabled {
+                let msg_text = watch_disabled_text(lang);
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            }
             let sess = match session::get_session(&db, user_id, chat_id.0).await {
                 Ok(Some(s)) if s.id == session_id => s,
                 _ => {
-                    let msg_text = clone_request_expired(ui_language(&config));
+                    let msg_text = clone_request_expired(lang);
                     if let Some(message) = query.message.as_ref() {
                         bot.edit_message_text(chat_id, message.id(), msg_text)
                             .await?;
@@ -845,7 +856,7 @@ pub async fn handle_callback_query(
             let payload: Option<session::InspectSessionPayload> =
                 serde_json::from_str(&sess.payload_json).ok();
             let Some(payload) = payload else {
-                let msg_text = clone_request_expired(ui_language(&config));
+                let msg_text = clone_request_expired(lang);
                 if let Some(message) = query.message.as_ref() {
                     bot.edit_message_text(chat_id, message.id(), msg_text)
                         .await?;
@@ -854,15 +865,134 @@ pub async fn handle_callback_query(
                 }
                 return Ok(());
             };
+            if !payload.inspect.is_folder {
+                let msg_text = watch_source_must_be_folder(lang);
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            }
+            let dest = match payload.inspect.default_destination.as_ref() {
+                Some(d) => (d.label.clone(), d.destination_parent_id.clone()),
+                None => match repo::default_destination_profile(&db, "default")
+                    .await
+                    .ok()
+                    .flatten()
+                {
+                    Some(profile) => (profile.label, profile.destination_parent_id),
+                    None => {
+                        let msg_text = match lang {
+                            keyboards::UiLanguage::Vi => {
+                                "Chưa cấu hình thư mục đích mặc định.\nVui lòng cài đặt thư mục đích trước bằng lệnh /set_destination <link_đích>."
+                            }
+                            keyboards::UiLanguage::En => {
+                                "No default destination configured.\nPlease set a default destination first using /set_destination <dest_link>."
+                            }
+                        };
+                        if let Some(message) = query.message.as_ref() {
+                            bot.edit_message_text(chat_id, message.id(), msg_text)
+                                .await?;
+                        } else {
+                            bot.send_message(chat_id, msg_text).await?;
+                        }
+                        return Ok(());
+                    }
+                },
+            };
+            let watch_payload = session::WatchCreateSessionPayload {
+                source_input: payload.source_input,
+                source_name: payload.inspect.file.name,
+                source_id: payload.inspect.file.id,
+                dest_name: dest.0,
+                dest_id: dest.1,
+                content_policy: config.watch.default_content_update_policy.clone(),
+                deletion_policy: config.watch.default_deletion_policy.clone(),
+                message_id: query.message.as_ref().map(|m| m.id().0),
+            };
+            let Ok(payload_json) = serde_json::to_string(&watch_payload) else {
+                return Ok(());
+            };
+            let Ok(new_sess) = session::start_session(
+                &db,
+                user_id,
+                chat_id.0,
+                session::SessionFlow::Watch,
+                session::SessionStep::WaitConfirm,
+                payload_json,
+            )
+            .await
+            else {
+                return Ok(());
+            };
+
+            let card_text = render_watch_create_confirm(
+                lang,
+                &watch_payload.source_name,
+                &watch_payload.source_id,
+                &watch_payload.dest_name,
+                &watch_payload.dest_id,
+                &watch_payload.content_policy,
+                &watch_payload.deletion_policy,
+            );
+            let keyboard = keyboards::confirm_create_watch_keyboard(&new_sess.id, lang);
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            }
+            return Ok(());
+        }
+        Some(("wconf", "start", session_id)) => {
+            let lang = ui_language(&config);
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s))
+                    if s.id == session_id && s.flow == session::SessionFlow::Watch.as_str() =>
+                {
+                    s
+                }
+                _ => {
+                    let msg_text = clone_request_expired(lang);
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: session::WatchCreateSessionPayload =
+                match serde_json::from_str(&sess.payload_json) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let msg_text = clone_request_expired(lang);
+                        if let Some(message) = query.message.as_ref() {
+                            bot.edit_message_text(chat_id, message.id(), msg_text)
+                                .await?;
+                        } else {
+                            bot.send_message(chat_id, msg_text).await?;
+                        }
+                        return Ok(());
+                    }
+                };
             let _ = session::clear_session(&db, user_id, chat_id.0).await;
-            let res = start_watch(
+            let res = start_watch_with_policy(
                 &bot,
                 &config,
                 &db,
                 chat_id.0,
                 user_id,
                 &payload.source_input,
-                ui_language(&config),
+                Some(&payload.dest_id),
+                Some(&payload.content_policy),
+                lang,
             )
             .await;
             let msg_text = res.unwrap_or_else(|err| err.to_string());
@@ -871,6 +1001,182 @@ pub async fn handle_callback_query(
                     .await?;
             } else {
                 bot.send_message(chat_id, msg_text).await?;
+            }
+            return Ok(());
+        }
+        Some(("wconf", "opt", session_id)) => {
+            let lang = ui_language(&config);
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s))
+                    if s.id == session_id && s.flow == session::SessionFlow::Watch.as_str() =>
+                {
+                    s
+                }
+                _ => {
+                    let msg_text = clone_request_expired(lang);
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: session::WatchCreateSessionPayload =
+                match serde_json::from_str(&sess.payload_json) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let msg_text = clone_request_expired(lang);
+                        if let Some(message) = query.message.as_ref() {
+                            bot.edit_message_text(chat_id, message.id(), msg_text)
+                                .await?;
+                        } else {
+                            bot.send_message(chat_id, msg_text).await?;
+                        }
+                        return Ok(());
+                    }
+                };
+            let card_text = render_watch_options(lang);
+            let keyboard =
+                keyboards::watch_options_keyboard(session_id, &payload.content_policy, lang);
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            }
+            return Ok(());
+        }
+        Some(("wconf", "cancel", _session_id)) => {
+            let _ = session::clear_session(&db, user_id, chat_id.0).await;
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(
+                    chat_id,
+                    message.id(),
+                    clone_request_cancelled(ui_language(&config)),
+                )
+                .await?;
+                return Ok(());
+            }
+            clone_request_cancelled(ui_language(&config)).to_string()
+        }
+        Some(("wopt", "pol", rest)) => {
+            let lang = ui_language(&config);
+            let Some((session_id, code)) = rest.split_once(':') else {
+                return Ok(());
+            };
+            let policy = match code {
+                "v" => "versioned_copy",
+                "r" => "replace_copy",
+                "m" => "manual_confirmation",
+                _ => "versioned_copy",
+            };
+            let mut sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s))
+                    if s.id == session_id && s.flow == session::SessionFlow::Watch.as_str() =>
+                {
+                    s
+                }
+                _ => {
+                    let msg_text = clone_request_expired(lang);
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let mut payload: session::WatchCreateSessionPayload =
+                match serde_json::from_str(&sess.payload_json) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let msg_text = clone_request_expired(lang);
+                        if let Some(message) = query.message.as_ref() {
+                            bot.edit_message_text(chat_id, message.id(), msg_text)
+                                .await?;
+                        } else {
+                            bot.send_message(chat_id, msg_text).await?;
+                        }
+                        return Ok(());
+                    }
+                };
+            payload.content_policy = policy.to_string();
+            if let Ok(json) = serde_json::to_string(&payload) {
+                sess.payload_json = json;
+                let _ = repo::upsert_telegram_session(&db, sess).await;
+            }
+
+            let card_text = render_watch_options(lang);
+            let keyboard =
+                keyboards::watch_options_keyboard(session_id, &payload.content_policy, lang);
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            }
+            return Ok(());
+        }
+        Some(("wopt", "back", session_id)) => {
+            let lang = ui_language(&config);
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s))
+                    if s.id == session_id && s.flow == session::SessionFlow::Watch.as_str() =>
+                {
+                    s
+                }
+                _ => {
+                    let msg_text = clone_request_expired(lang);
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: session::WatchCreateSessionPayload =
+                match serde_json::from_str(&sess.payload_json) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let msg_text = clone_request_expired(lang);
+                        if let Some(message) = query.message.as_ref() {
+                            bot.edit_message_text(chat_id, message.id(), msg_text)
+                                .await?;
+                        } else {
+                            bot.send_message(chat_id, msg_text).await?;
+                        }
+                        return Ok(());
+                    }
+                };
+            let card_text = render_watch_create_confirm(
+                lang,
+                &payload.source_name,
+                &payload.source_id,
+                &payload.dest_name,
+                &payload.dest_id,
+                &payload.content_policy,
+                &payload.deletion_policy,
+            );
+            let keyboard = keyboards::confirm_create_watch_keyboard(session_id, lang);
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), card_text)
+                    .reply_markup(keyboard)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, card_text)
+                    .reply_markup(keyboard)
+                    .await?;
             }
             return Ok(());
         }
@@ -3718,13 +4024,15 @@ async fn start_clone_reference(
 
 // ── Watch handlers ───────────────────────────────────────────────────────────
 
-async fn start_watch(
+async fn start_watch_with_policy(
     bot: &Bot,
     config: &AppConfig,
     db: &Database,
     chat_id: i64,
     telegram_user_id: i64,
     input: &str,
+    dest_id_override: Option<&str>,
+    content_policy_override: Option<&str>,
     lang: keyboards::UiLanguage,
 ) -> anyhow::Result<String> {
     ensure_watch_enabled(config.watch.enabled, lang)?;
@@ -3733,7 +4041,9 @@ async fn start_watch(
         anyhow::bail!(watch_usage_text(lang));
     }
     let source_ref = parse_drive_reference(parts[0])?;
-    let dest_ref = if parts.len() >= 2 {
+    let dest_ref = if let Some(dest_id) = dest_id_override {
+        parse_drive_reference(dest_id)?
+    } else if parts.len() >= 2 {
         parse_drive_reference(parts[1])?
     } else {
         match repo::default_destination_profile(db, "default").await? {
@@ -3764,6 +4074,7 @@ async fn start_watch(
             telegram_user_id,
             chat_id,
             exclude_globs: Vec::new(),
+            content_update_policy: content_policy_override.map(str::to_string),
         },
     )
     .await
@@ -3817,6 +4128,29 @@ async fn start_watch(
         &created.source_id,
         &created.destination_name,
     ))
+}
+
+async fn start_watch(
+    bot: &Bot,
+    config: &AppConfig,
+    db: &Database,
+    chat_id: i64,
+    telegram_user_id: i64,
+    input: &str,
+    lang: keyboards::UiLanguage,
+) -> anyhow::Result<String> {
+    start_watch_with_policy(
+        bot,
+        config,
+        db,
+        chat_id,
+        telegram_user_id,
+        input,
+        None,
+        None,
+        lang,
+    )
+    .await
 }
 
 fn ensure_watch_enabled(enabled: bool, lang: keyboards::UiLanguage) -> anyhow::Result<()> {
@@ -4039,6 +4373,9 @@ async fn watch_status_detail(
         .as_ref()
         .map_or(w.last_consumed_sequence, |b| b.cursor_last_event_sequence);
     let pending_events = backlog.as_ref().map_or(0, |b| b.pending_events);
+    let mapped_files = repo::count_active_source_mappings_for_watch(db, &w.id)
+        .await
+        .unwrap_or(0);
     Ok(render_watch_detail(
         lang,
         &w,
@@ -4046,6 +4383,8 @@ async fn watch_status_detail(
         &destination,
         cursor_seq,
         pending_events,
+        mapped_files,
+        crate::state::db::now_ms(),
     ))
 }
 
@@ -4054,15 +4393,23 @@ async fn watch_folder_labels(
     access_token: Option<&str>,
     watch: &repo::WatchSubscription,
 ) -> (String, String) {
-    let source = watch_folder_label(
-        drive,
-        access_token,
-        &watch.source_root_id,
-        watch.source_resource_key.as_deref(),
-    )
-    .await;
+    let source = if let Some(name) = watch.source_name.as_deref().filter(|s| !s.is_empty()) {
+        name.to_string()
+    } else {
+        watch_folder_label(
+            drive,
+            access_token,
+            &watch.source_root_id,
+            watch.source_resource_key.as_deref(),
+        )
+        .await
+    };
     let destination =
-        watch_folder_label(drive, access_token, &watch.destination_root_id, None).await;
+        if let Some(name) = watch.destination_name.as_deref().filter(|s| !s.is_empty()) {
+            name.to_string()
+        } else {
+            watch_folder_label(drive, access_token, &watch.destination_root_id, None).await
+        };
     (source, destination)
 }
 
@@ -4368,6 +4715,8 @@ mod tests {
             status: "failed".to_string(),
             source_root_id: "source".to_string(),
             destination_parent_id: "dest".to_string(),
+            source_name: None,
+            destination_name: None,
             total_discovered: 10,
             completed_items: 7,
             failed_items: 2,
@@ -4400,6 +4749,8 @@ mod tests {
             status: "running".to_string(),
             source_root_id: "source".to_string(),
             destination_parent_id: "dest".to_string(),
+            source_name: None,
+            destination_name: None,
             total_discovered: 10,
             completed_items: 4,
             failed_items: 1,
@@ -4475,16 +4826,10 @@ mod tests {
     fn watch_policies_are_translated_for_telegram() {
         assert_eq!(
             vi_content_update_policy("versioned_copy"),
-            "tạo bản copy mới"
+            "Tạo phiên bản mới"
         );
-        assert_eq!(
-            vi_deletion_policy("preserve_destination"),
-            "giữ bản copy ở đích"
-        );
-        assert_eq!(
-            vi_move_out_policy("detach"),
-            "tách khỏi watch, không xoá bản copy"
-        );
+        assert_eq!(vi_deletion_policy("preserve_destination"), "Giữ bản ở đích");
+        assert_eq!(vi_move_out_policy("detach"), "Ngừng theo dõi file");
     }
 
     #[test]
@@ -4498,8 +4843,10 @@ mod tests {
             source_root_id: "source".to_string(),
             source_resource_key: None,
             source_drive_id: None,
+            source_name: None,
             destination_root_id: "dest".to_string(),
             destination_drive_id: None,
+            destination_name: None,
             status: "catching_up".to_string(),
             content_update_policy: "versioned_copy".to_string(),
             deletion_policy: "preserve_destination".to_string(),
@@ -4507,21 +4854,42 @@ mod tests {
             exclude_globs: "[]".to_string(),
             baseline_sequence: 3,
             last_consumed_sequence: 4,
+            last_consumed_at_ms: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         };
 
-        let en = render_watch_detail(keyboards::UiLanguage::En, &watch, "Source", "Dest", 9, 5);
-        assert!(en.contains("Status: catching up"));
+        let en = render_watch_detail(
+            keyboards::UiLanguage::En,
+            &watch,
+            "Source",
+            "Dest",
+            9,
+            5,
+            12,
+            1000,
+        );
+        assert!(en.contains("Status: ● catching up"));
         assert!(en.contains("Source folder: Source (source)"));
         assert!(en.contains("Pending changes: 5"));
-        assert!(en.contains("create a new copy"));
+        assert!(en.contains("Create new version"));
+        assert!(en.contains("Mapped files: 12 files"));
 
-        let vi = render_watch_detail(keyboards::UiLanguage::Vi, &watch, "Nguồn", "Đích", 9, 5);
-        assert!(vi.contains("Trạng thái: đang bắt kịp"));
+        let vi = render_watch_detail(
+            keyboards::UiLanguage::Vi,
+            &watch,
+            "Nguồn",
+            "Đích",
+            9,
+            5,
+            12,
+            1000,
+        );
+        assert!(vi.contains("Trạng thái: ● đang bắt kịp"));
         assert!(vi.contains("Nguồn (folder cần lưu): Nguồn (source)"));
         assert!(vi.contains("Số thay đổi còn chờ: 5"));
-        assert!(vi.contains("tạo bản copy mới"));
+        assert!(vi.contains("Tạo phiên bản mới"));
+        assert!(vi.contains("Đã ánh xạ: 12 tệp"));
     }
 
     #[test]

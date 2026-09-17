@@ -282,11 +282,12 @@ impl CloneService {
 
         // Destination: an explicit override is validated (folder + writable)
         // before planning; otherwise fall back to the default profile.
-        let (destination_parent_id, destination_drive_id) = if let Some(dest_id) = request
-            .destination_parent_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
+        let (destination_parent_id, destination_drive_id, destination_name) = if let Some(dest_id) =
+            request
+                .destination_parent_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
         {
             let destination = self
                 .get_reference_retry(&DriveReference {
@@ -296,7 +297,11 @@ impl CloneService {
                 })
                 .await?;
             validate_destination_for_clone(&destination)?;
-            (destination.id.clone(), destination.drive_id.clone())
+            (
+                destination.id.clone(),
+                destination.drive_id.clone(),
+                Some(destination.name.clone()),
+            )
         } else {
             let profile = repo::default_destination_profile(&self.db, "default")
                 .await?
@@ -304,6 +309,7 @@ impl CloneService {
             (
                 profile.destination_parent_id.clone(),
                 profile.destination_drive_id.clone(),
+                Some(profile.label.clone()),
             )
         };
 
@@ -327,6 +333,8 @@ impl CloneService {
                     .duplicate_policy
                     .clone()
                     .unwrap_or_else(|| self.config.engine.default_duplicate_policy.clone()),
+                source_name: Some(source.name.clone()),
+                destination_name,
             },
         )
         .await?;
@@ -419,6 +427,8 @@ impl CloneService {
                 destination_drive_id,
                 progress_message_id: request.progress_message_id,
                 duplicate_policy: self.config.engine.default_duplicate_policy.clone(),
+                source_name: Some(source.name.clone()),
+                destination_name: None,
             },
         )
         .await?;
