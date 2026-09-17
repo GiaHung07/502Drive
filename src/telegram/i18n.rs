@@ -78,6 +78,7 @@ pub enum TextKey {
     HomeHint,
     HomeJobsRunning,
     HomeNeedsAttention,
+    ReplyKeyboardPlaceholder,
     HomeNoDestination,
     HomeStatusConnected,
     HomeStatusNotConnected,
@@ -233,6 +234,7 @@ impl TextKey {
         Self::HomeHint,
         Self::HomeJobsRunning,
         Self::HomeNeedsAttention,
+        Self::ReplyKeyboardPlaceholder,
         Self::HomeNoDestination,
         Self::HomeStatusConnected,
         Self::HomeStatusNotConnected,
@@ -486,7 +488,13 @@ impl TextKey {
             (UiLanguage::Vi, Self::HomeDriveLabel) => "Google Drive",
             (UiLanguage::En, Self::HomeDriveLabel) => "Google Drive",
             (UiLanguage::Vi, Self::HomeHint) => "Gửi link Google Drive để bắt đầu nhanh.",
+            (UiLanguage::Vi, Self::ReplyKeyboardPlaceholder) => {
+                "Dán link Google Drive hoặc chọn chức năng…"
+            }
             (UiLanguage::En, Self::HomeHint) => "Send a Google Drive link to get started quickly.",
+            (UiLanguage::En, Self::ReplyKeyboardPlaceholder) => {
+                "Paste a Drive link or pick a section…"
+            }
             (UiLanguage::Vi, Self::HomeJobsRunning) => "Đang chạy",
             (UiLanguage::En, Self::HomeJobsRunning) => "Running",
             (UiLanguage::Vi, Self::HomeNeedsAttention) => "Cần chú ý",

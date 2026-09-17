@@ -1,6 +1,6 @@
 #[cfg(test)]
 use teloxide::types::InlineKeyboardButtonKind;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup};
 
 /// Callback data of a button, if it is a callback button.
 #[cfg(test)]
@@ -579,6 +579,88 @@ fn truncate_label(label: &str, max_chars: usize) -> String {
     }
     let keep = max_chars.saturating_sub(3);
     format!("{}...", label.chars().take(keep).collect::<String>())
+}
+
+/// Persistent reply-keyboard sections (LanMan-style main navigation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Clone,
+    Watch,
+    Overview,
+    Jobs,
+    Watches,
+    Destination,
+    Account,
+    Language,
+}
+
+pub fn section_label(lang: UiLanguage, section: Section) -> &'static str {
+    let (vi, en) = match section {
+        Section::Clone => ("\u{FF0B} Sao ch\u{00E9}p", "\u{FF0B} Clone"),
+        Section::Watch => ("\u{27F3} \u{0110}\u{1ED3}ng b\u{1ED9}", "\u{27F3} Sync"),
+        Section::Overview => ("\u{1F4CA} T\u{1ED5}ng quan", "\u{1F4CA} Overview"),
+        Section::Jobs => ("\u{1F4E6} C\u{00F4}ng vi\u{1EC7}c", "\u{1F4E6} Jobs"),
+        Section::Watches => ("\u{1F441} Theo d\u{00F5}i", "\u{1F441} Watches"),
+        Section::Destination => (
+            "\u{1F4C1} Th\u{01B0} m\u{1EE5}c \u{0111}\u{00ED}ch",
+            "\u{1F4C1} Destination",
+        ),
+        Section::Account => ("\u{1F464} T\u{00E0}i kho\u{1EA3}n", "\u{1F464} Account"),
+        Section::Language => ("\u{1F310} Ng\u{00F4}n ng\u{1EEF}", "\u{1F310} Language"),
+    };
+    if lang == UiLanguage::Vi { vi } else { en }
+}
+
+const SECTIONS: &[Section] = &[
+    Section::Clone,
+    Section::Watch,
+    Section::Overview,
+    Section::Jobs,
+    Section::Watches,
+    Section::Destination,
+    Section::Account,
+    Section::Language,
+];
+
+/// Map an incoming text message to a reply-keyboard section, if it exactly
+/// matches a section label in either language (labels are stable across the
+/// opposite language so a stale client keyboard still routes correctly).
+pub fn section_from_text(text: &str) -> Option<Section> {
+    let t = text.trim();
+    SECTIONS.iter().copied().find(|&sec| {
+        section_label(UiLanguage::Vi, sec) == t || section_label(UiLanguage::En, sec) == t
+    })
+}
+
+/// The persistent main keyboard: section rows sized for one-thumb use.
+pub fn main_reply_keyboard(lang: UiLanguage, watch_enabled: bool) -> KeyboardMarkup {
+    let mut rows: Vec<Vec<KeyboardButton>> = Vec::new();
+    let mut row1 = vec![KeyboardButton::new(section_label(lang, Section::Clone))];
+    if watch_enabled {
+        row1.push(KeyboardButton::new(section_label(lang, Section::Watch)));
+    }
+    rows.push(row1);
+    rows.push(vec![
+        KeyboardButton::new(section_label(lang, Section::Overview)),
+        KeyboardButton::new(section_label(lang, Section::Jobs)),
+    ]);
+    let mut row3 = Vec::new();
+    if watch_enabled {
+        row3.push(KeyboardButton::new(section_label(lang, Section::Watches)));
+    }
+    row3.push(KeyboardButton::new(section_label(
+        lang,
+        Section::Destination,
+    )));
+    rows.push(row3);
+    rows.push(vec![
+        KeyboardButton::new(section_label(lang, Section::Account)),
+        KeyboardButton::new(section_label(lang, Section::Language)),
+    ]);
+    KeyboardMarkup::new(rows)
+        .resize_keyboard()
+        .persistent()
+        .input_field_placeholder(lang.text(T::ReplyKeyboardPlaceholder))
 }
 
 #[cfg(test)]

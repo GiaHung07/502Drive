@@ -197,7 +197,105 @@ impl ReplyPrompt {
     }
 }
 
-pub async fn handle_message(
+/// Dispatch a persistent reply-keyboard section press. Sections mirror the
+/// `menu:open:*` callback arms but always SEND a fresh panel (there is no
+/// message to edit when the user taps a keyboard button).
+pub(crate) async fn handle_section(
+    bot: Bot,
+    chat_id: ChatId,
+    config: AppConfig,
+    db: Database,
+    user_id: i64,
+    section: keyboards::Section,
+) -> ResponseResult<()> {
+    let lang = ui_language(&config);
+    match section {
+        keyboards::Section::Clone => {
+            send_reply_prompt(
+                &bot,
+                &db,
+                user_id,
+                chat_id,
+                clone_prompt(lang),
+                ReplyPrompt::Clone,
+                lang,
+            )
+            .await?;
+        }
+        keyboards::Section::Watch => {
+            send_reply_prompt(
+                &bot,
+                &db,
+                user_id,
+                chat_id,
+                watch_prompt(lang),
+                ReplyPrompt::Watch,
+                lang,
+            )
+            .await?;
+        }
+        keyboards::Section::Overview => {
+            let text = render_home_dashboard(&config, &db, user_id, lang)
+                .await
+                .unwrap_or_else(|err| load_home_error(lang, &err));
+            bot.send_message(chat_id, text)
+                .reply_markup(keyboards::main_menu_keyboard(config.watch.enabled, lang))
+                .await?;
+        }
+        keyboards::Section::Jobs => match render_jobs_panel(&db, user_id, lang).await {
+            Ok((text, keyboard)) => {
+                bot.send_message(chat_id, text)
+                    .reply_markup(keyboard)
+                    .await?;
+            }
+            Err(err) => {
+                bot.send_message(chat_id, load_jobs_error(lang, &err))
+                    .reply_markup(keyboards::back_home_keyboard(lang))
+                    .await?;
+            }
+        },
+        keyboards::Section::Watches => {
+            match render_watch_panel(&config, &db, user_id, 0, WatchListMode::Status).await {
+                Ok((text, keyboard)) => {
+                    let keyboard = (!keyboard.inline_keyboard.is_empty())
+                        .then_some(keyboard)
+                        .unwrap_or_else(|| keyboards::back_home_keyboard(lang));
+                    bot.send_message(chat_id, text)
+                        .reply_markup(keyboard)
+                        .await?;
+                }
+                Err(err) => {
+                    bot.send_message(chat_id, load_watch_error(lang, &err))
+                        .reply_markup(keyboards::back_home_keyboard(lang))
+                        .await?;
+                }
+            }
+        }
+        keyboards::Section::Destination => {
+            let (text, keyboard) = render_destination_panel(&db, user_id, chat_id.0, lang).await;
+            let keyboard = keyboard.unwrap_or_else(|| keyboards::back_home_keyboard(lang));
+            bot.send_message(chat_id, text)
+                .reply_markup(keyboard)
+                .await?;
+        }
+        keyboards::Section::Account => {
+            let text = account_summary(&config, &db, lang)
+                .await
+                .unwrap_or_else(|err| format!("Lỗi đọc trạng thái tài khoản: {err}"));
+            bot.send_message(chat_id, text)
+                .reply_markup(keyboards::account_keyboard(lang))
+                .await?;
+        }
+        keyboards::Section::Language => {
+            bot.send_message(chat_id, language_panel_text(lang))
+                .reply_markup(keyboards::language_keyboard(lang))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn handle_message(
     bot: Bot,
     msg: Message,
     mut config: AppConfig,
@@ -222,6 +320,13 @@ pub async fn handle_message(
     if let Ok(command) = Command::parse(&text, "gdclone_bot") {
         let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
         return handle_command(bot, msg, config, db, user_id, command).await;
+    }
+
+    // Persistent reply-keyboard sections always work — even mid-session —
+    // and clear any active conversational flow like commands do.
+    if let Some(section) = keyboards::section_from_text(&text) {
+        let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
+        return handle_section(bot, msg.chat.id, config, db, user_id, section).await;
     }
 
     if let Ok(Some(active_session)) = session::get_session(&db, user_id, msg.chat.id.0).await {
@@ -2104,23 +2209,33 @@ async fn handle_command(
                 .await
                 .unwrap_or_else(|err| load_home_error(ui_language(&config), &err));
             bot.send_message(msg.chat.id, text)
-                .reply_markup(keyboards::main_menu_keyboard(
-                    config.watch.enabled,
+                .reply_markup(keyboards::main_reply_keyboard(
                     ui_language(&config),
+                    config.watch.enabled,
                 ))
                 .await?;
         }
         Command::Help => {
             let text = render_help_text(ui_language(&config));
             bot.send_message(msg.chat.id, text)
+                .reply_markup(keyboards::main_reply_keyboard(
+                    ui_language(&config),
+                    config.watch.enabled,
+                ))
+                .await?;
+        }
+        Command::Preview => {
+            // Merged into the home dashboard: one overview surface, no legacy
+            // self-refreshing side panel anymore.
+            let text = render_home_dashboard(&config, &db, user_id, ui_language(&config))
+                .await
+                .unwrap_or_else(|err| load_home_error(ui_language(&config), &err));
+            bot.send_message(msg.chat.id, text)
                 .reply_markup(keyboards::main_menu_keyboard(
                     config.watch.enabled,
                     ui_language(&config),
                 ))
                 .await?;
-        }
-        Command::Preview => {
-            spawn_preview_dashboard(bot, msg.chat.id, db, user_id, ui_language(&config)).await?;
         }
         Command::Connect => {
             let connect_text = match ui_language(&config) {
