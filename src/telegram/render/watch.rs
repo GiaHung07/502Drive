@@ -4,7 +4,7 @@ use crate::state::repo;
 use crate::telegram::handlers::WatchListMode;
 use crate::telegram::i18n::TextKey as T;
 use crate::telegram::keyboards;
-use crate::telegram::render::{progress_status_field, push_field, short_id};
+use crate::telegram::render::{human_bytes, progress_status_field, push_field, short_id};
 
 pub(crate) fn watch_list_mode_title(
     mode: WatchListMode,
@@ -385,6 +385,49 @@ pub(crate) fn render_watch_options(lang: keyboards::UiLanguage) -> String {
     ]
     .join("\n")
 }
+
+pub(crate) fn render_conflict_card(
+    lang: keyboards::UiLanguage,
+    details: &crate::watch::service::ConflictDetails,
+) -> String {
+    let title = lang.text(T::WatchConflictTitle);
+    let mut lines = vec![
+        format!("{title} — {}", details.file_name),
+        "━━━━━━━━━━".to_string(),
+    ];
+
+    let current_info = match &details.current_dest_modified {
+        Some(mod_time) => mod_time.as_str(),
+        None => "—",
+    };
+    push_field(&mut lines, lang.text(T::WatchConflictCurrent), current_info);
+
+    let new_info = match (
+        details.new_source_size,
+        details.new_source_modified.as_deref(),
+    ) {
+        (Some(size), Some(m)) => format!("{} · {}", human_bytes(size as i64), m),
+        (Some(size), None) => human_bytes(size as i64),
+        (None, Some(m)) => m.to_string(),
+        _ => "—".to_string(),
+    };
+    push_field(&mut lines, lang.text(T::WatchConflictNew), &new_info);
+
+    if details.remaining > 1 {
+        let suffix = match lang {
+            keyboards::UiLanguage::Vi => "tệp",
+            keyboards::UiLanguage::En => "files",
+        };
+        push_field(
+            &mut lines,
+            lang.text(T::WatchConflictRemaining),
+            &format!("{} {suffix}", details.remaining),
+        );
+    }
+
+    lines.join("\n")
+}
+
 pub(crate) fn watch_disabled_text(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => {

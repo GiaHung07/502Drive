@@ -278,6 +278,7 @@ async fn dispatch_one(
         let applied = apply_result.is_ok();
         let final_status = match apply_result {
             Ok(()) => "applied",
+            Err(ref err) if err.to_string().contains("manual confirmation required") => "pending",
             Err(ref err) => {
                 warn!(
                     watch_id = watch.id,
@@ -565,7 +566,7 @@ async fn scan_missing_children(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn apply_classification(
+pub(crate) async fn apply_classification(
     config: &AppConfig,
     db: &Database,
     drive: &DriveClient,
@@ -592,10 +593,9 @@ async fn apply_classification(
                 }
                 "manual_confirmation" => {
                     repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
+                    let short_id = &watch.id[..8.min(watch.id.len())];
                     let msg = format!(
-                        "❓ Watch `{}`: source `{}` removed/trashed. Reply with action.",
-                        &watch.id[..8.min(watch.id.len())],
-                        file_id
+                        "⚠ Watch `{short_id}`: nguồn `{file_id}` bị xoá/vào thùng rác.\nDùng lệnh /watch_status {short_id} để chọn hành động.",
                     );
                     let _ = notify_tx.try_send((watch.chat_id, msg));
                     info!(
@@ -815,10 +815,10 @@ async fn apply_classification(
                 }
                 "manual_confirmation" => {
                     repo::update_watch_status(db, &watch.id, "needs_reconcile").await?;
+                    let short_id = &watch.id[..8.min(watch.id.len())];
+                    let file_name = file.map(|f| f.name.as_str()).unwrap_or(file_id);
                     let msg = format!(
-                        "❓ Watch `{}`: content changed in `{}`. Choose action: versioned_copy / skip.",
-                        &watch.id[..8.min(watch.id.len())],
-                        file_id
+                        "⚠ Watch `{short_id}`: tệp `{file_name}` có phiên bản mới.\nDùng lệnh /watch_status {short_id} để chọn hành động.",
                     );
                     let _ = notify_tx.try_send((watch.chat_id, msg));
                     info!(

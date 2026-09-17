@@ -2974,6 +2974,65 @@ pub async fn upsert_event_application(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingConfirmationEvent {
+    pub sequence: i64,
+    pub file_id: String,
+    pub removed: bool,
+    pub file_json: Option<String>,
+    pub classification: String,
+}
+
+pub async fn next_pending_confirmation_for_watch(
+    db: &Database,
+    watch_id: &str,
+) -> anyhow::Result<Option<PendingConfirmationEvent>> {
+    let watch_id = watch_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT wea.event_sequence, ce.file_id, ce.removed, ce.file_json, wea.classification
+                 FROM watch_event_applications wea
+                 JOIN change_events ce ON ce.sequence = wea.event_sequence
+                 WHERE wea.watch_id = ?1 AND wea.status = 'pending'
+                 ORDER BY wea.event_sequence ASC
+                 LIMIT 1",
+            )?;
+            let row = stmt
+                .query_row(params![watch_id], |r| {
+                    Ok(PendingConfirmationEvent {
+                        sequence: r.get(0)?,
+                        file_id: r.get(1)?,
+                        removed: r.get::<_, i64>(2)? != 0,
+                        file_json: r.get(3)?,
+                        classification: r.get(4)?,
+                    })
+                })
+                .optional()?;
+            Ok::<Option<PendingConfirmationEvent>, rusqlite::Error>(row)
+        })
+        .await?)
+}
+
+pub async fn count_pending_confirmation_events(
+    db: &Database,
+    watch_id: &str,
+) -> anyhow::Result<i64> {
+    let watch_id = watch_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM watch_event_applications
+                 WHERE watch_id = ?1 AND status = 'pending'",
+                params![watch_id],
+                |r| r.get(0),
+            )
+        })
+        .await?)
+}
+
 /// Check whether a source file_id is within the watch's mapped subtree.
 /// Returns `true` when source_mappings has an active row for this
 /// (watch scope, file_id).
@@ -3042,6 +3101,41 @@ pub async fn active_watch_mapping_destination(
                    AND mapping_state = 'active'",
                 params![watch_id, source_item_id],
                 |row| row.get(0),
+            )
+            .optional()
+        })
+        .await?)
+}
+
+#[derive(Debug, Clone)]
+pub struct WatchMappingInfo {
+    pub destination_item_id: String,
+    pub source_name: String,
+    pub source_modified_time: Option<String>,
+}
+
+pub async fn get_watch_mapping_info(
+    db: &Database,
+    watch_id: &str,
+    source_item_id: &str,
+) -> anyhow::Result<Option<WatchMappingInfo>> {
+    let watch_id = watch_id.to_string();
+    let source_item_id = source_item_id.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT destination_item_id, source_name, source_modified_time
+                 FROM source_mappings
+                 WHERE scope_type = 'watch' AND scope_id = ?1 AND source_item_id = ?2",
+                params![watch_id, source_item_id],
+                |row| {
+                    Ok(WatchMappingInfo {
+                        destination_item_id: row.get(0)?,
+                        source_name: row.get(1)?,
+                        source_modified_time: row.get(2)?,
+                    })
+                },
             )
             .optional()
         })

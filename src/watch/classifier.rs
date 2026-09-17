@@ -42,6 +42,21 @@ impl Classification {
             Classification::Ambiguous => "ambiguous",
         }
     }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "new_item" => Some(Classification::NewItem),
+            "content_changed" => Some(Classification::ContentChanged),
+            "renamed" => Some(Classification::Renamed),
+            "moved_inside" => Some(Classification::MovedInside),
+            "moved_outside" => Some(Classification::MovedOutside),
+            "moved_back" => Some(Classification::MovedBack),
+            "trashed_or_removed" => Some(Classification::TrashedOrRemoved),
+            "irrelevant" => Some(Classification::Irrelevant),
+            "ambiguous" => Some(Classification::Ambiguous),
+            _ => None,
+        }
+    }
 }
 
 /// Prior knowledge about a source item that we use to detect what changed.

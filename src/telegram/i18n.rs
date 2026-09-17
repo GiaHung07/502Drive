@@ -162,6 +162,14 @@ pub enum TextKey {
     WatchCreatedSummary,
     WatchLastSynced,
     WatchMappedFiles,
+    WatchConflictTitle,
+    WatchConflictCurrent,
+    WatchConflictNew,
+    WatchConflictRemaining,
+    WatchActionNewVersion,
+    WatchActionReplace,
+    WatchActionSkip,
+    WatchResolveConflictButton,
 }
 
 impl TextKey {
@@ -309,6 +317,14 @@ impl TextKey {
         Self::WatchCreatedSummary,
         Self::WatchLastSynced,
         Self::WatchMappedFiles,
+        Self::WatchConflictTitle,
+        Self::WatchConflictCurrent,
+        Self::WatchConflictNew,
+        Self::WatchConflictRemaining,
+        Self::WatchActionNewVersion,
+        Self::WatchActionReplace,
+        Self::WatchActionSkip,
+        Self::WatchResolveConflictButton,
     ];
 
     fn text(self, lang: UiLanguage) -> &'static str {
@@ -767,6 +783,22 @@ impl TextKey {
             (UiLanguage::En, Self::WatchLastSynced) => "Sync status",
             (UiLanguage::Vi, Self::WatchMappedFiles) => "Đã ánh xạ",
             (UiLanguage::En, Self::WatchMappedFiles) => "Mapped files",
+            (UiLanguage::Vi, Self::WatchConflictTitle) => "⚠ Có phiên bản mới",
+            (UiLanguage::En, Self::WatchConflictTitle) => "⚠ New version detected",
+            (UiLanguage::Vi, Self::WatchConflictCurrent) => "Bản hiện tại",
+            (UiLanguage::En, Self::WatchConflictCurrent) => "Current copy",
+            (UiLanguage::Vi, Self::WatchConflictNew) => "Bản nguồn mới",
+            (UiLanguage::En, Self::WatchConflictNew) => "New source copy",
+            (UiLanguage::Vi, Self::WatchConflictRemaining) => "Còn lại",
+            (UiLanguage::En, Self::WatchConflictRemaining) => "Remaining",
+            (UiLanguage::Vi, Self::WatchActionNewVersion) => "Tạo bản mới",
+            (UiLanguage::En, Self::WatchActionNewVersion) => "New version",
+            (UiLanguage::Vi, Self::WatchActionReplace) => "Thay thế",
+            (UiLanguage::En, Self::WatchActionReplace) => "Replace",
+            (UiLanguage::Vi, Self::WatchActionSkip) => "Bỏ qua",
+            (UiLanguage::En, Self::WatchActionSkip) => "Skip",
+            (UiLanguage::Vi, Self::WatchResolveConflictButton) => "⚠ Giải quyết xung đột",
+            (UiLanguage::En, Self::WatchResolveConflictButton) => "⚠ Resolve conflict",
         }
     }
 }

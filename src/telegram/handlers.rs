@@ -1855,6 +1855,139 @@ pub async fn handle_callback_query(
             .await?;
             return Ok(());
         }
+        Some(("watch", "res", watch_id)) => {
+            let lang = ui_language(&config);
+            let watch = match resolve_watch_for_user(&db, user_id, watch_id, lang).await {
+                Ok(w) => w,
+                Err(err) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        err.to_string(),
+                        None,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            match crate::watch::service::get_pending_conflict_details(&db, &watch.id).await {
+                Ok(Some(details)) => {
+                    let card_text = render_conflict_card(lang, &details);
+                    let keyboard = keyboards::watch_resolve_conflict_keyboard(
+                        &watch.id,
+                        details.sequence,
+                        lang,
+                    );
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        card_text,
+                        Some(keyboard),
+                    )
+                    .await?;
+                }
+                _ => {
+                    let result = watch_status_panel(&config, &db, user_id, &watch.id).await;
+                    if let Ok((text, keyboard)) = result {
+                        let keyboard = (!keyboard.inline_keyboard.is_empty()).then_some(keyboard);
+                        edit_or_send_with_keyboard(
+                            &bot,
+                            chat_id,
+                            query.message.as_ref().map(|m| m.id()),
+                            text,
+                            keyboard,
+                        )
+                        .await?;
+                    }
+                }
+            }
+            return Ok(());
+        }
+        Some(("wres", code, rest)) => {
+            let lang = ui_language(&config);
+            let Some((watch_id, _seq)) = rest.split_once(':') else {
+                return Ok(());
+            };
+            let watch = match resolve_watch_for_user(&db, user_id, watch_id, lang).await {
+                Ok(w) => w,
+                Err(err) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        err.to_string(),
+                        None,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            let decision = match code {
+                "v" => crate::watch::service::PendingDecision::VersionedCopy,
+                "r" => crate::watch::service::PendingDecision::Replace,
+                "s" => crate::watch::service::PendingDecision::Skip,
+                _ => crate::watch::service::PendingDecision::Skip,
+            };
+            let drive = DriveClient::with_timeout(Duration::from_secs(
+                config.engine.request_timeout_seconds,
+            ));
+            let outcome =
+                crate::watch::service::resolve_pending(&config, &db, &drive, &watch.id, decision)
+                    .await;
+
+            match outcome {
+                Ok(Some(res)) if res.remaining_pending > 0 => {
+                    if let Ok(Some(details)) =
+                        crate::watch::service::get_pending_conflict_details(&db, &watch.id).await
+                    {
+                        let card_text = render_conflict_card(lang, &details);
+                        let keyboard = keyboards::watch_resolve_conflict_keyboard(
+                            &watch.id,
+                            details.sequence,
+                            lang,
+                        );
+                        edit_or_send_with_keyboard(
+                            &bot,
+                            chat_id,
+                            query.message.as_ref().map(|m| m.id()),
+                            card_text,
+                            Some(keyboard),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
+
+            let result = watch_status_panel(&config, &db, user_id, &watch.id).await;
+            match result {
+                Ok((text, keyboard)) => {
+                    let keyboard = (!keyboard.inline_keyboard.is_empty()).then_some(keyboard);
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        text,
+                        keyboard,
+                    )
+                    .await?;
+                }
+                Err(err) => {
+                    edit_or_send_with_keyboard(
+                        &bot,
+                        chat_id,
+                        query.message.as_ref().map(|m| m.id()),
+                        err.to_string(),
+                        None,
+                    )
+                    .await?;
+                }
+            }
+            return Ok(());
+        }
         _ => unknown_action(ui_language(&config)).to_string(),
     };
 

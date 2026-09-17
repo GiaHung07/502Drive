@@ -360,6 +360,11 @@ pub fn watch_detail_keyboard(
             lang.text(T::Resume),
             format!("watch:resume:{watch_id}"),
         )]);
+    } else if status == "needs_reconcile" {
+        rows.push(vec![InlineKeyboardButton::callback(
+            lang.text(T::WatchResolveConflictButton),
+            format!("watch:res:{short_id}"),
+        )]);
     }
     rows.push(vec![
         InlineKeyboardButton::callback(lang.text(T::Versioned), format!("watch:pol:{short_id}:v")),
@@ -377,6 +382,41 @@ pub fn watch_detail_keyboard(
         InlineKeyboardButton::callback(lang.text(T::BackHome), "menu:open:home"),
     ]);
     InlineKeyboardMarkup::new(rows)
+}
+
+pub fn watch_resolve_conflict_keyboard(
+    watch_id: &str,
+    sequence: i64,
+    lang: UiLanguage,
+) -> InlineKeyboardMarkup {
+    let short_id = watch_id.get(..8).unwrap_or(watch_id);
+    debug_assert!(format!("wres:v:{short_id}:{sequence}").len() <= 64);
+    debug_assert!(format!("wres:r:{short_id}:{sequence}").len() <= 64);
+    debug_assert!(format!("wres:s:{short_id}:{sequence}").len() <= 64);
+
+    InlineKeyboardMarkup::new([
+        vec![
+            InlineKeyboardButton::callback(
+                lang.text(T::WatchActionNewVersion),
+                format!("wres:v:{short_id}:{sequence}"),
+            ),
+            InlineKeyboardButton::callback(
+                lang.text(T::WatchActionReplace),
+                format!("wres:r:{short_id}:{sequence}"),
+            ),
+            InlineKeyboardButton::callback(
+                lang.text(T::WatchActionSkip),
+                format!("wres:s:{short_id}:{sequence}"),
+            ),
+        ],
+        vec![InlineKeyboardButton::callback(
+            match lang {
+                UiLanguage::Vi => "◀ Chi tiết watch",
+                UiLanguage::En => "◀ Watch detail",
+            },
+            format!("watch:status:{watch_id}"),
+        )],
+    ])
 }
 
 pub fn watch_unwatch_confirm_keyboard(watch_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {

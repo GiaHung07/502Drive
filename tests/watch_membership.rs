@@ -596,3 +596,138 @@ async fn exclude_globs_round_trip() {
         .unwrap();
     assert_eq!(watch.exclude_globs, "[]");
 }
+
+#[tokio::test]
+async fn test_resolve_pending_and_conflict_details() {
+    let (db, cursor_id) = test_db_with_cursor().await;
+
+    let watch_id = repo::create_watch_subscription(
+        &db,
+        repo::NewWatchSubscription {
+            google_account_id: "default".into(),
+            cursor_id: cursor_id.clone(),
+            telegram_user_id: 42,
+            chat_id: 100,
+            source_root_id: "src-root".into(),
+            source_resource_key: None,
+            source_drive_id: None,
+            source_name: Some("Source Folder".into()),
+            destination_root_id: "dst-root".into(),
+            destination_drive_id: None,
+            destination_name: Some("Dest Folder".into()),
+            content_update_policy: "manual_confirmation".into(),
+            deletion_policy: "manual_confirmation".into(),
+            move_out_policy: "detach".into(),
+            exclude_globs: "[]".to_string(),
+            baseline_sequence: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    repo::update_watch_status(&db, &watch_id, "needs_reconcile")
+        .await
+        .unwrap();
+
+    // Commit a change event for the cursor
+    let events = vec![repo::NewChangeEventRow {
+        cursor_id: cursor_id.clone(),
+        request_page_token: "tok".into(),
+        ordinal_in_page: 0,
+        file_id: "file-xyz".into(),
+        removed: false,
+        file_json: Some(
+            r#"{"id":"file-xyz","name":"doc.pdf","mimeType":"application/pdf","size":"1024","modifiedTime":"2026-09-17T12:00:00Z"}"#.into(),
+        ),
+    }];
+    let seq = repo::commit_change_page(&db, &cursor_id, events, None, Some("tok-2"), 0)
+        .await
+        .unwrap();
+
+    // Save mapping for file-xyz
+    gdclone_bot::engine::mapping::record_mapping(
+        &db,
+        gdclone_bot::engine::mapping::MappingRecord {
+            scope_type: "watch".to_string(),
+            scope_id: watch_id.clone(),
+            source_item_id: "file-xyz".to_string(),
+            destination_item_id: "dest-file-xyz".to_string(),
+            source_parent_id: None,
+            destination_parent_id: Some("dst-root".to_string()),
+            mime_type: "application/pdf".to_string(),
+            source_name: "doc.pdf".to_string(),
+            source_version: None,
+            source_modified_time: Some("2026-09-15T10:00:00Z".to_string()),
+            source_md5_checksum: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Upsert event application as "pending"
+    repo::upsert_event_application(&db, &watch_id, seq, "content_changed", "pending")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repo::count_pending_confirmation_events(&db, &watch_id)
+            .await
+            .unwrap(),
+        1
+    );
+
+    let next_pending = repo::next_pending_confirmation_for_watch(&db, &watch_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next_pending.sequence, seq);
+    assert_eq!(next_pending.file_id, "file-xyz");
+    assert_eq!(next_pending.classification, "content_changed");
+
+    let details = gdclone_bot::watch::service::get_pending_conflict_details(&db, &watch_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(details.watch_id, watch_id);
+    assert_eq!(details.file_name, "doc.pdf");
+    assert_eq!(
+        details.current_dest_modified.as_deref(),
+        Some("2026-09-15T10:00:00Z")
+    );
+    assert_eq!(details.new_source_size, Some(1024));
+    assert_eq!(
+        details.new_source_modified.as_deref(),
+        Some("2026-09-17T12:00:00Z")
+    );
+    assert_eq!(details.remaining, 1);
+
+    let config =
+        gdclone_bot::config::AppConfig::load(std::path::Path::new("config.sample.toml")).unwrap();
+    let drive = gdclone_bot::watch::service::drive_client_for(&config);
+
+    // Resolve as Skip
+    let outcome = gdclone_bot::watch::service::resolve_pending(
+        &config,
+        &db,
+        &drive,
+        &watch_id,
+        gdclone_bot::watch::service::PendingDecision::Skip,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        outcome.decision,
+        gdclone_bot::watch::service::PendingDecision::Skip
+    );
+    assert_eq!(outcome.remaining_pending, 0);
+
+    // Verify watch status transitioned back to "active" because 0 pending remaining
+    let watch = repo::watch_for_user_unchecked(&db, &watch_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(watch.status, "active");
+    assert_eq!(watch.last_consumed_sequence, seq);
+}
