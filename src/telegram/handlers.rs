@@ -2837,38 +2837,6 @@ async fn account_summary(
 
 // ── Preview dashboard ────────────────────────────────────────────────────────
 
-async fn spawn_preview_dashboard(
-    bot: Bot,
-    chat_id: ChatId,
-    db: Database,
-    telegram_user_id: i64,
-    lang: keyboards::UiLanguage,
-) -> ResponseResult<()> {
-    let text = render_preview_dashboard(&db, telegram_user_id, lang)
-        .await
-        .unwrap_or_else(|err| preview_load_error(lang, &err));
-    let message = bot.send_message(chat_id, text).await?;
-    tokio::spawn(async move {
-        let mut last_text = String::new();
-        for _ in 0..15 {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            let text = match render_preview_dashboard(&db, telegram_user_id, lang).await {
-                Ok(t) => t,
-                Err(err) => preview_update_error(lang, &err),
-            };
-            if text == last_text {
-                continue;
-            }
-            last_text = text.clone();
-            if let Err(err) = bot.edit_message_text(chat_id, message.id, text).await {
-                warn!(error = %err, "edit preview dashboard failed");
-                break;
-            }
-        }
-    });
-    Ok(())
-}
-
 // ── Clone flow ───────────────────────────────────────────────────────────────
 
 async fn send_clone_outcome(
@@ -5191,7 +5159,6 @@ mod tests {
             "Tạo phiên bản mới"
         );
         assert_eq!(vi_deletion_policy("preserve_destination"), "Giữ bản ở đích");
-        assert_eq!(vi_move_out_policy("detach"), "Ngừng theo dõi file");
     }
 
     #[test]
@@ -5445,20 +5412,6 @@ mod tests {
             clone_missing_destination(en),
             "No destination folder yet. Use /set_destination <folder_url>."
         );
-    }
-
-    #[test]
-    fn preview_destination_label_uses_short_id_and_drive_marker() {
-        let profile = repo::DestinationProfile {
-            id: "profile".to_string(),
-            google_account_id: "default".to_string(),
-            label: "Đích".to_string(),
-            destination_parent_id: "abcdefghijklmnop".to_string(),
-            destination_drive_id: Some("shared-drive".to_string()),
-            destination_resource_key: None,
-            is_default: true,
-        };
-        assert_eq!(preview_destination_label(&profile), "Đích [SD:abcdefgh]");
     }
 
     #[test]

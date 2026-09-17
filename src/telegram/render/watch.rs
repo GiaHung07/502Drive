@@ -96,13 +96,6 @@ pub(crate) fn watch_name_field(lang: keyboards::UiLanguage) -> &'static str {
     }
 }
 
-pub(crate) fn watch_id_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "ID watch",
-        keyboards::UiLanguage::En => "Watch ID",
-    }
-}
-
 pub(crate) fn watch_source_field(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => "Nguồn (folder cần lưu)",
@@ -128,34 +121,6 @@ pub(crate) fn watch_deletion_policy_field(lang: keyboards::UiLanguage) -> &'stat
     match lang {
         keyboards::UiLanguage::Vi => "Khi nguồn xoá file",
         keyboards::UiLanguage::En => "When source deletes a file",
-    }
-}
-
-pub(crate) fn watch_move_policy_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Khi file rời khỏi nguồn",
-        keyboards::UiLanguage::En => "When a file leaves source",
-    }
-}
-
-pub(crate) fn watch_baseline_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Mốc bắt đầu theo dõi",
-        keyboards::UiLanguage::En => "Watch baseline",
-    }
-}
-
-pub(crate) fn watch_consumed_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Đã áp đến sự kiện",
-        keyboards::UiLanguage::En => "Applied through event",
-    }
-}
-
-pub(crate) fn watch_cursor_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Sự kiện mới nhất",
-        keyboards::UiLanguage::En => "Latest event",
     }
 }
 
@@ -262,25 +227,6 @@ pub(crate) fn deletion_policy_label(lang: keyboards::UiLanguage, policy: &str) -
     match policy {
         "preserve_destination" => "Keep destination copy",
         "manual_confirmation" => "Ask before deleting",
-        other => other,
-    }
-}
-
-pub(crate) fn vi_move_out_policy(policy: &str) -> &str {
-    match policy {
-        "detach" => "Ngừng theo dõi file",
-        "keep_following" => "Tiếp tục theo dõi",
-        other => other,
-    }
-}
-
-pub(crate) fn move_out_policy_label(lang: keyboards::UiLanguage, policy: &str) -> &str {
-    if lang == keyboards::UiLanguage::Vi {
-        return vi_move_out_policy(policy);
-    }
-    match policy {
-        "detach" => "Stop tracking file",
-        "keep_following" => "Keep following",
         other => other,
     }
 }

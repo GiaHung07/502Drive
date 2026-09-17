@@ -6,13 +6,6 @@ use crate::telegram::i18n::TextKey as T;
 use crate::telegram::keyboards;
 use crate::telegram::render::{push_field, short_id};
 
-pub(crate) fn destination_title(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "THƯ MỤC ĐÍCH",
-        keyboards::UiLanguage::En => "DESTINATIONS",
-    }
-}
-
 pub(crate) fn destination_empty_text(lang: keyboards::UiLanguage) -> &'static str {
     match lang {
         keyboards::UiLanguage::Vi => {
@@ -42,13 +35,6 @@ pub(crate) fn destination_name_field(lang: keyboards::UiLanguage) -> &'static st
     match lang {
         keyboards::UiLanguage::Vi => "Tên",
         keyboards::UiLanguage::En => "Name",
-    }
-}
-
-pub(crate) fn destination_location_field(lang: keyboards::UiLanguage) -> &'static str {
-    match lang {
-        keyboards::UiLanguage::Vi => "Vị trí",
-        keyboards::UiLanguage::En => "Location",
     }
 }
 
@@ -211,12 +197,4 @@ pub(crate) fn render_destination_saved(
         location.to_string(),
     ];
     lines.join("\n")
-}
-
-fn capability_text(value: Option<bool>) -> &'static str {
-    match value {
-        Some(true) => "Có",
-        Some(false) => "Không",
-        None => "Không rõ",
-    }
 }

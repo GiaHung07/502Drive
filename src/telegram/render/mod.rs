@@ -9,7 +9,6 @@ pub(crate) mod home;
 pub(crate) mod inspect;
 pub(crate) mod job;
 pub(crate) mod jobs;
-pub(crate) mod preview;
 pub(crate) mod prompts;
 pub(crate) mod watch;
 
@@ -20,7 +19,6 @@ pub(crate) use home::*;
 pub(crate) use inspect::*;
 pub(crate) use job::*;
 pub(crate) use jobs::*;
-pub(crate) use preview::*;
 pub(crate) use prompts::*;
 pub(crate) use watch::*;
 
