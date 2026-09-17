@@ -467,7 +467,7 @@ export const Settings: React.FC<SettingsProps> = ({
               <div className="flex items-center gap-2">
                 <p className="text-sm font-medium text-text-primary">502Drive Desktop</p>
                 <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-bg-input text-accent font-medium">
-                  {status?.app_version || "v0.1.0"}
+                  {status?.app_version || "v0.2.0"}
                 </span>
               </div>
               <p className="text-xs text-text-secondary">

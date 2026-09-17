@@ -31,7 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectTab,
   isCollapsed,
   onToggleCollapse,
-  version = 'v0.1.0',
+  version = 'v0.2.0',
 }) => {
   // Sidebar base widths (64/228px @16px root) must track the responsive root
   // font-size so labels never clip when the window grows.

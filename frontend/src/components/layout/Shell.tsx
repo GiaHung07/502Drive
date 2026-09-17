@@ -120,7 +120,7 @@ export const Shell: React.FC<ShellProps> = ({
         onSelectTab={onSelectTab}
         isCollapsed={isCollapsed}
         onToggleCollapse={() => setIsCollapsed(!isCollapsed)}
-        version={status?.app_version || "v0.1.0"}
+        version={status?.app_version || "v0.2.0"}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

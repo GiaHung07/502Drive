@@ -114,7 +114,7 @@ pub async fn get_system_status() -> Result<SystemStatus, String> {
         service_active,
         service_name: "gdclone-bot.service".to_string(),
         db_integrity,
-        app_version: "v0.1.0".to_string(),
+        app_version: format!("v{}", env!("CARGO_PKG_VERSION")),
         // No fake bot username: the real handle only exists after a getMe
         // round-trip against the configured bot token, which the status panel
         // does not perform. The frontend already tolerates `None`.

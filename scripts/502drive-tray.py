@@ -25,7 +25,7 @@ from gi.repository import AyatanaAppIndicator3, GLib, Gtk, Gdk
 SERVICE_NAME = "gdclone-bot"
 APP_NAME = "502Drive"
 APP_ID = "502drive"
-APP_VERSION = "v0.1.0"
+APP_VERSION = "v0.2.0"
 ICON_ACTIVE = "502drive-symbolic"  # icon name (hicolor theme lookup - scales correctly at all sizes)
 ICON_INACTIVE = "502drive-inactive-symbolic"  # icon name
 ICON_APP = str(Path.home() / ".local/share/icons/hicolor/scalable/apps/502drive.svg")

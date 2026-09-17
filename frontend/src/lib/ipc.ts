@@ -211,7 +211,7 @@ let mockSystemStatus: SystemStatus = {
   service_active: true,
   service_name: 'gdclone-bot.service',
   db_integrity: 'ok',
-  app_version: 'v0.1.0',
+  app_version: 'v0.2.0',
   bot_username: 'Drive502_Bot',
   destination_label: 'My Drive / Backup 502',
   destination_id: '1aBcDeFgHiJkLmNoPqRsTuVwXyZ01234',
@@ -448,8 +448,8 @@ export const api = {
           },
         ],
         remote_update: {
-          current_version: 'v0.1.0',
-          latest_version: 'v0.1.0',
+          current_version: 'v0.2.0',
+          latest_version: 'v0.2.0',
           update_available: false,
           changelog: 'Phiên bản ổn định mới nhất.',
         },
@@ -462,10 +462,10 @@ export const api = {
     if (isTauri()) return await invoke<RemoteUpdateInfo>('check_remote_update')
     if (USE_MOCKS) {
       return {
-        current_version: 'v0.1.0',
-        latest_version: 'v0.1.0',
+        current_version: 'v0.2.0',
+        latest_version: 'v0.2.0',
         update_available: false,
-        changelog: 'Bạn đang sử dụng phiên bản mới nhất v0.1.0.',
+        changelog: 'Bạn đang sử dụng phiên bản mới nhất v0.2.0.',
       }
     }
     throw new Error(MOCK_UNAVAILABLE)
