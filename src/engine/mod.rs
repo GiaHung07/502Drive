@@ -5,5 +5,6 @@ pub mod operation;
 pub mod recovery;
 pub mod retry;
 pub mod scheduler;
+pub mod services;
 pub mod traversal;
 pub mod ui_requests;

@@ -30,7 +30,7 @@ use crate::{
     drive::{client::DriveClient, links::parse_drive_reference, token_manager::TokenManager},
     engine::{
         copy::{CloneRequest, CloneService, validate_clone_request},
-        recovery,
+        recovery, services,
     },
     state::{
         db::Database,
@@ -63,6 +63,11 @@ pub struct WatchRequestPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryRequestPayload {
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResumeRequestPayload {
     pub job_id: String,
 }
 
@@ -111,6 +116,7 @@ async fn process_pending(
             ui_requests::KIND_CLONE => process_clone(config, db, drive, &request).await,
             ui_requests::KIND_WATCH => process_watch(config, db, drive, &request).await,
             ui_requests::KIND_RETRY => process_retry(config, db, &request).await,
+            ui_requests::KIND_RESUME => process_resume(config, db, drive, &request).await,
             other => {
                 warn!(
                     request_id = request.id,
@@ -355,7 +361,7 @@ async fn process_retry(
         return reject(db, &request.id, "job not found").await;
     };
 
-    match repo::retry_failed_job_for_user(db, owner, &job_id).await? {
+    match services::JobService::retry(db, owner, &job_id).await? {
         Some(summary) => {
             accept(
                 db,
@@ -379,6 +385,49 @@ async fn process_retry(
         None => {
             reject(db, &request.id, "job not retryable or has no failed items").await?;
         }
+    }
+    Ok(())
+}
+
+// ── Resume requests ──────────────────────────────────────────────────────────
+
+/// GUI-initiated job resume. The GUI process cannot spawn the daemon's resume
+/// worker, so the whole transition (`paused` → `recovering`) plus the worker
+/// spawn happen here, in the daemon, via [`services::JobService::resume`].
+async fn process_resume(
+    config: &AppConfig,
+    db: &Database,
+    _drive: &DriveClient,
+    request: &UiRequest,
+) -> anyhow::Result<()> {
+    let payload: ResumeRequestPayload = match serde_json::from_str(&request.payload_json) {
+        Ok(p) => p,
+        Err(err) => {
+            return reject(db, &request.id, &format!("invalid resume payload: {err}")).await;
+        }
+    };
+
+    let job_id = payload.job_id.trim().to_string();
+    let owner = job_owner_user(db, &job_id).await?;
+    let Some(owner) = owner else {
+        return reject(db, &request.id, "job not found").await;
+    };
+
+    if services::JobService::resume(db, owner, &job_id).await? {
+        accept(
+            db,
+            &request.id,
+            &format!("resume accepted for job {job_id}"),
+        )
+        .await?;
+        recovery::spawn_startup_resume_worker(config.clone(), db.clone(), drive_client_for(config));
+    } else {
+        reject(
+            db,
+            &request.id,
+            "job is not paused (resume requires status 'paused')",
+        )
+        .await?;
     }
     Ok(())
 }

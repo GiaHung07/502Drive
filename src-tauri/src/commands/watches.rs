@@ -1,6 +1,9 @@
-use crate::commands::get_db_path;
-use gdclone_bot::state::repo;
-use rusqlite::{Connection, OpenFlags, params};
+use crate::commands::{get_config_path, get_db_path, resolve_watch_actor};
+use gdclone_bot::config::AppConfig;
+use gdclone_bot::engine::services::watch::{WatchPolicyKind, WatchService};
+use gdclone_bot::state::db::Database;
+use gdclone_bot::state::repo::{self, WatchResumeResult};
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
@@ -62,106 +65,94 @@ fn short_id(id: &str) -> String {
     }
 }
 
+/// Shared setup for the watch-control commands: open the database and resolve
+/// the acting telegram user id (see `resolve_watch_actor`).
+async fn open_watch_db(watch_id: &str) -> Result<(Database, i64), String> {
+    let db_path = get_db_path();
+    if !db_path.exists() {
+        return Err("Database does not exist".to_string());
+    }
+    let actor = {
+        let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| e.to_string())?;
+        resolve_watch_actor(&conn, watch_id)?
+    };
+    let db = Database::open(&db_path)
+        .await
+        .map_err(|e| format!("cannot open state database: {e:#}"))?;
+    Ok((db, actor))
+}
+
+/// Pause a watch through the engine's guarded transition
+/// (`active|catching_up|degraded` → `paused`). Never writes `paused`
+/// unconditionally — that used to also stop `initializing`/`needs_reconcile`
+/// watches behind the engine's back.
 #[tauri::command]
 pub async fn pause_watch(watch_id: String) -> Result<(), String> {
-    let db_path = get_db_path();
-    if !db_path.exists() {
-        return Err("Database does not exist".to_string());
+    let (db, actor) = open_watch_db(&watch_id).await?;
+    let changed = WatchService::pause(&db, actor, &watch_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if !changed {
+        return Err("watch cannot be paused from its current state".to_string());
     }
-
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().timestamp_millis();
-    conn.execute(
-        "UPDATE watch_subscriptions SET status = 'paused', updated_at_ms = ?1 WHERE id = ?2;",
-        params![now, watch_id],
-    )
-    .map_err(|e| e.to_string())?;
-
     Ok(())
 }
 
+/// Resume a paused watch through the engine's backlog-aware transition:
+/// within the configured backlog limit → `catching_up`, beyond it →
+/// `needs_reconcile`. Never writes `active` directly — the dispatcher owns
+/// that promotion.
 #[tauri::command]
 pub async fn resume_watch(watch_id: String) -> Result<(), String> {
-    let db_path = get_db_path();
-    if !db_path.exists() {
-        return Err("Database does not exist".to_string());
-    }
-
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().timestamp_millis();
-    conn.execute(
-        "UPDATE watch_subscriptions SET status = 'active', updated_at_ms = ?1 WHERE id = ?2;",
-        params![now, watch_id],
+    let (db, actor) = open_watch_db(&watch_id).await?;
+    let config =
+        AppConfig::load(&get_config_path()).map_err(|e| format!("cannot load config: {e:#}"))?;
+    match WatchService::resume(
+        &db,
+        actor,
+        &watch_id,
+        config.watch.max_backlog_events_per_watch,
     )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
+    .await
+    .map_err(|e| format!("{e:#}"))?
+    {
+        WatchResumeResult::Resumed | WatchResumeResult::NeedsReconcile { .. } => Ok(()),
+        WatchResumeResult::NotResumable => {
+            Err("watch cannot be resumed from its current state".to_string())
+        }
+    }
 }
 
-/// Stop (unwatch). Safe as a direct write: the engine's own
-/// `stop_watch_for_user` is the same unconditional status transition
-/// (`status != 'stopped'` → `'stopped'`); the dispatcher ignores stopped
-/// watches and the poller/dispatcher re-read state every cycle.
+/// Stop (unwatch) through the engine's `stop_watch_for_user` semantics
+/// (any status `!= 'stopped'` → `stopped`); the dispatcher ignores stopped
+/// watches and re-reads state every cycle.
 #[tauri::command]
 pub async fn unwatch(watch_id: String) -> Result<bool, String> {
-    let db_path = get_db_path();
-    if !db_path.exists() {
-        return Err("Database does not exist".to_string());
-    }
-
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().timestamp_millis();
-    let changed = conn
-        .execute(
-            "UPDATE watch_subscriptions SET status = 'stopped', updated_at_ms = ?1
-             WHERE id = ?2 AND status != 'stopped';",
-            params![now, watch_id],
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(changed > 0)
+    let (db, actor) = open_watch_db(&watch_id).await?;
+    WatchService::stop(&db, actor, &watch_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
-/// Update one policy of a watch. Safe as a direct write: the engine's
-/// `set_watch_*_policy` repo functions are plain column UPDATEs with no status
-/// guard; the dispatcher reads the policy per event. Values are validated
-/// against the same sets as the `watch_subscriptions` CHECK constraints.
+/// Update one policy of a watch through the shared [`WatchService`]
+/// validator, which covers all three policy kinds and mirrors the
+/// `watch_subscriptions` CHECK constraints. The dispatcher reads the policy
+/// per event.
 #[tauri::command]
 pub async fn set_watch_policy(
     watch_id: String,
     policy_kind: String,
     policy_value: String,
 ) -> Result<(), String> {
-    let db_path = get_db_path();
-    if !db_path.exists() {
-        return Err("Database does not exist".to_string());
-    }
-
-    let (column, allowed): (&str, &[&str]) = match policy_kind.as_str() {
-        "content_update" => (
-            "content_update_policy",
-            &["versioned_copy", "replace_copy", "manual_confirmation"],
-        ),
-        "deletion" => (
-            "deletion_policy",
-            &["preserve_destination", "manual_confirmation"],
-        ),
-        "move_out" => ("move_out_policy", &["detach", "keep_following"]),
-        other => return Err(format!("unknown policy kind '{other}'")),
-    };
-    if !allowed.contains(&policy_value.as_str()) {
-        return Err(format!(
-            "invalid {} policy '{}'; expected one of: {}",
-            policy_kind,
-            policy_value,
-            allowed.join(", ")
-        ));
-    }
-
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().timestamp_millis();
-    let sql =
-        format!("UPDATE watch_subscriptions SET {column} = ?1, updated_at_ms = ?2 WHERE id = ?3;");
-    conn.execute(&sql, params![policy_value, now, watch_id])
+    let kind = WatchPolicyKind::parse(&policy_kind)
+        .ok_or_else(|| format!("unknown policy kind '{policy_kind}'"))?;
+    let (db, actor) = open_watch_db(&watch_id).await?;
+    let changed = WatchService::set_policy(&db, actor, &watch_id, kind, &policy_value)
+        .await
         .map_err(|e| e.to_string())?;
+    if !changed {
+        return Err(format!("watch {watch_id} not found"));
+    }
     Ok(())
 }

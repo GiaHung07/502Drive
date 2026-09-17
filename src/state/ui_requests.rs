@@ -20,6 +20,9 @@ use super::db::{Database, now_ms};
 pub const KIND_CLONE: &str = "clone";
 pub const KIND_WATCH: &str = "watch";
 pub const KIND_RETRY: &str = "retry";
+/// GUI-initiated job resume: the repo transition (`paused` → `recovering`)
+/// plus the daemon-side resume worker must both run in the daemon process.
+pub const KIND_RESUME: &str = "resume";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UiRequest {

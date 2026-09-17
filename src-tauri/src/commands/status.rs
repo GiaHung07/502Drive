@@ -1,4 +1,5 @@
 use crate::commands::get_db_path;
+use gdclone_bot::state::{db::Database, repo};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::process::Command;
@@ -58,55 +59,15 @@ pub async fn get_system_status() -> Result<SystemStatus, String> {
     let mut total_cloned_bytes = 0i64;
 
     if db_path.exists() {
+        // Read-only connection: integrity check plus the two aggregates that
+        // have no repo function yet (byte/file sums over job_items).
         if let Ok(conn) = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-            // Check integrity
             if let Ok(mut stmt) = conn.prepare("PRAGMA integrity_check;") {
                 let integrity: Result<String, _> = stmt.query_row([], |row| row.get(0));
                 if let Ok(val) = integrity {
                     db_integrity = val;
                 }
             }
-
-            // Google account
-            if let Ok(mut stmt) = conn.prepare(
-                "SELECT email, status FROM google_accounts ORDER BY updated_at_ms DESC LIMIT 1;",
-            ) {
-                if let Ok(row) = stmt.query_row([], |r| {
-                    Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?))
-                }) {
-                    google_account = row.0;
-                    account_status = row.1;
-                }
-            }
-
-            // Destination profile
-            if let Ok(mut stmt) = conn.prepare(
-                "SELECT label, destination_parent_id FROM destination_profiles WHERE is_default = 1 LIMIT 1;"
-            ) {
-                if let Ok(row) = stmt.query_row([], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                }) {
-                    destination_label = Some(row.0);
-                    destination_id = Some(row.1);
-                }
-            }
-
-            // Job stats
-            if let Ok(mut stmt) = conn.prepare("SELECT COUNT(*) FROM jobs;") {
-                total_jobs = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
-            }
-            if let Ok(mut stmt) = conn.prepare(
-                "SELECT COUNT(*) FROM jobs WHERE status IN ('running', 'discovering', 'queued', 'pausing');"
-            ) {
-                active_jobs = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
-            }
-            if let Ok(mut stmt) =
-                conn.prepare("SELECT COUNT(*) FROM jobs WHERE status = 'completed';")
-            {
-                completed_jobs = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
-            }
-
-            // File & bytes stats
             if let Ok(mut stmt) =
                 conn.prepare("SELECT COALESCE(SUM(completed_items), 0) FROM jobs;")
             {
@@ -117,6 +78,31 @@ pub async fn get_system_status() -> Result<SystemStatus, String> {
             ) {
                 total_cloned_bytes = stmt.query_row([], |r| r.get(0)).unwrap_or(0);
             }
+        }
+
+        // Everything else goes through the shared repo layer so the GUI and
+        // the daemon always agree on the definitions (active = queued |
+        // discovering | running | pausing | paused | cancelling | recovering).
+        if let Ok(db) = Database::open(&db_path).await {
+            if let Ok(Some(account)) = repo::google_account_secret(&db, "default").await {
+                google_account = account.email;
+                account_status = account.status;
+            }
+            // Default destination from destination_profiles; None (empty
+            // state) when nothing is configured — no invented fallback label.
+            if let Ok(Some(profile)) = repo::default_destination_profile(&db, "default").await {
+                destination_label = Some(profile.label);
+                destination_id = Some(profile.destination_parent_id);
+            }
+            if let Ok(counts) = repo::job_status_counts(&db).await {
+                for count in counts {
+                    total_jobs += count.count;
+                    if count.status == "completed" {
+                        completed_jobs = count.count;
+                    }
+                }
+            }
+            active_jobs = repo::active_job_count(&db).await.unwrap_or(0);
         }
     } else {
         db_integrity = "no_db_yet".to_string();
@@ -129,8 +115,11 @@ pub async fn get_system_status() -> Result<SystemStatus, String> {
         service_name: "gdclone-bot.service".to_string(),
         db_integrity,
         app_version: "v0.1.0".to_string(),
-        bot_username: Some("Drive502_Bot".to_string()),
-        destination_label: destination_label.or_else(|| Some("My Drive / Backup 502".to_string())),
+        // No fake bot username: the real handle only exists after a getMe
+        // round-trip against the configured bot token, which the status panel
+        // does not perform. The frontend already tolerates `None`.
+        bot_username: None,
+        destination_label,
         destination_id,
         stats: SystemStats {
             total_jobs,

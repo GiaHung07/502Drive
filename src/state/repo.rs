@@ -2592,6 +2592,49 @@ pub async fn set_watch_content_update_policy(
         .await?)
 }
 
+async fn set_watch_policy_column(
+    db: &Database,
+    telegram_user_id: i64,
+    watch_id: &str,
+    column: &str,
+    policy: &str,
+) -> anyhow::Result<bool> {
+    let watch_id = watch_id.to_string();
+    let column = column.to_string();
+    let policy = policy.to_string();
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let sql = format!(
+                "UPDATE watch_subscriptions
+                 SET {column} = ?1, updated_at_ms = ?2
+                 WHERE telegram_user_id = ?3 AND id = ?4"
+            );
+            let changed =
+                conn.execute(&sql, params![policy, now_ms(), telegram_user_id, watch_id])?;
+            Ok::<bool, rusqlite::Error>(changed > 0)
+        })
+        .await?)
+}
+
+pub async fn set_watch_deletion_policy(
+    db: &Database,
+    telegram_user_id: i64,
+    watch_id: &str,
+    policy: &str,
+) -> anyhow::Result<bool> {
+    set_watch_policy_column(db, telegram_user_id, watch_id, "deletion_policy", policy).await
+}
+
+pub async fn set_watch_move_out_policy(
+    db: &Database,
+    telegram_user_id: i64,
+    watch_id: &str,
+    policy: &str,
+) -> anyhow::Result<bool> {
+    set_watch_policy_column(db, telegram_user_id, watch_id, "move_out_policy", policy).await
+}
+
 /// Replace the exclude-glob list (a JSON string array) of a user-owned watch.
 pub async fn set_watch_exclude_globs(
     db: &Database,

@@ -2,44 +2,23 @@
 //!
 //! Design: the GUI process NEVER runs engine work (pollers, clone engine,
 //! watch initializer live in the daemon `502drive run`). Mutating operations
-//! are enqueued into the shared `ui_requests` table (migration 0008) and the
-//! daemon's consumer (`gdclone_bot::engine::ui_requests`) picks them up ~2s
-//! later. `browse_drive_children` is the one exception that performs a Drive
-//! call in the GUI process: it is a pure read (list folders) through the
-//! engine library, so the frontend folder picker works even while inspecting
-//! a running daemon.
+//! are enqueued into the shared `ui_requests` table (migrations 0008/0009) and
+//! the daemon's consumer (`gdclone_bot::engine::ui_requests`) picks them up
+//! ~2s later. `browse_drive_children` is the one exception that performs a
+//! Drive call in the GUI process: it is a pure read (list folders) through
+//! the shared [`gdclone_bot::engine::services::DestinationService`], so the
+//! frontend folder picker works even while inspecting a running daemon.
 
-use crate::commands::{get_config_path, get_db_path};
+use crate::commands::{get_config_path, get_db_path, open_queue_conn};
 use gdclone_bot::{
     config::AppConfig,
-    drive::{client::DriveClient, id_parser, token_manager::TokenManager},
+    drive::id_parser,
+    engine::services::DestinationService,
     engine::ui_requests::{CloneRequestPayload, RetryRequestPayload, WatchRequestPayload},
     state::{db::Database, ui_requests},
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
-
-fn open_queue_conn() -> Result<Connection, String> {
-    let db_path = get_db_path();
-    if !db_path.exists() {
-        return Err("Database does not exist".to_string());
-    }
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='ui_requests')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if !table_exists {
-        return Err(
-            "ui_requests table missing — start the 502drive daemon once so it applies migrations"
-                .to_string(),
-        );
-    }
-    Ok(conn)
-}
 
 // ── Request queue commands ───────────────────────────────────────────────────
 
@@ -177,7 +156,9 @@ pub struct DriveEntry {
 }
 
 /// List Drive folders for the folder picker. `parent_id = None` lists My Drive
-/// root ("root") plus the account's shared drives. Read-only Drive calls.
+/// root ("root") plus the account's shared drives. Read-only Drive calls,
+/// delegated to the shared DestinationService (same paging core the telegram
+/// destination browser uses).
 #[tauri::command]
 pub async fn browse_drive_children(
     parent_id: Option<String>,
@@ -188,80 +169,17 @@ pub async fn browse_drive_children(
     let db = Database::open(&get_db_path())
         .await
         .map_err(|e| format!("cannot open state database: {e:#}"))?;
-    let token_manager = TokenManager::new(config, db);
-    let token = token_manager
-        .access_token("default")
-        .await
-        .map_err(|e| format!("cannot get Drive access token: {e:#}"))?;
-    let drive = DriveClient::new();
-
-    match parent_id.as_deref() {
-        None => {
-            // Top level: shared drives first, then My Drive root folders.
-            let mut entries = Vec::new();
-            match drive
-                .list_shared_drives_page_size(token.as_str(), None, 200)
-                .await
-            {
-                Ok(drives) => {
-                    for d in drives.drives {
-                        let id = d.id;
-                        entries.push(DriveEntry {
-                            name: d.name,
-                            is_folder: true,
-                            drive_id: Some(id.clone()),
-                            id,
-                        });
-                    }
-                }
-                Err(err) => {
-                    // Shared drives can 403 on plain Gmail accounts — degrade
-                    // gracefully and still show My Drive.
-                    if err.status().map(|s| s.as_u16()) != Some(403) {
-                        return Err(format!("list shared drives failed: {err}"));
-                    }
-                }
-            }
-            let page = drive
-                .list_child_folders_page_size(token.as_str(), "root", None, None, 200, None)
-                .await
-                .map_err(|e| format!("list My Drive folders failed: {e}"))?;
-            for f in page.files {
-                let is_folder = f.is_folder();
-                entries.push(DriveEntry {
-                    id: f.id,
-                    name: f.name,
-                    is_folder,
-                    drive_id: f.drive_id,
-                });
-            }
-            Ok(entries)
-        }
-        Some(parent) => {
-            let page = drive
-                .list_child_folders_page_size(
-                    token.as_str(),
-                    parent,
-                    None,
-                    None,
-                    200,
-                    drive_id.as_deref(),
-                )
-                .await
-                .map_err(|e| format!("list folders failed: {e}"))?;
-            Ok(page
-                .files
-                .into_iter()
-                .map(|f| {
-                    let is_folder = f.is_folder();
-                    DriveEntry {
-                        id: f.id,
-                        name: f.name,
-                        is_folder,
-                        drive_id: f.drive_id,
-                    }
-                })
-                .collect())
-        }
-    }
+    let entries =
+        DestinationService::browse(&config, &db, parent_id.as_deref(), drive_id.as_deref())
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| DriveEntry {
+            id: entry.id,
+            name: entry.name,
+            is_folder: entry.is_folder,
+            drive_id: entry.drive_id,
+        })
+        .collect())
 }
