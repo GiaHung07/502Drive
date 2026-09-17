@@ -25,6 +25,7 @@ pub enum TextKey {
     BadgeSharedDrive,
     BrowseMyDrive,
     BrowseSharedDrive,
+    ButtonSetDefault,
     Cancel,
     Clone,
     CloneHere,
@@ -34,6 +35,7 @@ pub enum TextKey {
     ConfirmCancelJobTitle,
     ConfirmUnwatchBody,
     ConfirmUnwatchTitle,
+    ConfirmSetDestinationPrompt,
     CommandAccount,
     CommandCancel,
     CommandClearDestination,
@@ -153,6 +155,7 @@ impl TextKey {
         Self::BadgeSharedDrive,
         Self::BrowseMyDrive,
         Self::BrowseSharedDrive,
+        Self::ButtonSetDefault,
         Self::Cancel,
         Self::Clone,
         Self::CloneHere,
@@ -162,6 +165,7 @@ impl TextKey {
         Self::ConfirmCancelJobTitle,
         Self::ConfirmUnwatchBody,
         Self::ConfirmUnwatchTitle,
+        Self::ConfirmSetDestinationPrompt,
         Self::CommandAccount,
         Self::CommandCancel,
         Self::CommandClearDestination,
@@ -287,6 +291,8 @@ impl TextKey {
             (UiLanguage::En, Self::BrowseMyDrive) => "Browse My Drive",
             (UiLanguage::Vi, Self::BrowseSharedDrive) => "Duyệt Shared Drive",
             (UiLanguage::En, Self::BrowseSharedDrive) => "Browse Shared Drive",
+            (UiLanguage::Vi, Self::ButtonSetDefault) => "✓ Đặt",
+            (UiLanguage::En, Self::ButtonSetDefault) => "✓ Set",
             (UiLanguage::Vi, Self::Cancel) => "Huỷ",
             (UiLanguage::En, Self::Cancel) => "Cancel",
             (UiLanguage::Vi, Self::Clone) => "Clone",
@@ -313,6 +319,12 @@ impl TextKey {
             }
             (UiLanguage::Vi, Self::ConfirmUnwatchTitle) => "XÁC NHẬN DỪNG WATCH",
             (UiLanguage::En, Self::ConfirmUnwatchTitle) => "CONFIRM STOP WATCH",
+            (UiLanguage::Vi, Self::ConfirmSetDestinationPrompt) => {
+                "Đặt đây làm thư mục đích mặc định?"
+            }
+            (UiLanguage::En, Self::ConfirmSetDestinationPrompt) => {
+                "Set this as default destination?"
+            }
             (UiLanguage::Vi, Self::CommandAccount) => "Xem tài khoản Google",
             (UiLanguage::En, Self::CommandAccount) => "Show Google account",
             (UiLanguage::Vi, Self::CommandCancel) => "Huỷ job",

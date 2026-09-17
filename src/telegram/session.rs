@@ -56,6 +56,7 @@ impl SessionFlow {
 pub enum SessionStep {
     WaitSource,
     WaitDestination,
+    WaitConfirm,
     Inspected,
     WaitInput,
 }
@@ -65,6 +66,7 @@ impl SessionStep {
         match self {
             Self::WaitSource => "wait_source",
             Self::WaitDestination => "wait_destination",
+            Self::WaitConfirm => "wait_confirm",
             Self::Inspected => "inspected",
             Self::WaitInput => "wait_input",
         }
@@ -74,6 +76,7 @@ impl SessionStep {
         match s {
             "wait_source" => Self::WaitSource,
             "wait_destination" => Self::WaitDestination,
+            "wait_confirm" => Self::WaitConfirm,
             "inspected" => Self::Inspected,
             _ => Self::WaitInput,
         }
@@ -90,6 +93,8 @@ pub struct InspectSessionPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DestinationSessionPayload {
     pub return_to_inspect: Option<InspectSessionPayload>,
+    pub pending_folder: Option<crate::drive::types::DriveFile>,
+    pub resource_key: Option<String>,
 }
 
 pub async fn get_session(

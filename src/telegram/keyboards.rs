@@ -21,6 +21,21 @@ pub fn confirm_clone_keyboard(state_id: &str, lang: UiLanguage) -> InlineKeyboar
     ]])
 }
 
+pub fn confirm_set_destination_keyboard(
+    session_id: &str,
+    lang: UiLanguage,
+) -> InlineKeyboardMarkup {
+    debug_assert!(format!("dest:confirm:{session_id}").len() <= 64);
+    debug_assert!(format!("dest:cancel:{session_id}").len() <= 64);
+    InlineKeyboardMarkup::new([[
+        InlineKeyboardButton::callback(
+            lang.text(T::ButtonSetDefault),
+            format!("dest:confirm:{session_id}"),
+        ),
+        InlineKeyboardButton::callback(lang.text(T::Cancel), format!("dest:cancel:{session_id}")),
+    ]])
+}
+
 pub fn smart_link_action_keyboard(state_id: &str, lang: UiLanguage) -> InlineKeyboardMarkup {
     let (clone_label, sync_label, dest_label, cancel_label) = match lang {
         UiLanguage::Vi => (
@@ -437,11 +452,11 @@ fn truncate_label(label: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        UiLanguage, account_keyboard, callback_of, destination_browser_keyboard,
-        destination_panel_keyboard, job_cancel_confirm_keyboard, job_detail_keyboard,
-        language_keyboard, main_menu_keyboard, recent_destinations_keyboard,
-        smart_link_action_keyboard, truncate_label, watch_detail_keyboard, watch_list_keyboard,
-        watch_unwatch_confirm_keyboard,
+        UiLanguage, account_keyboard, callback_of, confirm_set_destination_keyboard,
+        destination_browser_keyboard, destination_panel_keyboard, job_cancel_confirm_keyboard,
+        job_detail_keyboard, language_keyboard, main_menu_keyboard, recent_destinations_keyboard,
+        smart_link_action_keyboard, truncate_label, unified_inspect_keyboard,
+        watch_detail_keyboard, watch_list_keyboard, watch_unwatch_confirm_keyboard,
     };
 
     #[test]
@@ -635,5 +650,44 @@ mod tests {
         assert_eq!(kb.inline_keyboard[1][0].text, "Đồng bộ (Realtime Sync)");
         assert_eq!(kb.inline_keyboard[2][0].text, "Đổi thư mục đích");
         assert_eq!(kb.inline_keyboard[2][1].text, "Huỷ");
+    }
+
+    #[test]
+    fn confirm_set_destination_keyboard_has_set_and_cancel() {
+        let vi = confirm_set_destination_keyboard("session-123", UiLanguage::Vi);
+        assert_eq!(vi.inline_keyboard[0][0].text, "✓ Đặt");
+        assert_eq!(
+            callback_of(&vi.inline_keyboard[0][0]),
+            Some("dest:confirm:session-123")
+        );
+        assert_eq!(vi.inline_keyboard[0][1].text, "Huỷ");
+        assert_eq!(
+            callback_of(&vi.inline_keyboard[0][1]),
+            Some("dest:cancel:session-123")
+        );
+
+        let en = confirm_set_destination_keyboard("session-123", UiLanguage::En);
+        assert_eq!(en.inline_keyboard[0][0].text, "✓ Set");
+        assert_eq!(
+            callback_of(&en.inline_keyboard[0][0]),
+            Some("dest:confirm:session-123")
+        );
+        assert_eq!(en.inline_keyboard[0][1].text, "Cancel");
+        assert_eq!(
+            callback_of(&en.inline_keyboard[0][1]),
+            Some("dest:cancel:session-123")
+        );
+    }
+
+    #[test]
+    fn unified_inspect_keyboard_callback_data_is_within_limit() {
+        let kb = unified_inspect_keyboard("sess-123", true, true, UiLanguage::Vi);
+        for row in &kb.inline_keyboard {
+            for btn in row {
+                if let Some(cb) = callback_of(btn) {
+                    assert!(cb.len() <= 64, "Callback data exceeds 64 bytes: {cb}");
+                }
+            }
+        }
     }
 }

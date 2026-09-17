@@ -20,12 +20,11 @@ use crate::{
         links::{DriveReference, parse_drive_reference},
         token_manager::TokenManager,
         types::DriveFile,
-        types::FOLDER_MIME_TYPE,
     },
     engine::{
         copy::{CloneOutcome, CloneRequest, CloneService},
         recovery,
-        services::{JobResolveError, JobService},
+        services::{DestinationService, JobResolveError, JobService},
     },
     report,
     secrets::FileSecretStore,
@@ -318,51 +317,21 @@ async fn handle_session_input(
                     .await?;
             }
         }
-        (session::SessionFlow::SetDestination, session::SessionStep::WaitDestination) => {
+        (session::SessionFlow::SetDestination, session::SessionStep::WaitDestination)
+        | (session::SessionFlow::SetDestination, session::SessionStep::WaitConfirm) => {
             let payload: Option<session::DestinationSessionPayload> =
                 serde_json::from_str(&active_session.payload_json).ok();
             let return_to_inspect = payload.and_then(|p| p.return_to_inspect);
-
-            match crate::engine::services::DestinationService::set_default(&config, &db, &input)
-                .await
-            {
-                Ok(dest_file) => {
-                    let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
-                    let success_msg = match ui_language(&config) {
-                        keyboards::UiLanguage::Vi => {
-                            format!("✓ Đã đặt thư mục đích mặc định: {}", dest_file.name)
-                        }
-                        keyboards::UiLanguage::En => {
-                            format!("✓ Default destination set: {}", dest_file.name)
-                        }
-                    };
-                    bot.send_message(msg.chat.id, success_msg).await?;
-
-                    if let Some(inspect_payload) = return_to_inspect {
-                        if let Some(reference) = crate::drive::id_parser::detect_drive_reference(
-                            &inspect_payload.source_input,
-                        ) {
-                            handle_inspect_flow(
-                                bot,
-                                msg.chat.id,
-                                config,
-                                db,
-                                user_id,
-                                reference,
-                                inspect_payload.source_input,
-                            )
-                            .await?;
-                        }
-                    }
-                }
-                Err(err) => {
-                    bot.send_message(
-                        msg.chat.id,
-                        format_error_for_user(&err, ui_language(&config)),
-                    )
-                    .await?;
-                }
-            }
+            handle_set_destination_input(
+                bot,
+                msg.chat.id,
+                config,
+                db,
+                user_id,
+                input,
+                return_to_inspect,
+            )
+            .await?;
         }
         (session::SessionFlow::Prompt(action), session::SessionStep::WaitInput) => {
             let _ = session::clear_session(&db, user_id, msg.chat.id.0).await;
@@ -519,6 +488,70 @@ async fn handle_inspect_flow(
         }
         Err(err) => {
             bot.edit_message_text(chat_id, loading.id, clone_inspect_error(lang, &err))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_set_destination_input(
+    bot: Bot,
+    chat_id: ChatId,
+    config: AppConfig,
+    db: Database,
+    user_id: i64,
+    input: String,
+    return_to_inspect: Option<session::InspectSessionPayload>,
+) -> ResponseResult<()> {
+    let lang = ui_language(&config);
+    let loading = bot
+        .send_message(
+            chat_id,
+            match lang {
+                keyboards::UiLanguage::Vi => "Đang kiểm tra thư mục đích...",
+                keyboards::UiLanguage::En => "Checking destination folder...",
+            },
+        )
+        .await?;
+
+    match DestinationService::inspect_folder(&config, &db, &input).await {
+        Ok((dest_file, resource_key)) => {
+            let payload = serde_json::to_string(&session::DestinationSessionPayload {
+                return_to_inspect,
+                pending_folder: Some(dest_file.clone()),
+                resource_key,
+            })
+            .unwrap_or_default();
+
+            let sess = match session::start_session(
+                &db,
+                user_id,
+                chat_id.0,
+                session::SessionFlow::SetDestination,
+                session::SessionStep::WaitConfirm,
+                payload,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(err) => {
+                    bot.edit_message_text(chat_id, loading.id, format_error_for_user(&err, lang))
+                        .await?;
+                    return Ok(());
+                }
+            };
+
+            let prompt_text =
+                lang.text(crate::telegram::i18n::TextKey::ConfirmSetDestinationPrompt);
+            let card_text = format!("{prompt_text}\n\n📁 {}", dest_file.name);
+            let keyboard = keyboards::confirm_set_destination_keyboard(&sess.id, lang);
+
+            bot.edit_message_text(chat_id, loading.id, card_text)
+                .reply_markup(keyboard)
+                .await?;
+        }
+        Err(err) => {
+            bot.edit_message_text(chat_id, loading.id, format_error_for_user(&err, lang))
                 .await?;
         }
     }
@@ -873,6 +906,8 @@ pub async fn handle_callback_query(
             };
             let dest_payload = serde_json::to_string(&session::DestinationSessionPayload {
                 return_to_inspect: Some(payload),
+                pending_folder: None,
+                resource_key: None,
             })
             .unwrap_or_default();
             let _ = session::start_session(
@@ -908,6 +943,142 @@ pub async fn handle_callback_query(
                 return Ok(());
             }
             clone_request_cancelled(ui_language(&config)).to_string()
+        }
+        Some(("dest", "confirm", session_id)) => {
+            let sess = match session::get_session(&db, user_id, chat_id.0).await {
+                Ok(Some(s)) if s.id == session_id => s,
+                _ => {
+                    let msg_text = clone_request_expired(ui_language(&config));
+                    if let Some(message) = query.message.as_ref() {
+                        bot.edit_message_text(chat_id, message.id(), msg_text)
+                            .await?;
+                    } else {
+                        bot.send_message(chat_id, msg_text).await?;
+                    }
+                    return Ok(());
+                }
+            };
+            let payload: Option<session::DestinationSessionPayload> =
+                serde_json::from_str(&sess.payload_json).ok();
+            let Some(payload) = payload else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, msg_text).await?;
+                }
+                return Ok(());
+            };
+
+            let Some(folder) = payload.pending_folder else {
+                let msg_text = clone_request_expired(ui_language(&config));
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(chat_id, message.id(), msg_text)
+                        .await?;
+                }
+                return Ok(());
+            };
+
+            let _ = session::clear_session(&db, user_id, chat_id.0).await;
+            if let Err(err) =
+                DestinationService::save_as_default(&db, &folder, payload.resource_key).await
+            {
+                if let Some(message) = query.message.as_ref() {
+                    bot.edit_message_text(
+                        chat_id,
+                        message.id(),
+                        format_error_for_user(&err, ui_language(&config)),
+                    )
+                    .await?;
+                } else {
+                    bot.send_message(chat_id, format_error_for_user(&err, ui_language(&config)))
+                        .await?;
+                }
+                return Ok(());
+            }
+
+            let success_text = match ui_language(&config) {
+                keyboards::UiLanguage::Vi => {
+                    format!("✓ Đã đặt thư mục đích mặc định: {}", folder.name)
+                }
+                keyboards::UiLanguage::En => {
+                    format!("✓ Default destination set: {}", folder.name)
+                }
+            };
+
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), &success_text)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, &success_text).await?;
+            }
+
+            if let Some(inspect_payload) = payload.return_to_inspect {
+                if let Some(reference) =
+                    crate::drive::id_parser::detect_drive_reference(&inspect_payload.source_input)
+                {
+                    handle_inspect_flow(
+                        bot,
+                        chat_id,
+                        config,
+                        db,
+                        user_id,
+                        reference,
+                        inspect_payload.source_input,
+                    )
+                    .await?;
+                }
+            }
+            return Ok(());
+        }
+        Some(("dest", "cancel", session_id)) => {
+            let sess = session::get_session(&db, user_id, chat_id.0)
+                .await
+                .ok()
+                .flatten();
+            let return_to_inspect = if let Some(s) = sess {
+                if s.id == session_id {
+                    let _ = session::clear_session(&db, user_id, chat_id.0).await;
+                    let payload: Option<session::DestinationSessionPayload> =
+                        serde_json::from_str(&s.payload_json).ok();
+                    payload.and_then(|p| p.return_to_inspect)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let cancel_text = match ui_language(&config) {
+                keyboards::UiLanguage::Vi => "Đã huỷ cài đặt thư mục đích.",
+                keyboards::UiLanguage::En => "Cancelled setting destination folder.",
+            };
+
+            if let Some(message) = query.message.as_ref() {
+                bot.edit_message_text(chat_id, message.id(), cancel_text)
+                    .await?;
+            } else {
+                bot.send_message(chat_id, cancel_text).await?;
+            }
+
+            if let Some(inspect_payload) = return_to_inspect {
+                if let Some(reference) =
+                    crate::drive::id_parser::detect_drive_reference(&inspect_payload.source_input)
+                {
+                    handle_inspect_flow(
+                        bot,
+                        chat_id,
+                        config,
+                        db,
+                        user_id,
+                        reference,
+                        inspect_payload.source_input,
+                    )
+                    .await?;
+                }
+            }
+            return Ok(());
         }
         Some(("clone", "confirm", source)) => {
             let Some(source) =
@@ -1537,12 +1708,8 @@ async fn handle_command(
                 .await?;
                 return Ok(());
             }
-            let text = set_destination(&config, &db, &input).await;
-            bot.send_message(
-                msg.chat.id,
-                text.unwrap_or_else(|err| format_error_for_user(&err, ui_language(&config))),
-            )
-            .await?;
+            handle_set_destination_input(bot, msg.chat.id, config, db, user_id, input, None)
+                .await?;
         }
         Command::Jobs => match render_jobs_panel(&db, user_id, ui_language(&config)).await {
             Ok((text, keyboard)) => {
@@ -3134,49 +3301,14 @@ async fn destination_summary(db: &Database) -> anyhow::Result<String> {
     }
 }
 
-async fn set_destination(config: &AppConfig, db: &Database, input: &str) -> anyhow::Result<String> {
-    let reference = parse_drive_reference(input)?;
-    let token_manager = TokenManager::new(config.clone(), db.clone());
-    let access_token = token_manager.access_token("default").await?;
-    let drive =
-        DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
-    let file = drive
-        .get_reference(access_token.as_str(), &reference)
-        .await?;
-    save_destination_profile(db, &file, reference.resource_key).await
-}
-
 async fn save_destination_profile(
     db: &Database,
     file: &DriveFile,
     resource_key: Option<String>,
 ) -> anyhow::Result<String> {
-    if file.mime_type != FOLDER_MIME_TYPE {
-        anyhow::bail!("Thư mục đích phải là thư mục Google Drive");
-    }
-    if file.capabilities.as_ref().and_then(|c| c.can_add_children) != Some(true) {
-        anyhow::bail!("Tài khoản Google hiện tại không có quyền ghi vào thư mục đích này");
-    }
-    repo::upsert_destination_profile(
-        db,
-        destination_profile_from_file(file, resource_key.clone()),
-    )
-    .await?;
+    DestinationService::validate_writable_folder(file)?;
+    DestinationService::save_as_default(db, file, resource_key.clone()).await?;
     Ok(render_destination_saved(file, resource_key))
-}
-
-fn destination_profile_from_file(
-    file: &DriveFile,
-    resource_key: Option<String>,
-) -> repo::NewDestinationProfile {
-    repo::NewDestinationProfile {
-        google_account_id: "default".to_string(),
-        label: file.name.clone(),
-        destination_parent_id: file.id.clone(),
-        destination_drive_id: file.drive_id.clone(),
-        destination_resource_key: resource_key.or(file.resource_key.clone()),
-        is_default: true,
-    }
 }
 
 // ── Clone source inspect ─────────────────────────────────────────────────────
@@ -3999,7 +4131,7 @@ async fn manage_watch_filter(
 mod tests {
     use super::*;
     use crate::drive::client::DriveApiError;
-    use crate::drive::types::DriveFile;
+    use crate::drive::types::{DriveFile, FOLDER_MIME_TYPE, SHORTCUT_MIME_TYPE};
     use crate::watch::errors::format_drive_error;
     use reqwest::StatusCode;
 

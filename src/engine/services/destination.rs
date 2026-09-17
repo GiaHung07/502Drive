@@ -35,6 +35,46 @@ pub struct DestinationEntry {
 pub struct DestinationService;
 
 impl DestinationService {
+    /// Resolve a user-supplied Drive link/id and validate that it is a writable folder.
+    pub async fn inspect_folder(
+        config: &AppConfig,
+        db: &Database,
+        input: &str,
+    ) -> anyhow::Result<(DriveFile, Option<String>)> {
+        let reference = parse_drive_reference(input)?;
+        let token_manager = TokenManager::new(config.clone(), db.clone());
+        let access_token = token_manager.access_token("default").await?;
+        let drive =
+            DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
+        let file = drive
+            .get_reference(access_token.as_str(), &reference)
+            .await?;
+        Self::validate_writable_folder(&file)?;
+        let resource_key = reference.resource_key.or(file.resource_key.clone());
+        Ok((file, resource_key))
+    }
+
+    /// Save a previously validated Drive folder as the default destination profile.
+    pub async fn save_as_default(
+        db: &Database,
+        file: &DriveFile,
+        resource_key: Option<String>,
+    ) -> anyhow::Result<()> {
+        repo::upsert_destination_profile(
+            db,
+            repo::NewDestinationProfile {
+                google_account_id: "default".to_string(),
+                label: file.name.clone(),
+                destination_parent_id: file.id.clone(),
+                destination_drive_id: file.drive_id.clone(),
+                destination_resource_key: resource_key.or_else(|| file.resource_key.clone()),
+                is_default: true,
+            },
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Resolve a user-supplied Drive link/id, validate it is a folder the
     /// connected account can write to, and save it as the default
     /// destination profile (for the hardcoded single account `"default"`).
@@ -46,27 +86,8 @@ impl DestinationService {
         db: &Database,
         input: &str,
     ) -> anyhow::Result<DriveFile> {
-        let reference = parse_drive_reference(input)?;
-        let token_manager = TokenManager::new(config.clone(), db.clone());
-        let access_token = token_manager.access_token("default").await?;
-        let drive =
-            DriveClient::with_timeout(Duration::from_secs(config.engine.request_timeout_seconds));
-        let file = drive
-            .get_reference(access_token.as_str(), &reference)
-            .await?;
-        Self::validate_writable_folder(&file)?;
-        repo::upsert_destination_profile(
-            db,
-            repo::NewDestinationProfile {
-                google_account_id: "default".to_string(),
-                label: file.name.clone(),
-                destination_parent_id: file.id.clone(),
-                destination_drive_id: file.drive_id.clone(),
-                destination_resource_key: reference.resource_key.or(file.resource_key.clone()),
-                is_default: true,
-            },
-        )
-        .await?;
+        let (file, resource_key) = Self::inspect_folder(config, db, input).await?;
+        Self::save_as_default(db, &file, resource_key).await?;
         Ok(file)
     }
 
