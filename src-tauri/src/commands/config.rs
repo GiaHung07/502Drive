@@ -62,6 +62,8 @@ pub struct WizardConfigInput {
     pub owner_telegram_id: Option<i64>,
     pub engine_concurrency: Option<usize>,
     pub auto_confirm_clone: Option<bool>,
+    pub sa_directory: Option<String>,
+    pub shared_drive_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -240,7 +242,10 @@ pub async fn update_config_field(field: String, value: String) -> Result<(), Str
                     .entry("app")
                     .or_insert_with(|| toml::Value::Table(toml::Table::new()));
                 if let Some(t) = app.as_table_mut() {
-                    t.insert("language".to_string(), toml::Value::String(value.trim().to_string()));
+                    t.insert(
+                        "language".to_string(),
+                        toml::Value::String(value.trim().to_string()),
+                    );
                 }
             }
         }
@@ -352,6 +357,26 @@ pub async fn save_wizard_config(input: WizardConfigInput) -> Result<(), String> 
                 "auto_confirm_clone".to_string(),
                 toml::Value::Boolean(auto_confirm),
             );
+        }
+    }
+
+    if input.sa_directory.is_some() || input.shared_drive_id.is_some() {
+        let sa = table
+            .entry("service_accounts")
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        if let Some(t) = sa.as_table_mut() {
+            if let Some(dir) = input.sa_directory {
+                let trimmed = dir.trim().to_string();
+                if !trimmed.is_empty() {
+                    t.insert("directory".to_string(), toml::Value::String(trimmed));
+                }
+            }
+            if let Some(s_id) = input.shared_drive_id {
+                let trimmed = s_id.trim().to_string();
+                if !trimmed.is_empty() {
+                    t.insert("shared_drive_id".to_string(), toml::Value::String(trimmed));
+                }
+            }
         }
     }
 

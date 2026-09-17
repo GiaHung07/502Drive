@@ -4,6 +4,10 @@ import { api, getErrorMessage } from '@/lib/ipc'
 import { DriveItemRef } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
+import { useI18n } from '@/hooks/useI18n'
+import { Button } from '@/components/ui/Button'
+import { LogIn } from 'lucide-react'
+
 export interface FolderPickerPanelProps {
   /** Currently selected folder id (highlighted row). */
   selectedId?: string | null
@@ -22,6 +26,7 @@ export const FolderPickerPanel: React.FC<FolderPickerPanelProps> = ({
   onSelect,
   className,
 }) => {
+  const { t } = useI18n()
   // Path of folders drilled into; empty array = root level (shared drives + My Drive).
   const [path, setPath] = useState<DriveItemRef[]>([])
   const [items, setItems] = useState<DriveItemRef[]>([])
@@ -66,12 +71,19 @@ export const FolderPickerPanel: React.FC<FolderPickerPanelProps> = ({
   }
 
   const truncateTo = (index: number) => {
-    // index is the position in the breadcrumb including the virtual root (-1 = root level)
     setPath((p) => (index < 0 ? [] : p.slice(0, index + 1)))
   }
 
   const goBack = () => {
     setPath((p) => p.slice(0, -1))
+  }
+
+  const handleQuickReconnect = async () => {
+    try {
+      await api.triggerLogin()
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   return (
@@ -87,8 +99,8 @@ export const FolderPickerPanel: React.FC<FolderPickerPanelProps> = ({
           type="button"
           onClick={goBack}
           disabled={path.length === 0}
-          aria-label="Quay lại thư mục cấp trên"
-          title="Quay lại"
+          aria-label={t('folder_picker.back')}
+          title={t('folder_picker.back')}
           className="p-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-input/70 disabled:opacity-35 disabled:pointer-events-none cursor-pointer transition-colors shrink-0"
         >
           <CornerLeftUp className="h-3.5 w-3.5" />
@@ -99,7 +111,7 @@ export const FolderPickerPanel: React.FC<FolderPickerPanelProps> = ({
             onClick={() => truncateTo(-1)}
             className="px-1.5 py-0.5 rounded-md font-medium text-text-secondary hover:text-text-primary hover:bg-bg-input/70 cursor-pointer transition-colors shrink-0"
           >
-            Drive
+            {t('folder_picker.root')}
           </button>
           {path.map((p, idx) => (
             <React.Fragment key={p.id}>
@@ -126,31 +138,40 @@ export const FolderPickerPanel: React.FC<FolderPickerPanelProps> = ({
         {isLoading ? (
           <div className="flex items-center justify-center gap-2 py-6 text-xs text-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin text-accent" />
-            <span>Đang tải thư mục…</span>
+            <span>{t('folder_picker.loading')}</span>
           </div>
         ) : error ? (
-          <div className="flex flex-col gap-2 py-4 px-3 text-xs text-error">
+          <div className="flex flex-col gap-2.5 py-4 px-3 text-xs text-error">
             <div className="flex items-start gap-2">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span className="font-medium leading-relaxed">
                 {error.includes('401') || error.includes('unauthorized_client')
-                  ? 'Không thể kết nối Google Drive — lỗi xác thực (401 Unauthorized)'
+                  ? t('folder_picker.auth_error_title')
                   : error}
               </span>
             </div>
             {(error.includes('401') || error.includes('unauthorized_client')) && (
-              <div className="ml-6 space-y-1.5 text-[0.6875rem] text-text-secondary bg-bg-card rounded-lg p-2.5 border border-border/60">
-                <p className="font-semibold text-text-primary">Cách khắc phục:</p>
+              <div className="ml-6 space-y-2 text-[0.6875rem] text-text-secondary bg-bg-card rounded-lg p-2.5 border border-border/60">
+                <p className="font-semibold text-text-primary">{t('folder_picker.auth_fix_title')}</p>
                 <ol className="list-decimal list-inside space-y-1 leading-relaxed">
-                  <li>Vào <strong>Cài đặt</strong> → nhấn <strong>Đăng nhập Google</strong> để cấp quyền lại</li>
-                  <li>Trên Google Cloud Console → OAuth Consent Screen → bấm <strong>"Publish App"</strong></li>
-                  <li>Hoặc thêm email của bạn vào danh sách <em>Test Users</em></li>
+                  <li>{t('folder_picker.auth_fix_step1')}</li>
+                  <li>{t('folder_picker.auth_fix_step2')}</li>
+                  <li>{t('folder_picker.auth_fix_step3')}</li>
                 </ol>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleQuickReconnect}
+                  className="text-xs h-7 gap-1.5 rounded-lg mt-1 w-full bg-accent hover:bg-accent/90 text-white font-semibold"
+                >
+                  <LogIn className="h-3 w-3" />
+                  <span>{t('folder_picker.btn_reconnect')}</span>
+                </Button>
               </div>
             )}
           </div>
         ) : items.length === 0 ? (
-          <p className="py-6 text-center text-xs text-text-muted">Thư mục này trống</p>
+          <p className="py-6 text-center text-xs text-text-muted">{t('folder_picker.empty')}</p>
         ) : (
           <ul className="p-1.5 space-y-0.5">
             {items.map((item) => {

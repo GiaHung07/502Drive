@@ -25,7 +25,8 @@ impl AccessToken {
     }
 
     fn is_valid(&self) -> bool {
-        Instant::now() + Duration::from_secs(60) < self.expires_at
+        // Refresh token 5 minutes before actual expiry to ensure long I/O calls don't fail mid-flight
+        Instant::now() + Duration::from_secs(300) < self.expires_at
     }
 }
 
@@ -89,8 +90,22 @@ impl TokenManager {
         {
             Ok(token) => token,
             Err(RefreshTokenError::InvalidGrant) => {
-                repo::mark_account_reconnect_required(&self.db, account_id).await?;
-                bail!("Google refresh token expired or was revoked. Run: 502drive auth login");
+                let _ = repo::mark_account_reconnect_required(&self.db, account_id).await;
+                bail!(
+                    "Google refresh token expired, revoked, or client unauthorized. Run: 502drive auth login"
+                );
+            }
+            Err(RefreshTokenError::Endpoint { status, body })
+                if status.as_u16() == 401
+                    || (status.as_u16() == 400
+                        && (body.contains("unauthorized_client")
+                            || body.contains("invalid_client")
+                            || body.contains("invalid_grant"))) =>
+            {
+                let _ = repo::mark_account_reconnect_required(&self.db, account_id).await;
+                bail!(
+                    "Google account '{account_id}' requires reconnection: {body}. Run: 502drive auth login"
+                );
             }
             Err(err) => return Err(err.into()),
         };

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { LayoutDashboard, ArrowLeftRight, Settings, Terminal, ChevronLeft, ChevronRight, HardDrive } from 'lucide-react'
+import { LayoutDashboard, ArrowLeftRight, Settings, Terminal, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 import { cn } from '@/lib/utils'
 
 export type TabId = 'dashboard' | 'jobs' | 'settings' | 'dev'
@@ -13,18 +14,13 @@ export interface SidebarProps {
   version?: string
 }
 
+import { useI18n } from '@/hooks/useI18n'
+
 interface NavItem {
   id: TabId
   label: string
   icon: React.ComponentType<{ className?: string }>
 }
-
-const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Trang chính', icon: LayoutDashboard },
-  { id: 'jobs', label: 'Tiến độ & đồng bộ', icon: ArrowLeftRight },
-  { id: 'settings', label: 'Cài đặt', icon: Settings },
-  { id: 'dev', label: 'Công cụ Dev', icon: Terminal },
-]
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
@@ -33,6 +29,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   version = 'v0.2.0',
 }) => {
+  const { t } = useI18n()
+
+  const navItems: NavItem[] = [
+    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
+    { id: 'jobs', label: t('nav.jobs'), icon: ArrowLeftRight },
+    { id: 'settings', label: t('nav.settings'), icon: Settings },
+    { id: 'dev', label: t('nav.dev'), icon: Terminal },
+  ]
+
   // Sidebar base widths (64/228px @16px root) must track the responsive root
   // font-size so labels never clip when the window grows.
   const [scale, setScale] = useState(1)
@@ -47,14 +52,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <motion.aside
       animate={{ width: Math.round((isCollapsed ? 64 : 228) * scale) }}
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-      className="h-screen bg-bg-elevated border-r border-border/60 flex flex-col justify-between select-none relative shrink-0 z-20 transition-colors"
+      className="h-screen bg-bg-elevated border-r border-border/60 flex flex-col justify-between select-none relative shrink-0 z-20 transition-colors overflow-hidden"
     >
       {/* Brand Header */}
       <div>
-        <div className="h-14 border-b border-border/60 flex items-center px-4 gap-3">
-          <div className="h-8 w-8 rounded-xl bg-accent/12 flex items-center justify-center shrink-0 text-accent shadow-xs">
-            <HardDrive className="h-4.5 w-4.5 stroke-[2]" />
-          </div>
+        <div className="h-14 border-b border-border/60 flex items-center px-3.5 gap-2.5 overflow-hidden">
+          <LogoMark size="sm" />
           <AnimatePresence>
             {!isCollapsed && (
               <motion.div
@@ -64,7 +67,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 transition={{ duration: 0.15 }}
                 className="overflow-hidden whitespace-nowrap flex items-center gap-1.5"
               >
-                <span className="font-bold text-sm tracking-tight text-text-primary">502Drive</span>
+                <span className="font-bold text-sm tracking-tight text-text-primary">
+                  <span className="text-accent font-extrabold">502</span>
+                  <span>Drive</span>
+                </span>
                 <span className="text-[0.625rem] px-1.5 py-0.5 rounded-md bg-accent/15 text-accent font-mono font-semibold tracking-wide">CORE</span>
               </motion.div>
             )}
@@ -72,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation List */}
-        <nav className="p-2 space-y-1 mt-1.5">
+        <nav className="p-2 space-y-1 mt-1.5 overflow-hidden">
           {navItems.map((item) => {
             const Icon = item.icon
             const isActive = activeTab === item.id
@@ -84,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 title={isCollapsed ? item.label : undefined}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
-                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer group relative select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer group relative select-none overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                   isActive
                     ? 'text-accent bg-accent/12 font-semibold shadow-xs'
                     : 'text-text-secondary hover:text-text-primary hover:bg-bg-input/70'

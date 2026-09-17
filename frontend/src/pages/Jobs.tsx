@@ -17,6 +17,8 @@ import {
   Plus,
 } from "lucide-react"
 
+import { useI18n } from "@/hooks/useI18n"
+
 export interface JobsProps {
   jobs: JobSummary[]
   watches: WatchSummary[]
@@ -50,6 +52,7 @@ export const Jobs: React.FC<JobsProps> = ({
   onRefresh,
   isRefreshing,
 }) => {
+  const { t } = useI18n()
   const [filter, setFilter] = useState<FilterType>("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearchFocused, setIsSearchFocused] = useState(false)
@@ -109,10 +112,10 @@ export const Jobs: React.FC<JobsProps> = ({
   )
 
   const tabs: { id: FilterType; label: string; count: number }[] = [
-    { id: "all", label: "Tất cả", count: filteredJobs.length + filteredWatches.length },
-    { id: "running", label: "Đang chạy", count: runningJobs.length },
-    { id: "completed", label: "Lịch sử", count: completedJobs.length },
-    { id: "watches", label: "Theo dõi", count: filteredWatches.length },
+    { id: "all", label: t('jobs_page.filter_all'), count: filteredJobs.length + filteredWatches.length },
+    { id: "running", label: t('jobs_page.filter_running'), count: runningJobs.length },
+    { id: "completed", label: t('jobs_page.filter_completed'), count: completedJobs.length },
+    { id: "watches", label: t('jobs_page.filter_watches'), count: filteredWatches.length },
   ]
 
   return (
@@ -170,8 +173,8 @@ export const Jobs: React.FC<JobsProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setIsSearchFocused(true)}
-              placeholder="Tìm tác vụ, thư mục... (/)"
-              aria-label="Tìm kiếm tác vụ và thư mục theo dõi"
+              placeholder={t('jobs_page.search_placeholder')}
+              aria-label={t('jobs_page.search_placeholder')}
               className="w-full h-9 pl-9 pr-8 text-xs sm:text-sm rounded-xl bg-bg-input/70 border border-border/50 text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all shadow-xs"
             />
             <AnimatePresence>
@@ -181,9 +184,9 @@ export const Jobs: React.FC<JobsProps> = ({
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
                   onClick={() => setSearchQuery("")}
-                  aria-label="Xóa tìm kiếm"
+                  aria-label={t('common.cancel')}
                   className="absolute right-2.5 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-card transition-colors cursor-pointer"
-                  title="Xóa tìm kiếm"
+                  title={t('common.cancel')}
                 >
                   <X className="h-3.5 w-3.5" />
                 </motion.button>
@@ -199,7 +202,7 @@ export const Jobs: React.FC<JobsProps> = ({
             className="gap-2 shrink-0 font-medium"
           >
             <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin text-accent" : ""}`} />
-            <span className="hidden sm:inline">Làm mới</span>
+            <span className="hidden sm:inline">{t('common.refresh')}</span>
           </Button>
         </div>
       </div>
@@ -213,7 +216,7 @@ export const Jobs: React.FC<JobsProps> = ({
                 <ArrowLeftRight className="h-4 w-4" />
               </div>
               <h2 className="text-sm font-semibold text-text-primary">
-                Tác vụ đang sao chép ({runningJobs.length})
+                {t('jobs_page.filter_running')} ({runningJobs.length})
               </h2>
             </div>
           </div>
@@ -224,12 +227,10 @@ export const Jobs: React.FC<JobsProps> = ({
                 <FolderSearch className="h-6 w-6 stroke-[1.5]" />
               </div>
               <p className="text-sm font-semibold text-text-primary">
-                {query ? `Không tìm thấy tác vụ đang chạy phù hợp với "${query}"` : "Không có tác vụ sao chép nào đang chạy"}
+                {query ? `${t('jobs_page.empty_title')} "${query}"` : t('jobs_page.empty_title')}
               </p>
               <p className="text-xs text-text-muted max-w-sm mx-auto">
-                {query
-                  ? "Hãy thử tìm kiếm theo ID khác hoặc xóa ô lọc."
-                  : "Các tác vụ clone mới từ bot Telegram hoặc kéo thả sẽ tự động kích hoạt tại đây."}
+                {t('jobs_page.empty_desc')}
               </p>
             </Card>
           ) : (
@@ -267,7 +268,7 @@ export const Jobs: React.FC<JobsProps> = ({
                 <Radio className="h-4 w-4" />
               </div>
               <h2 className="text-sm font-semibold text-text-primary">
-                Thư mục theo dõi thời gian thực ({filteredWatches.length})
+                {t('watches.card_title')} ({filteredWatches.length})
               </h2>
             </div>
             {onCreateWatch && (
@@ -276,10 +277,10 @@ export const Jobs: React.FC<JobsProps> = ({
                 variant="secondary"
                 onClick={onCreateWatch}
                 className="text-xs gap-1.5 rounded-xl font-medium shrink-0"
-                title="Thêm thư mục theo dõi thời gian thực mới"
+                title={t('jobs_page.btn_new_watch')}
               >
                 <Plus className="h-3.5 w-3.5 text-accent" />
-                Tạo theo dõi
+                {t('jobs_page.btn_new_watch')}
               </Button>
             )}
           </div>
@@ -290,10 +291,10 @@ export const Jobs: React.FC<JobsProps> = ({
                 <Radio className="h-6 w-6 stroke-[1.5]" />
               </div>
               <p className="text-sm font-semibold text-text-primary">
-                {query ? `Không tìm thấy thư mục theo dõi nào khớp với "${query}"` : "Chưa thiết lập theo dõi thư mục nào"}
+                {t('watches.no_watches_title')}
               </p>
               <p className="text-xs text-text-muted max-w-sm mx-auto">
-                Gõ lệnh /watch trong bot Telegram hoặc thêm thư mục để 502Drive tự động sync hai chiều.
+                {t('watches.no_watches_desc')}
               </p>
             </Card>
           ) : (
@@ -332,7 +333,7 @@ export const Jobs: React.FC<JobsProps> = ({
                 <CheckCircle2 className="h-4 w-4" />
               </div>
               <h2 className="text-sm font-semibold text-text-primary">
-                Lịch sử tác vụ hoàn tất ({completedJobs.length})
+                {t('jobs_page.filter_completed')} ({completedJobs.length})
               </h2>
             </div>
           </div>
@@ -343,7 +344,7 @@ export const Jobs: React.FC<JobsProps> = ({
                 <Inbox className="h-6 w-6 stroke-[1.5]" />
               </div>
               <p className="text-sm font-semibold text-text-primary">
-                {query ? `Không có lịch sử tác vụ nào khớp với "${query}"` : "Chưa có lịch sử tác vụ hoàn tất"}
+                {t('jobs_page.empty_title')}
               </p>
             </Card>
           ) : (

@@ -181,7 +181,11 @@ pub async fn refresh_access_token(
     }
 
     let body = response.text().await.unwrap_or_default();
-    if body.contains("\"invalid_grant\"") {
+    if body.contains("\"invalid_grant\"")
+        || body.contains("\"unauthorized_client\"")
+        || body.contains("\"invalid_client\"")
+        || status == reqwest::StatusCode::UNAUTHORIZED
+    {
         return Err(RefreshTokenError::InvalidGrant);
     }
     Err(RefreshTokenError::Endpoint { status, body })

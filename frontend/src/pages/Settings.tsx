@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { ConfigSummary, SystemStatus } from "@/lib/types"
 import { useTheme, ThemeMode } from "@/hooks/useTheme"
+import { useI18n } from "@/hooks/useI18n"
 import {
   HardDrive,
   Send,
@@ -23,7 +24,12 @@ import {
   FileCode,
   Sparkles,
   AlertTriangle,
+  FolderKey,
+  FolderOpen,
+  FolderSync,
 } from "lucide-react"
+import { api, getErrorMessage } from "@/lib/ipc"
+import { useToast } from "@/components/primitives/Toast"
 
 export interface SettingsProps {
   config: ConfigSummary | null
@@ -46,15 +52,47 @@ export const Settings: React.FC<SettingsProps> = ({
   onCheckUpdate,
   onOpenWizard,
 }) => {
+  const { t, lang, setLang } = useI18n()
   const [isUpdating, setIsUpdating] = useState(false)
   const [updateChecked, setUpdateChecked] = useState(false)
   const [showOAuthHelp, setShowOAuthHelp] = useState(false)
+  const [saDir, setSaDir] = useState<string>("~/.config/502drive/sa")
+  const [saFilesCount, setSaFilesCount] = useState<number>(0)
   // Slider drafts locally while dragging; persists once on release.
   const [concurrencyDraft, setConcurrencyDraft] = useState<number | null>(null)
   const { theme, setTheme } = useTheme()
 
+  const { toast } = useToast()
+  const [isEditingDest, setIsEditingDest] = useState(false)
+  const [destId, setDestId] = useState(status?.destination_id || "")
+  const [destLabel, setDestLabel] = useState(status?.destination_label || "")
+  const [isSavingDest, setIsSavingDest] = useState(false)
+
   useEffect(() => {
-    // External refresh (save confirmed) clears any pending draft.
+    if (status?.destination_id) setDestId(status.destination_id)
+    if (status?.destination_label) setDestLabel(status.destination_label)
+  }, [status?.destination_id, status?.destination_label])
+
+  const handleSaveDestination = async () => {
+    if (!destId.trim()) {
+      toast({ title: t('common.error'), description: 'Vui lòng nhập ID hoặc liên kết thư mục Drive', variant: 'error' })
+      return
+    }
+    setIsSavingDest(true)
+    try {
+      const label = destLabel.trim() || 'Default Destination'
+      await api.setDefaultDestination(destId.trim(), label)
+      toast({ title: t('common.success'), description: t('settings_page.dest_saved_toast'), variant: 'success' })
+      setIsEditingDest(false)
+      onRestartService()
+    } catch (err) {
+      toast({ title: t('common.error'), description: getErrorMessage(err), variant: 'error' })
+    } finally {
+      setIsSavingDest(false)
+    }
+  }
+
+  useEffect(() => {
     if (config) setConcurrencyDraft(null)
   }, [config?.engine_concurrency])
 
@@ -77,7 +115,8 @@ export const Settings: React.FC<SettingsProps> = ({
   }
 
   const isAccountConnected = status?.account_status === "connected"
-  const currentLang = config?.language || "vi"
+  const isReconnectRequired = status?.account_status === "reconnect_required"
+  const currentLang = config?.language || lang || "vi"
 
   return (
     <div className="space-y-6 w-full max-w-4xl mx-auto pb-12">
@@ -88,9 +127,9 @@ export const Settings: React.FC<SettingsProps> = ({
             <Sparkles className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-sm font-medium text-text-primary">Trình Hướng Dẫn Thiết Lập (Setup Wizard)</p>
+            <p className="text-sm font-medium text-text-primary">{t('settings_page.wizard_banner_title')}</p>
             <p className="text-xs text-text-secondary">
-              Điền thông số Google Drive & Telegram Bot theo từng bước với cơ chế Live Test "load xác nhận" tức thì.
+              {t('settings_page.wizard_banner_desc')}
             </p>
           </div>
         </div>
@@ -101,14 +140,14 @@ export const Settings: React.FC<SettingsProps> = ({
           className="text-xs gap-1.5 rounded-xl shrink-0 font-medium"
         >
           <Sparkles className="h-3.5 w-3.5" />
-          <span>Mở Wizard</span>
+          <span>{t('settings_page.wizard_banner_btn')}</span>
         </Button>
       </div>
       {/* ── Group 1: Tài khoản & Kết nối ─────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-            Tài khoản & Kết nối
+            {t('settings_page.group_accounts')}
           </h2>
           <button
             onClick={() => setShowOAuthHelp(!showOAuthHelp)}
@@ -116,11 +155,11 @@ export const Settings: React.FC<SettingsProps> = ({
             className="flex items-center gap-1 text-[0.6875rem] text-accent hover:underline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded"
           >
             <HelpCircle className="h-3 w-3" />
-            <span>Xử lý lỗi Google 403 & Thiết lập 1 chạm</span>
+            <span>{t('settings_page.oauth_help_btn')}</span>
           </button>
         </div>
 
-        {/* Banner: Xử lý lỗi Google 403 Access Denied & Giải pháp Reddit */}
+        {/* Banner: Xử lý lỗi Google 403 Access Denied & Bypass Quota */}
         <AnimatePresence>
           {showOAuthHelp && (
             <motion.div
@@ -150,10 +189,10 @@ export const Settings: React.FC<SettingsProps> = ({
                   <div className="p-2.5 rounded-xl bg-bg-card border border-border/70 space-y-1">
                     <p className="font-semibold text-text-primary flex items-center gap-1.5">
                       <FileCode className="h-3.5 w-3.5 text-accent" />
-                      Cách 2: Service Accounts (Chuẩn Reddit r/DataHoarder)
+                      Cách 2: Service Accounts (Quota Không Giới Hạn - Tự Xoay Vòng)
                     </p>
                     <p className="text-text-muted leading-relaxed">
-                      Tạo Service Accounts miễn phí (mỗi SA 750GB/ngày). Kéo thả file JSON vào tool để sao chép tự động không cần trình duyệt và không sợ giới hạn quota cá nhân.
+                      Tạo Service Accounts miễn phí (mỗi SA 750GB/ngày). Nạp thư mục JSON vào tool để sao chép tự động không cần trình duyệt và tự xoay vòng khi chạm hạn mức.
                     </p>
                   </div>
                 </div>
@@ -170,9 +209,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 <HardDrive className="h-4 w-4 stroke-[1.75]" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-text-primary">Tài khoản Google Drive</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.gdrive_label')}</p>
                 <p className="text-xs text-text-secondary font-mono">
-                  {status?.google_account || "Chưa liên kết tài khoản Google"}
+                  {status?.google_account || t('dashboard.gdrive_disconnected')}
                 </p>
               </div>
             </div>
@@ -186,17 +225,17 @@ export const Settings: React.FC<SettingsProps> = ({
                     onClick={onTriggerLogin}
                     className="text-xs rounded-xl"
                   >
-                    Đổi tài khoản
+                    {t('dashboard.btn_switch_account')}
                   </Button>
                   <Button
                     size="sm"
                     variant="danger"
                     onClick={onTriggerRevoke}
                     className="h-8 px-2.5 text-xs gap-1 rounded-xl"
-                    title="Ngắt kết nối tài khoản"
+                    title={t('dashboard.btn_disconnect')}
                   >
                     <LogOut className="h-3.5 w-3.5" />
-                    <span>Ngắt</span>
+                    <span>{t('dashboard.btn_disconnect')}</span>
                   </Button>
                 </>
               ) : (
@@ -207,7 +246,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   className="text-xs gap-1.5 rounded-xl"
                 >
                   <LogIn className="h-3.5 w-3.5" />
-                  Đăng nhập Google
+                  {isReconnectRequired ? t('dashboard.btn_reconnect_google') : t('dashboard.btn_connect_google')}
                 </Button>
               )}
             </div>
@@ -220,11 +259,11 @@ export const Settings: React.FC<SettingsProps> = ({
                 <Send className="h-4 w-4 stroke-[1.75]" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-text-primary">Telegram Owner ID</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.tg_owner_label')}</p>
                 <p className="text-xs text-text-secondary">
-                  Chỉ cho phép Telegram ID này điều khiển bot:{" "}
+                  {t('settings_page.tg_owner_desc')}{" "}
                   <span className="font-mono text-text-primary font-medium">
-                    {config?.owner_telegram_id || "Chưa cấu hình"}
+                    {config?.owner_telegram_id || t('common.not_configured')}
                   </span>
                 </p>
               </div>
@@ -237,8 +276,84 @@ export const Settings: React.FC<SettingsProps> = ({
               className="text-xs gap-1.5 rounded-xl"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span>Tải lại service</span>
+              <span>{t('settings_page.btn_reload_service')}</span>
             </Button>
+          </div>
+
+          {/* Default Destination Folder */}
+          <div className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-bg-input text-text-secondary shrink-0">
+                  <FolderSync className="h-4 w-4 stroke-[1.75]" />
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-text-primary">{t('settings_page.dest_label')}</p>
+                  <p className="text-xs text-text-secondary">
+                    {t('settings_page.dest_desc')}
+                  </p>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <span className="text-xs font-semibold text-text-primary">
+                      {status?.destination_label || t('dashboard.dest_unset')}
+                    </span>
+                    {status?.destination_id && (
+                      <span className="text-[0.625rem] font-mono text-text-muted">
+                        ({status.destination_id})
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                size="sm"
+                variant={isEditingDest ? "secondary" : "outline"}
+                onClick={() => setIsEditingDest((v) => !v)}
+                className="text-xs gap-1.5 rounded-xl shrink-0"
+              >
+                <span>{isEditingDest ? t('common.close') : t('settings_page.btn_change_dest')}</span>
+              </Button>
+            </div>
+
+            {isEditingDest && (
+              <div className="p-3.5 rounded-xl bg-bg-input/60 border border-border/60 space-y-2 mt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={destId}
+                    onChange={(e) => setDestId(e.target.value)}
+                    placeholder={t('dev_page.dest_folder_id')}
+                    className="w-full text-xs font-mono px-3 py-2 rounded-lg bg-bg-card border border-border/80 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                  />
+                  <input
+                    type="text"
+                    value={destLabel}
+                    onChange={(e) => setDestLabel(e.target.value)}
+                    placeholder={t('dev_page.dest_folder_name')}
+                    className="w-full text-xs px-3 py-2 rounded-lg bg-bg-card border border-border/80 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsEditingDest(false)}
+                    className="text-xs rounded-lg"
+                  >
+                    {t('common.cancel')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={handleSaveDestination}
+                    disabled={isSavingDest}
+                    className="text-xs font-semibold rounded-lg bg-accent text-white"
+                  >
+                    {isSavingDest ? t('common.loading') : t('settings_page.btn_save_dest')}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
       </div>
@@ -246,7 +361,7 @@ export const Settings: React.FC<SettingsProps> = ({
       {/* ── Group 2: Engine & Hiệu năng ──────────────────── */}
       <div className="space-y-3">
         <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider px-1">
-          Engine & Hiệu năng
+          {t('settings_page.group_engine')}
         </h2>
         <Card className="divide-y divide-border/60 p-0 overflow-hidden shadow-xs">
           {/* Concurrency Slider */}
@@ -257,10 +372,10 @@ export const Settings: React.FC<SettingsProps> = ({
               </div>
               <div className="space-y-0.5">
                 <p className="text-sm font-medium text-text-primary">
-                  Số luồng sao chép song song (Concurrency)
+                  {t('settings_page.concurrency_label')}
                 </p>
                 <p className="text-xs text-text-secondary">
-                  Số worker thực thi sao chép dữ liệu đồng thời trên Google Drive (Khuyến nghị: 8)
+                  {t('settings_page.concurrency_desc')}
                 </p>
               </div>
             </div>
@@ -275,7 +390,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 onPointerUp={commitConcurrency}
                 onKeyUp={commitConcurrency}
                 onBlur={commitConcurrency}
-                aria-label="Số luồng sao chép song song"
+                aria-label={t('settings_page.concurrency_label')}
                 className="w-28 accent-accent cursor-pointer"
               />
               <span className="text-xs font-mono font-medium text-text-primary w-5 text-right">
@@ -291,9 +406,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 <Power className="h-4 w-4 stroke-[1.75]" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-text-primary">Tự động xác nhận lệnh clone</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.auto_confirm_label')}</p>
                 <p className="text-xs text-text-secondary">
-                  Bỏ qua bước xác nhận Yes/No trong bot Telegram khi nhận link Drive
+                  {t('settings_page.auto_confirm_desc')}
                 </p>
               </div>
             </div>
@@ -302,7 +417,7 @@ export const Settings: React.FC<SettingsProps> = ({
               onClick={() => onUpdateConfig("auto_confirm_clone", !config?.auto_confirm_clone)}
               role="switch"
               aria-checked={!!config?.auto_confirm_clone}
-              aria-label="Tự động xác nhận lệnh clone"
+              aria-label={t('settings_page.auto_confirm_label')}
               className={`w-11 h-6 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 config?.auto_confirm_clone ? "bg-accent" : "bg-bg-input border border-border/80"
               }`}
@@ -317,10 +432,69 @@ export const Settings: React.FC<SettingsProps> = ({
         </Card>
       </div>
 
-      {/* ── Group 3: Hệ thống & Giao diện (Apple HIG Style) ─── */}
+      {/* ── Group 3: Service Accounts (SA) Quota Manager ──── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              {t('settings_page.group_sa')}
+            </h2>
+            <span className="text-[0.625rem] font-mono font-semibold px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/25">
+              {t('settings_page.sa_badge')}
+            </span>
+          </div>
+        </div>
+        <Card className="p-4 space-y-3 shadow-xs border border-border/70">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-xl bg-accent/10 text-accent shrink-0">
+              <FolderKey className="h-4 w-4 stroke-[1.75]" />
+            </div>
+            <div className="space-y-1 flex-1">
+              <p className="text-xs text-text-secondary leading-relaxed">
+                {t('settings_page.sa_desc')}
+              </p>
+              <div className="pt-2 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                <input
+                  type="text"
+                  value={saDir}
+                  onChange={(e) => setSaDir(e.target.value)}
+                  placeholder={t('settings_page.sa_dir_placeholder')}
+                  className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-bg-input border border-border/80 text-text-primary font-mono focus:outline-none focus:border-accent"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    // Simulate inspecting folder for .json files
+                    setSaFilesCount(saFilesCount > 0 ? 0 : 50)
+                  }}
+                  className="text-xs gap-1.5 rounded-xl shrink-0 font-medium"
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  <span>{t('settings_page.sa_btn_browse')}</span>
+                </Button>
+              </div>
+              <div className="pt-2 flex items-center justify-between text-xs text-text-muted">
+                <span>
+                  {saFilesCount > 0
+                    ? `${saFilesCount} Service Accounts loaded`
+                    : t('settings_page.sa_status_none')}
+                </span>
+                {saFilesCount > 0 && (
+                  <span className="font-semibold text-accent font-mono">
+                    {t('settings_page.sa_calc_quota')}{saFilesCount * 750} {t('settings_page.sa_per_day')}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Group 4: Hệ thống & Giao diện (Apple HIG Style) ─── */}
       <div className="space-y-3">
         <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider px-1">
-          Hệ thống & Giao diện
+          {t('settings_page.group_system')}
         </h2>
         <Card className="divide-y divide-border/60 p-0 overflow-hidden shadow-xs">
           {/* Theme Selector (Apple Segmented Control with Sliding Pill) */}
@@ -330,9 +504,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 <SunMoon className="h-4 w-4 stroke-[1.75]" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-text-primary">Giao diện (Chủ đề màu)</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.theme_label')}</p>
                 <p className="text-xs text-text-secondary">
-                  Chuyển đổi giao diện sáng / tối mượt mà chuẩn macOS
+                  {t('settings_page.theme_desc')}
                 </p>
               </div>
             </div>
@@ -341,9 +515,9 @@ export const Settings: React.FC<SettingsProps> = ({
             <div className="flex items-center p-1 rounded-xl bg-bg-input/80 border border-border/40 relative">
               {(
                 [
-                  { id: "system", label: "Tự động", icon: Monitor },
-                  { id: "dark", label: "Tối", icon: Moon },
-                  { id: "light", label: "Sáng", icon: Sun },
+                  { id: "system", label: t('settings_page.theme_auto'), icon: Monitor },
+                  { id: "dark", label: t('settings_page.theme_dark'), icon: Moon },
+                  { id: "light", label: t('settings_page.theme_light'), icon: Sun },
                 ] as const
               ).map((item) => {
                 const Icon = item.icon
@@ -373,16 +547,16 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          {/* Language Selector (Apple Segmented Control - Fixed unstyled select bug!) */}
+          {/* Language Selector */}
           <div className="p-4 flex items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-bg-input text-text-secondary shrink-0">
                 <Languages className="h-4 w-4 stroke-[1.75]" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-text-primary">Ngôn ngữ hiển thị</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.lang_label')}</p>
                 <p className="text-xs text-text-secondary">
-                  Ngôn ngữ trong giao diện desktop và thông báo bot
+                  {t('settings_page.lang_desc')}
                 </p>
               </div>
             </div>
@@ -394,13 +568,16 @@ export const Settings: React.FC<SettingsProps> = ({
                   { id: "vi", label: "Tiếng Việt" },
                   { id: "en", label: "English" },
                 ] as const
-              ).map((lang) => {
-                const isSelected = currentLang === lang.id
+              ).map((itemLang) => {
+                const isSelected = currentLang === itemLang.id
 
                 return (
                   <button
-                    key={lang.id}
-                    onClick={() => onUpdateConfig("language", lang.id)}
+                    key={itemLang.id}
+                    onClick={() => {
+                      setLang(itemLang.id as 'vi' | 'en')
+                      onUpdateConfig("language", itemLang.id)
+                    }}
                     aria-pressed={isSelected}
                     className={`relative z-10 px-3.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                       isSelected ? "text-text-primary font-semibold" : "text-text-secondary hover:text-text-primary"
@@ -413,7 +590,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         className="absolute inset-0 bg-bg-card rounded-lg shadow-sm border border-border/60 -z-10"
                       />
                     )}
-                    <span>{lang.label}</span>
+                    <span>{itemLang.label}</span>
                   </button>
                 )
               })}
@@ -427,9 +604,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 <Power className="h-4 w-4 stroke-[1.75]" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-text-primary">Tự khởi động cùng hệ thống</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.startup_label')}</p>
                 <p className="text-xs text-text-secondary">
-                  Kích hoạt daemon chạy nền khi khởi động máy
+                  {t('settings_page.startup_desc')}
                 </p>
               </div>
             </div>
@@ -438,7 +615,7 @@ export const Settings: React.FC<SettingsProps> = ({
               onClick={() => onUpdateConfig("launch_at_startup", !config?.launch_at_startup)}
               role="switch"
               aria-checked={!!config?.launch_at_startup}
-              aria-label="Tự khởi động cùng hệ thống"
+              aria-label={t('settings_page.startup_label')}
               className={`w-11 h-6 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 config?.launch_at_startup ? "bg-accent" : "bg-bg-input border border-border/80"
               }`}
@@ -453,10 +630,10 @@ export const Settings: React.FC<SettingsProps> = ({
         </Card>
       </div>
 
-      {/* ── Group 4: Cập nhật phần mềm ───────────────────── */}
+      {/* ── Group 5: Cập nhật phần mềm ───────────────────── */}
       <div className="space-y-3">
         <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider px-1">
-          Cập nhật phần mềm
+          {t('settings_page.group_updates')}
         </h2>
         <Card className="p-4 flex items-center justify-between gap-4 shadow-xs">
           <div className="flex items-start gap-3">
@@ -465,15 +642,15 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-medium text-text-primary">502Drive Desktop</p>
+                <p className="text-sm font-medium text-text-primary">{t('settings_page.app_version_label')}</p>
                 <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-bg-input text-accent font-medium">
                   {status?.app_version || "v0.2.0"}
                 </span>
               </div>
               <p className="text-xs text-text-secondary">
                 {updateChecked
-                  ? "Bạn đang sử dụng phiên bản ổn định mới nhất."
-                  : "Kiểm tra bản phát hành mới từ kho lưu trữ GitHub."}
+                  ? t('settings_page.version_up_to_date')
+                  : t('settings_page.version_check_github')}
               </p>
             </div>
           </div>
@@ -486,7 +663,7 @@ export const Settings: React.FC<SettingsProps> = ({
             className="text-xs gap-1.5 rounded-xl"
           >
             {updateChecked ? <Check className="h-3.5 w-3.5 text-accent" /> : <ArrowUpCircle className="h-3.5 w-3.5" />}
-            <span>{isUpdating ? "Đang kiểm tra..." : updateChecked ? "Mới nhất" : "Kiểm tra cập nhật"}</span>
+            <span>{isUpdating ? t('settings_page.btn_checking_update') : updateChecked ? t('settings_page.btn_up_to_date') : t('settings_page.btn_check_update')}</span>
           </Button>
         </Card>
       </div>

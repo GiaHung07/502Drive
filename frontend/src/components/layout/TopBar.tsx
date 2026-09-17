@@ -2,9 +2,10 @@ import React from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { StatusDot } from "@/components/primitives/StatusDot"
 import { Button } from "@/components/ui/Button"
-import { RefreshCw, RotateCcw, Search, Sun, Moon } from "lucide-react"
+import { RefreshCw, RotateCcw, Search, Sun, Moon, ArrowUpCircle } from "lucide-react"
 import { SystemStatus } from "@/lib/types"
 import { useTheme } from "@/hooks/useTheme"
+import { useI18n } from "@/hooks/useI18n"
 
 export interface TopBarProps {
   title: string
@@ -18,6 +19,12 @@ export interface TopBarProps {
   currentLang?: string
   /** Called when user toggles language from the TopBar pill. */
   onChangeLang?: (lang: string) => void
+  /** True when a newer remote version is detected. */
+  updateAvailable?: boolean
+  /** Latest detected version string. */
+  latestVersion?: string
+  /** Handler to open the UpdateModal. */
+  onOpenUpdateModal?: () => void
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -30,10 +37,31 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenCommandPalette,
   currentLang = "vi",
   onChangeLang,
+  updateAvailable,
+  latestVersion,
+  onOpenUpdateModal,
 }) => {
   const isServiceActive = status?.service_active ?? false
   const isAccountConnected = status?.account_status === "connected"
+  const isReconnectRequired = status?.account_status === "reconnect_required"
   const { resolvedTheme, toggleTheme } = useTheme()
+  const { t, lang, setLang } = useI18n()
+
+  const activeLang = currentLang || lang
+
+  const handleLangToggle = (selected: 'vi' | 'en') => {
+    setLang(selected)
+    onChangeLang?.(selected)
+  }
+
+  const getStatusInfo = () => {
+    if (!isServiceActive) return { label: t('topbar.service_paused'), variant: 'warning' as const }
+    if (isReconnectRequired) return { label: t('topbar.reconnect_required'), variant: 'warning' as const }
+    if (isAccountConnected) return { label: t('topbar.ready'), variant: 'active' as const }
+    return { label: t('topbar.not_connected'), variant: 'error' as const }
+  }
+
+  const statusInfo = getStatusInfo()
 
   return (
     <header className="h-14 border-b border-border/70 bg-bg-elevated px-4 sm:px-6 lg:px-8 flex items-center justify-between shrink-0 select-none z-20 transition-colors">
@@ -59,14 +87,14 @@ export const TopBar: React.FC<TopBarProps> = ({
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={onOpenCommandPalette}
-            aria-label="Mở thanh lệnh nhanh (Ctrl+K / ⌘K)"
+            aria-label={`${t('command_palette.placeholder')} (${t('topbar.search_shortcut')})`}
             className="flex items-center gap-2.5 px-3 py-1.5 h-9 rounded-xl bg-bg-input/70 hover:bg-bg-input text-text-muted hover:text-text-primary transition-all text-xs sm:text-sm font-sans border border-border/50 shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-            title="Mở thanh lệnh nhanh (Ctrl+K / ⌘K)"
+            title={`${t('command_palette.placeholder')} (${t('topbar.search_shortcut')})`}
           >
             <Search className="h-4 w-4 text-text-muted" />
-            <span className="text-[0.6875rem] font-sans hidden sm:inline text-text-secondary">Tìm kiếm...</span>
+            <span className="text-[0.6875rem] font-sans hidden sm:inline text-text-secondary">{t('topbar.search_placeholder')}</span>
             <kbd className="px-1.5 py-0.5 rounded-md bg-bg-card border border-border/80 text-[0.625rem] text-text-muted font-mono shadow-xs">
-              ⌘K
+              {t('topbar.search_shortcut')}
             </kbd>
           </motion.button>
         )}
@@ -74,49 +102,63 @@ export const TopBar: React.FC<TopBarProps> = ({
         {/* Live system state badge */}
         <div className="flex items-center gap-2 px-3 py-1.5 h-9 rounded-xl bg-bg-input/70 border border-border/50 text-xs sm:text-sm shadow-xs whitespace-nowrap shrink-0">
           <StatusDot
-            variant={isServiceActive && isAccountConnected ? "active" : !isServiceActive ? "warning" : "error"}
+            variant={statusInfo.variant}
             size="sm"
           />
           <span className="text-[0.6875rem] font-medium text-text-secondary hidden sm:inline">
-            {isServiceActive && isAccountConnected
-              ? "Sẵn sàng"
-              : !isServiceActive
-              ? "Service tạm dừng"
-              : "Chưa kết nối"}
+            {statusInfo.label}
           </span>
         </div>
 
         {/* Quick Language Toggle Pill — VI / EN */}
-        {onChangeLang && (
-          <div className="flex items-center p-0.5 rounded-xl bg-bg-input/70 border border-border/50 shadow-xs shrink-0">
-            {(["vi", "en"] as const).map((lang) => {
-              const isActive = currentLang === lang
-              return (
-                <motion.button
-                  key={lang}
-                  onClick={() => onChangeLang(lang)}
-                  aria-pressed={isActive}
-                  whileHover={{ scale: isActive ? 1 : 1.05 }}
-                  whileTap={{ scale: 0.96 }}
-                  className={`relative px-2.5 py-1 text-[0.6875rem] font-semibold rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
-                    isActive
-                      ? "text-text-primary"
-                      : "text-text-secondary hover:text-text-primary"
-                  }`}
-                  title={lang === "vi" ? "Tiếng Việt" : "English"}
-                >
-                  {isActive && (
-                    <motion.div
-                      layoutId="topbar-lang-pill"
-                      transition={{ type: "spring", stiffness: 500, damping: 32 }}
-                      className="absolute inset-0 bg-bg-card rounded-lg shadow-sm border border-border/60 -z-10"
-                    />
-                  )}
-                  <span className="relative z-10">{lang.toUpperCase()}</span>
-                </motion.button>
-              )
-            })}
-          </div>
+        <div className="flex items-center p-0.5 rounded-xl bg-bg-input/70 border border-border/50 shadow-xs shrink-0">
+          {(["vi", "en"] as const).map((itemLang) => {
+            const isActive = activeLang === itemLang
+            return (
+              <motion.button
+                key={itemLang}
+                onClick={() => handleLangToggle(itemLang)}
+                aria-pressed={isActive}
+                whileHover={{ scale: isActive ? 1 : 1.05 }}
+                whileTap={{ scale: 0.96 }}
+                className={`relative px-2.5 py-1 text-[0.6875rem] font-semibold rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                  isActive
+                    ? "text-text-primary"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+                title={itemLang === "vi" ? "Tiếng Việt" : "English"}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="topbar-lang-pill"
+                    transition={{ type: "spring", stiffness: 500, damping: 32 }}
+                    className="absolute inset-0 bg-bg-card rounded-lg shadow-sm border border-border/60 -z-10"
+                  />
+                )}
+                <span className="relative z-10">{itemLang.toUpperCase()}</span>
+              </motion.button>
+            )
+          })}
+        </div>
+
+        {/* Remote Update Notification Button */}
+        {updateAvailable && onOpenUpdateModal && (
+          <motion.button
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={onOpenUpdateModal}
+            className="h-9 px-2.5 rounded-xl flex items-center gap-1.5 bg-accent/15 hover:bg-accent/25 border border-accent/40 text-accent font-semibold text-xs shadow-xs cursor-pointer transition-colors"
+            title={t('update_modal.badge_available')}
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+            </span>
+            <ArrowUpCircle className="h-4 w-4" />
+            <span className="hidden sm:inline font-mono">{latestVersion || 'v0.2.1'}</span>
+          </motion.button>
         )}
 
         {/* Apple-style Theme Toggle Button with Spring Morph */}
@@ -124,9 +166,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.92 }}
           onClick={toggleTheme}
-          aria-label={resolvedTheme === "dark" ? "Chuyển sang chế độ sáng" : "Chuyển sang chế độ tối"}
+          aria-label={resolvedTheme === "dark" ? t('topbar.toggle_light') : t('topbar.toggle_dark')}
           className="relative h-9 w-9 rounded-xl flex items-center justify-center bg-bg-input/70 hover:bg-bg-input text-text-secondary hover:text-text-primary border border-border/50 shadow-xs cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-          title={resolvedTheme === "dark" ? "Chuyển sang chế độ sáng" : "Chuyển sang chế độ tối"}
+          title={resolvedTheme === "dark" ? t('topbar.toggle_light') : t('topbar.toggle_dark')}
         >
           <AnimatePresence mode="wait" initial={false}>
             {resolvedTheme === "dark" ? (
@@ -144,7 +186,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 key="moon"
                 initial={{ rotate: 90, scale: 0, opacity: 0 }}
                 animate={{ rotate: 0, scale: 1, opacity: 1 }}
-                exit={{ rotate: -90, scale: 0, opacity: 0 }}
+                exit={{ rotate: 90, scale: 0, opacity: 0 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
               >
                 <Moon className="h-4.5 w-4.5 text-accent stroke-[2]" />
@@ -161,11 +203,11 @@ export const TopBar: React.FC<TopBarProps> = ({
               variant="ghost"
               onClick={onRestartService}
               className="h-9 px-3 text-xs sm:text-sm text-text-secondary hover:text-text-primary gap-2 rounded-xl border border-border/50 font-medium"
-              title="Khởi động lại background service"
-              aria-label="Khởi động lại background service"
+              title={t('topbar.reload_service')}
+              aria-label={t('topbar.reload_service')}
             >
               <RotateCcw className="h-4 w-4" />
-              <span className="hidden lg:inline text-[0.6875rem] font-medium">Tải lại service</span>
+              <span className="hidden lg:inline text-[0.6875rem] font-medium">{t('topbar.reload_service')}</span>
             </Button>
           )}
 
@@ -176,8 +218,8 @@ export const TopBar: React.FC<TopBarProps> = ({
               onClick={onRefresh}
               disabled={isRefreshing}
               className="h-9 w-9 p-0 text-text-secondary hover:text-text-primary rounded-xl border border-border/50"
-              title="Làm mới dữ liệu"
-              aria-label="Làm mới dữ liệu"
+              title={t('topbar.refresh_data')}
+              aria-label={t('topbar.refresh_data')}
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin text-accent" : ""}`} />
             </Button>

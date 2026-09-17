@@ -53,7 +53,7 @@ pub async fn open_telegram_bot() -> Result<(), String> {
 #[tauri::command]
 pub async fn trigger_auth_login() -> Result<(), String> {
     let title = "502Drive - Đăng nhập Google";
-    let cmd = "502drive auth login; echo; read -p 'Nhấn Enter để đóng...' -r";
+    let cmd = "export PATH=\"$HOME/.local/bin:$PATH\"; which 502drive && 502drive auth login || ~/.local/bin/502drive auth login; echo; read -p 'Nhấn Enter để đóng...' -r";
 
     if std::path::Path::new("/usr/bin/ptyxis").exists() {
         Command::new("ptyxis")
@@ -71,8 +71,11 @@ pub async fn trigger_auth_login() -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Failed to spawn xterm: {e}"))?;
     } else {
-        Command::new("502drive")
-            .args(["auth", "login"])
+        Command::new("bash")
+            .args([
+                "-c",
+                "export PATH=\"$HOME/.local/bin:$PATH\"; 502drive auth login",
+            ])
             .spawn()
             .map_err(|e| format!("Failed to spawn 502drive auth login: {e}"))?;
     }
@@ -82,8 +85,11 @@ pub async fn trigger_auth_login() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn trigger_auth_revoke() -> Result<(), String> {
-    Command::new("502drive")
-        .args(["auth", "revoke"])
+    Command::new("bash")
+        .args([
+            "-c",
+            "export PATH=\"$HOME/.local/bin:$PATH\"; 502drive auth revoke",
+        ])
         .output()
         .map_err(|e| format!("Failed to run 502drive auth revoke: {e}"))?;
 

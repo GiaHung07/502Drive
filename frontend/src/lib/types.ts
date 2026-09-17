@@ -131,6 +131,8 @@ export interface WizardConfigInput {
   owner_telegram_id?: number
   engine_concurrency?: number
   auto_confirm_clone?: boolean
+  sa_directory?: string
+  shared_drive_id?: string
 }
 
 export interface TelegramBotVerifyResult {
@@ -184,3 +186,17 @@ export interface PreflightReport {
   steps: PreflightStep[]
   remote_update?: RemoteUpdateInfo
 }
+
+export interface AuthorizedUserDto {
+  telegram_user_id: number
+  role: string
+  enabled: boolean
+}
+
+export interface BackupInfoDto {
+  name: string
+  timestamp_ms: number
+  size_bytes: number
+  files_count: number
+}
+

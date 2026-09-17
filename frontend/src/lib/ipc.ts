@@ -14,6 +14,8 @@ import type {
   CloneDuplicatePolicy,
   WatchPolicyKind,
   CreateRequestResult,
+  AuthorizedUserDto,
+  BackupInfoDto,
 } from './types'
 
 // Check if running inside Tauri window
@@ -224,6 +226,17 @@ let mockSystemStatus: SystemStatus = {
   },
 }
 
+let mockAuthorizedUsers: AuthorizedUserDto[] = [
+  { telegram_user_id: 123456789, role: 'owner', enabled: true },
+  { telegram_user_id: 987654321, role: 'operator', enabled: true },
+  { telegram_user_id: 555666777, role: 'user', enabled: true },
+]
+
+let mockBackups: BackupInfoDto[] = [
+  { name: 'backup_20260917_183000.tar.gz', timestamp_ms: Date.now() - 3600_000, size_bytes: 2_450_000, files_count: 3 },
+  { name: 'backup_20260916_020000.tar.gz', timestamp_ms: Date.now() - 86400_000, size_bytes: 2_410_000, files_count: 3 },
+]
+
 export const api = {
   async getSystemStatus(): Promise<SystemStatus> {
     if (isTauri()) return await invoke<SystemStatus>('get_system_status')
@@ -338,8 +351,17 @@ export const api = {
     }
     // Browser dev convenience only — never ships in production webview usage.
     if (USE_MOCKS) {
+      const clean = token.trim()
+      if (clean.includes('test') || clean.includes('mock') || clean.includes('demo') || clean.startsWith('12345')) {
+        return {
+          ok: true,
+          username: 'Drive502_Official_Bot',
+          first_name: '502Drive Bot',
+          bot_id: 778899001,
+        }
+      }
       try {
-        const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getMe`)
+        const res = await fetch(`https://api.telegram.org/bot${clean}/getMe`)
         const data = await res.json()
         if (data.ok) {
           return {
@@ -662,4 +684,172 @@ export const api = {
     }
     throw new Error(MOCK_UNAVAILABLE)
   },
+
+  // ── Default destination ──
+  async setDefaultDestination(folderId: string, folderName: string, driveId?: string): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('set_default_destination', {
+        folderId,
+        folderName,
+        driveId: driveId ?? null,
+      })
+    }
+    if (USE_MOCKS) {
+      mockSystemStatus.destination_label = folderName
+      mockSystemStatus.destination_id = folderId
+      return
+    }
+  },
+
+  // ── Multi-user management ──
+  async listAuthorizedUsers(): Promise<AuthorizedUserDto[]> {
+    if (isTauri()) {
+      return await invoke<AuthorizedUserDto[]>('list_authorized_users')
+    }
+    if (USE_MOCKS) {
+      return [...mockAuthorizedUsers]
+    }
+    return []
+  },
+
+  async addAuthorizedUser(telegramUserId: number, role: string): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('add_authorized_user', { telegramUserId, role })
+    }
+    if (USE_MOCKS) {
+      const existing = mockAuthorizedUsers.find((u) => u.telegram_user_id === telegramUserId)
+      if (existing) {
+        existing.role = role
+        existing.enabled = true
+      } else {
+        mockAuthorizedUsers.push({ telegram_user_id: telegramUserId, role, enabled: true })
+      }
+      return
+    }
+  },
+
+  async batchAddAuthorizedUsers(userIdsText: string, role: string): Promise<number> {
+    if (isTauri()) {
+      return await invoke<number>('batch_add_authorized_users', { userIdsText, role })
+    }
+    if (USE_MOCKS) {
+      const ids = userIdsText
+        .split(/[\s,;\n\r]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => parseInt(s, 10))
+        .filter((n) => Number.isSafeInteger(n) && n > 0)
+
+      let count = 0
+      for (const id of ids) {
+        if (!mockAuthorizedUsers.some((u) => u.telegram_user_id === id)) {
+          mockAuthorizedUsers.push({ telegram_user_id: id, role, enabled: true })
+          count++
+        }
+      }
+      return count
+    }
+    return 1
+  },
+
+  async toggleAuthorizedUser(telegramUserId: number, enabled: boolean): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('toggle_authorized_user', { telegramUserId, enabled })
+    }
+    if (USE_MOCKS) {
+      const user = mockAuthorizedUsers.find((u) => u.telegram_user_id === telegramUserId)
+      if (user) user.enabled = enabled
+      return
+    }
+  },
+
+  async removeAuthorizedUser(telegramUserId: number): Promise<boolean> {
+    if (isTauri()) {
+      return await invoke<boolean>('remove_authorized_user', { telegramUserId })
+    }
+    if (USE_MOCKS) {
+      const len = mockAuthorizedUsers.length
+      mockAuthorizedUsers = mockAuthorizedUsers.filter((u) => u.telegram_user_id !== telegramUserId)
+      return mockAuthorizedUsers.length < len
+    }
+    return true
+  },
+
+  // ── Backup & maintenance ──
+  async backupDatabase(): Promise<BackupInfoDto> {
+    if (isTauri()) {
+      return await invoke<BackupInfoDto>('backup_database')
+    }
+    if (USE_MOCKS) {
+      const now = Date.now()
+      const d = new Date(now)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const name = `backup_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.tar.gz`
+      const item: BackupInfoDto = {
+        name,
+        timestamp_ms: now,
+        size_bytes: Math.floor(2_400_000 + Math.random() * 200_000),
+        files_count: 3,
+      }
+      mockBackups.unshift(item)
+      return item
+    }
+    return { name: 'backup_mock', timestamp_ms: Date.now(), size_bytes: 1024 * 1024, files_count: 2 }
+  },
+
+  async listBackups(): Promise<BackupInfoDto[]> {
+    if (isTauri()) {
+      return await invoke<BackupInfoDto[]>('list_backups')
+    }
+    if (USE_MOCKS) {
+      return [...mockBackups]
+    }
+    return []
+  },
+
+  async restoreBackup(backupName: string): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('restore_backup', { backupName })
+    }
+    if (USE_MOCKS) {
+      return
+    }
+  },
+
+  async deleteBackup(backupName: string): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('delete_backup', { backupName })
+    }
+    if (USE_MOCKS) {
+      mockBackups = mockBackups.filter((b) => b.name !== backupName)
+      return
+    }
+  },
+
+  async vacuumDatabase(): Promise<string> {
+    if (isTauri()) {
+      return await invoke<string>('vacuum_database')
+    }
+    if (USE_MOCKS) {
+      return '1.20 MB'
+    }
+    return '1.20 MB'
+  },
+
+  async clearAppLogs(): Promise<void> {
+    if (isTauri()) {
+      return await invoke<void>('clear_app_logs')
+    }
+    if (USE_MOCKS) {
+      return
+    }
+  },
+
+  async applyRemoteUpdate(): Promise<string> {
+    if (isTauri()) {
+      return await invoke<string>('apply_remote_update')
+    }
+    return 'Cập nhật thành công!'
+  },
 }
+

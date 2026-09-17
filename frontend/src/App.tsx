@@ -9,10 +9,13 @@ import { PreflightSplash } from '@/components/layout/PreflightSplash'
 import { SetupWizardModal } from '@/components/setup/SetupWizardModal'
 import { QuickCloneModal } from '@/components/modals/QuickCloneModal'
 import { CreateWatchModal } from '@/components/modals/CreateWatchModal'
+import { UpdateModal } from '@/components/modals/UpdateModal'
 import { ToastProvider, useToast } from '@/components/primitives/Toast'
 import { ThemeProvider } from '@/hooks/useTheme'
+import { I18nProvider, useI18n } from '@/hooks/useI18n'
+import { Language } from '@/lib/i18n'
 import { api, getErrorMessage } from '@/lib/ipc'
-import { SystemStatus, JobSummary, WatchSummary, ConfigSummary, WatchPolicyKind } from '@/lib/types'
+import { SystemStatus, JobSummary, WatchSummary, ConfigSummary, WatchPolicyKind, RemoteUpdateInfo } from '@/lib/types'
 
 const AppContent: React.FC = () => {
   const [isPreflightDone, setIsPreflightDone] = useState(false)
@@ -25,9 +28,10 @@ const AppContent: React.FC = () => {
   const [isWizardOpen, setIsWizardOpen] = useState(false)
   const [isCloneOpen, setIsCloneOpen] = useState(false)
   const [isWatchOpen, setIsWatchOpen] = useState(false)
-  // Optimistic language state — immediately reflects user toggle without waiting for round-trip
-  const [currentLang, setCurrentLang] = useState<string>('vi')
-
+  const [updateInfo, setUpdateInfo] = useState<RemoteUpdateInfo | null>(null)
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
+  
+  const { lang, setLang, t } = useI18n()
   const { toast } = useToast()
 
   const refreshData = useCallback(async (silent = false) => {
@@ -44,18 +48,23 @@ const AppContent: React.FC = () => {
       setWatches(newWatches)
       setConfig(newConfig)
       // Sync language state when config refreshes (avoid stomping an in-flight optimistic update)
-      if (newConfig?.language) {
-        setCurrentLang(newConfig.language)
+      if (newConfig?.language && (newConfig.language === 'vi' || newConfig.language === 'en')) {
+        setLang(newConfig.language as Language)
       }
     } catch (err) {
       console.error('Lỗi tải dữ liệu 502Drive:', err)
     } finally {
       if (!silent) setIsRefreshing(false)
     }
-  }, [])
+  }, [setLang])
 
   useEffect(() => {
     refreshData()
+    // Silently check for remote update on start
+    api.checkRemoteUpdate().then((info) => {
+      setUpdateInfo(info)
+    }).catch(() => {})
+
     const interval = setInterval(() => {
       // Background polling is silent — no spinner flicker every 3 seconds.
       if (!isWizardOpen) refreshData(true)
@@ -63,30 +72,33 @@ const AppContent: React.FC = () => {
     return () => clearInterval(interval)
   }, [refreshData, isWizardOpen])
 
-  // Sync currentLang from config on initial load
+  // Sync lang from config on initial load
   useEffect(() => {
-    if (config?.language) {
-      setCurrentLang(config.language)
+    if (config?.language && (config.language === 'vi' || config.language === 'en')) {
+      setLang(config.language as Language)
     }
-  }, [config?.language])
+  }, [config?.language, setLang])
 
-  const handleChangeLang = useCallback(async (lang: string) => {
+  const handleChangeLang = useCallback(async (newLang: string) => {
+    const targetLang = (newLang === 'en' ? 'en' : 'vi') as Language
     // Optimistic: update UI immediately before backend round-trip
-    setCurrentLang(lang)
+    setLang(targetLang)
     try {
-      await api.updateConfig('language', lang)
+      await api.updateConfig('language', targetLang)
       toast({
-        title: lang === 'vi' ? 'Đã chuyển sang Tiếng Việt' : 'Switched to English',
+        title: targetLang === 'vi' ? 'Đã chuyển sang Tiếng Việt' : 'Switched to English',
         variant: 'success',
         duration: 1500,
       })
       await refreshData(true)
     } catch (err) {
       // Revert on error
-      setCurrentLang(config?.language || 'vi')
-      toast({ title: 'Lỗi đổi ngôn ngữ', description: getErrorMessage(err), variant: 'error' })
+      if (config?.language && (config.language === 'vi' || config.language === 'en')) {
+        setLang(config.language as Language)
+      }
+      toast({ title: t('common.error', 'Lỗi'), description: getErrorMessage(err), variant: 'error' })
     }
-  }, [config?.language, refreshData, toast])
+  }, [config?.language, refreshData, setLang, t, toast])
 
   const handleStartService = async () => {
     try {
@@ -322,22 +334,18 @@ const AppContent: React.FC = () => {
   const handleCheckRemoteUpdate = async () => {
     try {
       const info = await api.checkRemoteUpdate()
+      setUpdateInfo(info)
       if (info.update_available) {
-        toast({
-          title: `Bản cập nhật mới ${info.latest_version}`,
-          description: info.changelog,
-          variant: 'success',
-          duration: 6000,
-        })
+        setIsUpdateModalOpen(true)
       } else {
         toast({
-          title: 'Đã cập nhật mới nhất',
-          description: `Bạn đang sử dụng phiên bản ${info.current_version}. Hệ thống đã đồng bộ.`,
+          title: t('settings_page.btn_up_to_date'),
+          description: `${t('settings_page.app_version_label')}: ${info.current_version}. ${t('settings_page.version_up_to_date')}`,
           variant: 'default',
         })
       }
     } catch (err) {
-      toast({ title: 'Lỗi kiểm tra cập nhật', description: getErrorMessage(err), variant: 'error' })
+      toast({ title: t('common.error'), description: getErrorMessage(err), variant: 'error' })
     }
   }
 
@@ -359,8 +367,11 @@ const AppContent: React.FC = () => {
           onRestartService={handleRestartService}
           onOpenBot={handleOpenBot}
           onTriggerLogin={handleTriggerLogin}
-          currentLang={currentLang}
+          currentLang={lang}
           onChangeLang={handleChangeLang}
+          updateAvailable={updateInfo?.update_available ?? false}
+          latestVersion={updateInfo?.latest_version}
+          onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
         >
           {activeTab === 'dashboard' && (
             <Dashboard
@@ -374,6 +385,7 @@ const AppContent: React.FC = () => {
               onResumeJob={handleResumeJob}
               onCancelJob={handleCancelJob}
               onNavigateToJobs={() => setActiveTab('jobs')}
+              onNavigateToSettings={() => setActiveTab('settings')}
               onOpenWizard={() => setIsWizardOpen(true)}
               onOpenQuickClone={() => setIsCloneOpen(true)}
             />
@@ -440,6 +452,13 @@ const AppContent: React.FC = () => {
         onClose={() => setIsWatchOpen(false)}
         onRefreshData={refreshData}
       />
+
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        updateInfo={updateInfo}
+        onUpdateCompleted={refreshData}
+      />
     </>
   )
 }
@@ -447,9 +466,12 @@ const AppContent: React.FC = () => {
 export default function App() {
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
+      <I18nProvider>
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      </I18nProvider>
     </ThemeProvider>
   )
 }
+

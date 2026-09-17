@@ -11,6 +11,8 @@ interface ToastContextType {
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined)
 
+const MAX_TOASTS = 3
+
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
 
@@ -22,7 +24,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ({ title, description, variant = 'default', duration = 3500 }: Omit<ToastMessage, 'id'>) => {
       const id = Math.random().toString(36).substring(2, 9)
       const newToast: ToastMessage = { id, title, description, variant, duration }
-      setToasts((prev) => [...prev, newToast])
+      setToasts((prev) => {
+        const next = [...prev, newToast]
+        if (next.length > MAX_TOASTS) {
+          return next.slice(next.length - MAX_TOASTS)
+        }
+        return next
+      })
 
       if (duration > 0) {
         setTimeout(() => {
@@ -40,7 +48,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         role="region"
         aria-label="Notifications"
         aria-live="polite"
-        className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none"
+        className="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 max-w-sm sm:max-w-md w-full px-4 pointer-events-none"
       >
         <AnimatePresence mode="popLayout">
           {toasts.map((t) => (
@@ -61,46 +69,81 @@ export const useToast = () => {
 }
 
 const ToastItem: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toast, onClose }) => {
-  const icons = {
-    default: <Info className="h-4 w-4 text-info shrink-0 stroke-[1.75]" />,
-    success: <CheckCircle2 className="h-4 w-4 text-accent shrink-0 stroke-[1.75]" />,
-    warning: <AlertTriangle className="h-4 w-4 text-warning shrink-0 stroke-[1.75]" />,
-    error: <AlertCircle className="h-4 w-4 text-error shrink-0 stroke-[1.75]" />,
+  const variant = toast.variant || 'default'
+
+  const variantStyles = {
+    default: {
+      card: 'border-border/80 shadow-modal hover:border-accent/40',
+      badge: 'bg-accent/15 text-accent border border-accent/25',
+      icon: <Info className="h-4 w-4 stroke-[2.2]" />,
+      bar: 'bg-accent',
+    },
+    success: {
+      card: 'border-success/35 shadow-[0_12px_36px_-6px_rgba(34,197,94,0.18)] hover:border-success/50',
+      badge: 'bg-success/15 text-success border border-success/30',
+      icon: <CheckCircle2 className="h-4 w-4 stroke-[2.2]" />,
+      bar: 'bg-success',
+    },
+    warning: {
+      card: 'border-warning/35 shadow-[0_12px_36px_-6px_rgba(234,179,8,0.18)] hover:border-warning/50',
+      badge: 'bg-warning/15 text-warning border border-warning/30',
+      icon: <AlertTriangle className="h-4 w-4 stroke-[2.2]" />,
+      bar: 'bg-warning',
+    },
+    error: {
+      card: 'border-error/35 shadow-[0_12px_36px_-6px_rgba(239,68,68,0.18)] hover:border-error/50',
+      badge: 'bg-error/15 text-error border border-error/30',
+      icon: <AlertCircle className="h-4 w-4 stroke-[2.2]" />,
+      bar: 'bg-error',
+    },
   }
+
+  const current = variantStyles[variant]
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: -12, scale: 0.94 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 50, scale: 0.94, transition: { duration: 0.15 } }}
-      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0, y: -24, scale: 0.92, filter: 'blur(3px)' }}
+      animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+      exit={{ opacity: 0, y: -16, scale: 0.94, filter: 'blur(3px)', transition: { duration: 0.16 } }}
+      transition={{ type: 'spring', stiffness: 450, damping: 30, mass: 0.8 }}
       className={cn(
-        'pointer-events-auto flex items-start gap-2.5 p-3 rounded-xl bg-bg-card/95 backdrop-blur-md border border-border/80 shadow-modal overflow-hidden relative select-none'
+        'pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-bg-elevated/95 backdrop-blur-2xl border overflow-hidden relative select-none w-full max-w-sm sm:max-w-md transition-all',
+        current.card
       )}
     >
-      <div className="pt-0.5">{icons[toast.variant || 'default']}</div>
-      <div className="flex-1 space-y-0.5 min-w-0">
-        <p className="text-xs font-semibold text-text-primary leading-tight">{toast.title}</p>
+      <div className={cn('p-1.5 rounded-xl shrink-0 mt-0.5', current.badge)}>
+        {current.icon}
+      </div>
+
+      <div className="flex-1 space-y-0.5 min-w-0 pr-1">
+        <p className="text-xs font-semibold text-text-primary leading-tight tracking-tight">
+          {toast.title}
+        </p>
         {toast.description && (
-          <p className="text-[0.6875rem] text-text-secondary leading-normal truncate">{toast.description}</p>
+          <p className="text-[0.6875rem] text-text-secondary leading-relaxed line-clamp-2">
+            {toast.description}
+          </p>
         )}
       </div>
+
       <button
         onClick={onClose}
         aria-label="Đóng thông báo"
-        className="p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-input transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-input/80 transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
         <X className="h-3.5 w-3.5" />
       </button>
 
-      {/* Subtle indicator bar */}
-      <motion.div
-        className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent/60"
-        initial={{ width: '100%' }}
-        animate={{ width: '0%' }}
-        transition={{ duration: (toast.duration || 3500) / 1000, ease: 'linear' }}
-      />
+      {/* Synchronized progress bar indicator matching variant */}
+      {toast.duration !== 0 && (
+        <motion.div
+          className={cn('absolute bottom-0 left-0 right-0 h-[2px] opacity-75', current.bar)}
+          initial={{ width: '100%' }}
+          animate={{ width: '0%' }}
+          transition={{ duration: (toast.duration || 3500) / 1000, ease: 'linear' }}
+        />
+      )}
     </motion.div>
   )
 }

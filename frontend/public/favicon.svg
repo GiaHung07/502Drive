@@ -1,0 +1,25 @@
+<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logo-grad-bg" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#064e3b" />
+      <stop offset="0.5" stop-color="#022c22" />
+      <stop offset="1" stop-color="#082f49" />
+    </linearGradient>
+    <linearGradient id="logo-grad-accent" x1="8" y1="12" x2="40" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34d399" />
+      <stop offset="0.5" stop-color="#10b981" />
+      <stop offset="1" stop-color="#06b6d4" />
+    </linearGradient>
+    <linearGradient id="logo-grad-line" x1="12" y1="8" x2="36" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67e8f9" />
+      <stop offset="1" stop-color="#a7f3d0" />
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="42" height="42" rx="12" fill="url(#logo-grad-bg)" stroke="url(#logo-grad-accent)" stroke-width="1.75" stroke-opacity="0.8"/>
+  <path d="M13 16C13 14.8954 13.8954 14 15 14H33C34.1046 14 35 14.8954 35 16V19C35 20.1046 34.1046 21 33 21H15C13.8954 21 13 20.1046 13 19V16Z" fill="url(#logo-grad-accent)" fill-opacity="0.3" stroke="url(#logo-grad-accent)" stroke-width="1.5"/>
+  <circle cx="17.5" cy="17.5" r="1.5" fill="#34d399"/>
+  <circle cx="22" cy="17.5" r="1.5" fill="#38bdf8"/>
+  <path d="M16 26L21 21L26 26M21 21V33" stroke="url(#logo-grad-line)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 24L27 29L22 24M27 29V17" stroke="url(#logo-grad-accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="1 3"/>
+  <path d="M15 35H33" stroke="url(#logo-grad-accent)" stroke-width="2" stroke-linecap="round"/>
+</svg>

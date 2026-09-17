@@ -7,6 +7,8 @@ import { SystemStatus } from "@/lib/types"
 import { useToast } from "@/components/primitives/Toast"
 import { FolderUp } from "lucide-react"
 
+import { useI18n } from "@/hooks/useI18n"
+
 export interface ShellProps {
   activeTab: TabId
   onSelectTab: (tab: TabId) => void
@@ -16,18 +18,12 @@ export interface ShellProps {
   onRestartService?: () => void
   onOpenBot?: () => void
   onTriggerLogin?: () => void
-  /** Current language setting ("vi" | "en") for the TopBar pill. */
   currentLang?: string
-  /** Callback when user toggles language from the TopBar. */
   onChangeLang?: (lang: string) => void
+  updateAvailable?: boolean
+  latestVersion?: string
+  onOpenUpdateModal?: () => void
   children: React.ReactNode
-}
-
-const tabTitles: Record<TabId, { title: string; subtitle: string }> = {
-  dashboard: { title: "Trang chính", subtitle: "Tổng quan hệ thống & tài khoản" },
-  jobs: { title: "Tiến độ & đồng bộ", subtitle: "Quản lý tác vụ sao chép và theo dõi thư mục" },
-  settings: { title: "Cài đặt", subtitle: "Cấu hình tham số engine, tài khoản và giao diện" },
-  dev: { title: "Công cụ Dev", subtitle: "Báo cáo chẩn đoán hệ thống và nhật ký vận hành" },
 }
 
 export const Shell: React.FC<ShellProps> = ({
@@ -41,12 +37,23 @@ export const Shell: React.FC<ShellProps> = ({
   onTriggerLogin,
   currentLang,
   onChangeLang,
+  updateAvailable,
+  latestVersion,
+  onOpenUpdateModal,
   children,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const { toast } = useToast()
+  const { t } = useI18n()
+
+  const tabTitles: Record<TabId, { title: string; subtitle: string }> = {
+    dashboard: { title: t('nav.dashboard'), subtitle: t('nav.dashboard_sub') },
+    jobs: { title: t('nav.jobs'), subtitle: t('nav.jobs_sub') },
+    settings: { title: t('nav.settings'), subtitle: t('nav.settings_sub') },
+    dev: { title: t('nav.dev'), subtitle: t('nav.dev_sub') },
+  }
 
   const currentInfo = tabTitles[activeTab]
 
@@ -99,7 +106,7 @@ export const Shell: React.FC<ShellProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="flex h-screen w-screen bg-bg-base overflow-hidden font-sans relative"
+      className="flex h-screen w-full max-w-full bg-bg-base overflow-hidden font-sans relative"
     >
       {/* Drag & Drop Visual Overlay */}
       <AnimatePresence>
@@ -114,8 +121,8 @@ export const Shell: React.FC<ShellProps> = ({
               <FolderUp className="h-7 w-7 stroke-[1.75]" />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-base font-semibold text-text-primary">Thả liên kết Google Drive vào đây</p>
-              <p className="text-xs text-text-muted">502Drive sẽ tự động phân tích và bắt đầu sao chép</p>
+              <p className="text-base font-semibold text-text-primary">{t('drag_drop.title')}</p>
+              <p className="text-xs text-text-muted">{t('drag_drop.subtitle')}</p>
             </div>
           </motion.div>
         )}
@@ -140,6 +147,9 @@ export const Shell: React.FC<ShellProps> = ({
           onOpenCommandPalette={() => setIsCommandOpen(true)}
           currentLang={currentLang}
           onChangeLang={onChangeLang}
+          updateAvailable={updateAvailable}
+          latestVersion={latestVersion}
+          onOpenUpdateModal={onOpenUpdateModal}
         />
 
         {/* Responsive viewport container with fluid auto-centering */}
@@ -168,6 +178,7 @@ export const Shell: React.FC<ShellProps> = ({
         onOpenBot={onOpenBot || (() => {})}
         onTriggerLogin={onTriggerLogin || (() => {})}
         onRefresh={onRefresh || (() => {})}
+        onOpenUpdateModal={onOpenUpdateModal}
       />
     </div>
   )

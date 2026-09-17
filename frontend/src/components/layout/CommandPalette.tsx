@@ -14,6 +14,12 @@ import {
   LogIn,
   RefreshCw,
   X,
+  Users,
+  Database,
+  Stethoscope,
+  HardDrive,
+  ArrowUpCircle,
+  FolderOpen,
 } from 'lucide-react'
 
 export interface CommandPaletteProps {
@@ -24,6 +30,7 @@ export interface CommandPaletteProps {
   onOpenBot: () => void
   onTriggerLogin: () => void
   onRefresh: () => void
+  onOpenUpdateModal?: () => void
 }
 
 interface CommandItem {
@@ -32,7 +39,7 @@ interface CommandItem {
   subtitle: string
   icon: React.ComponentType<{ className?: string }>
   action: () => void
-  category: 'Trang' | 'Thao tác' | 'Giao diện'
+  category: 'Trang' | 'Thao tác' | 'Giao diện' | 'Công cụ'
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -43,6 +50,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenBot,
   onTriggerLogin,
   onRefresh,
+  onOpenUpdateModal,
 }) => {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -74,8 +82,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     },
     {
       id: 'nav-settings',
-      title: 'Mở Cài đặt',
-      subtitle: 'Cấu hình concurrency, tài khoản, ngôn ngữ',
+      title: 'Mở Cài đặt hệ thống',
+      subtitle: 'Cấu hình concurrency, tài khoản, ngôn ngữ, SA pool',
       icon: Settings,
       category: 'Trang',
       action: () => {
@@ -85,12 +93,67 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     },
     {
       id: 'nav-dev',
-      title: 'Mở Công cụ Dev',
-      subtitle: 'Chẩn đoán doctor và xem nhật ký runtime',
+      title: 'Mở Công cụ Dev & Vận hành',
+      subtitle: 'Chẩn đoán doctor, quản lý người dùng, sao lưu SQLite, nhật ký',
       icon: Terminal,
       category: 'Trang',
       action: () => {
         onSelectTab('dev')
+        onClose()
+      },
+    },
+    {
+      id: 'tool-users',
+      title: 'Quản lý Người dùng Telegram',
+      subtitle: 'Thêm và phân quyền các tài khoản điều khiển bot',
+      icon: Users,
+      category: 'Công cụ',
+      action: () => {
+        onSelectTab('dev')
+        onClose()
+      },
+    },
+    {
+      id: 'tool-backup',
+      title: 'Sao lưu & Khôi phục Dữ liệu (Backup SQLite)',
+      subtitle: 'Tạo bản snapshot dữ liệu state.db và config.toml an toàn',
+      icon: Database,
+      category: 'Công cụ',
+      action: () => {
+        onSelectTab('dev')
+        onClose()
+      },
+    },
+    {
+      id: 'tool-doctor',
+      title: 'Chạy Chẩn đoán Toàn diện (Doctor)',
+      subtitle: 'Kiểm tra tệp tin, SQLite, WAL, permissions, kết nối Google & Telegram',
+      icon: Stethoscope,
+      category: 'Công cụ',
+      action: () => {
+        onSelectTab('dev')
+        onClose()
+      },
+    },
+    {
+      id: 'tool-destination',
+      title: 'Cấu hình Thư mục đích mặc định',
+      subtitle: 'Chọn thư mục Google Drive để lưu các tác vụ sao chép',
+      icon: FolderOpen,
+      category: 'Công cụ',
+      action: () => {
+        onSelectTab('settings')
+        onClose()
+      },
+    },
+    {
+      id: 'tool-sa',
+      title: 'Cấu hình Service Accounts Pool',
+      subtitle: 'Mở rộng hạn mức tải và tự động luân chuyển token bypass 750GB/ngày',
+      icon: HardDrive,
+      category: 'Công cụ',
+      action: () => {
+        onSelectTab('settings')
         onClose()
       },
     },
@@ -135,6 +198,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       category: 'Thao tác',
       action: () => {
         onTriggerLogin()
+        onClose()
+      },
+    },
+    {
+      id: 'act-update',
+      title: 'Kiểm tra & Cập nhật Phiên bản Mới',
+      subtitle: 'Cập nhật ứng dụng từ xa với sao lưu tự động',
+      icon: ArrowUpCircle,
+      category: 'Thao tác',
+      action: () => {
+        onOpenUpdateModal?.()
         onClose()
       },
     },

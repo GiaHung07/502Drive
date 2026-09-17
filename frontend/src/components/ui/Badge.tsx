@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 export type BadgeVariant =
   | 'running'
   | 'paused'
+  | 'warning'
   | 'done'
   | 'completed'
   | 'failed'
@@ -33,6 +34,7 @@ export const Badge: React.FC<BadgeProps> = ({
     done: 'bg-success/12 text-success',
     completed: 'bg-success/12 text-success',
     paused: 'bg-warning/12 text-warning',
+    warning: 'bg-warning/12 text-warning',
     failed: 'bg-error/12 text-error',
     disconnected: 'bg-error/12 text-error',
     queued: 'bg-info/12 text-info',

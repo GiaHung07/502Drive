@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { HardDrive, CheckCircle2, AlertCircle, RefreshCw, LogIn, ArrowRight, Sparkles, Wrench } from 'lucide-react'
+import { CheckCircle2, AlertCircle, RefreshCw, LogIn, ArrowRight, Sparkles, Wrench } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 import { Button } from '@/components/ui/Button'
 import { ProgressBar } from '@/components/primitives/ProgressBar'
 import { api, getErrorMessage } from '@/lib/ipc'
@@ -90,16 +91,19 @@ export const PreflightSplash: React.FC<PreflightSplashProps> = ({
         className="w-full max-w-lg space-y-6"
       >
         {/* Brand Header */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
           <motion.div
             animate={{ scale: [1, 1.05, 1] }}
             transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
-            className="w-14 h-14 rounded-2xl bg-accent/15 border border-accent/30 text-accent flex items-center justify-center mx-auto shadow-float"
+            className="flex items-center justify-center mx-auto"
           >
-            <HardDrive className="h-7 w-7 stroke-[1.75]" />
+            <LogoMark size="xl" />
           </motion.div>
-          <div className="space-y-0.5">
-            <h1 className="text-lg font-semibold text-text-primary tracking-tight">502Drive</h1>
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold text-text-primary tracking-tight">
+              <span className="text-accent font-extrabold">502</span>
+              <span>Drive</span>
+            </h1>
             <p className="text-xs text-text-secondary">
               Khởi tạo môi trường & tự động kiểm tra hệ thống
             </p>
@@ -220,25 +224,27 @@ export const PreflightSplash: React.FC<PreflightSplashProps> = ({
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="p-3.5 rounded-xl bg-accent/5 border border-accent/20 flex items-center justify-between gap-3"
+              className="p-4 rounded-2xl bg-accent/10 border border-accent/25 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm"
             >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Sparkles className="h-4 w-4 text-accent shrink-0" />
-                <div className="space-y-0.5">
-                  <p className="text-xs font-semibold text-text-primary">Thiết lập kết nối</p>
-                  <p className="text-[11px] text-text-secondary truncate">
+              <div className="flex items-start gap-3 min-w-0 flex-1">
+                <div className="p-2 rounded-xl bg-accent/15 text-accent shrink-0 mt-0.5">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-xs font-bold text-text-primary">Thiết lập kết nối</p>
+                  <p className="text-[11px] text-text-secondary leading-relaxed">
                     Đăng nhập tài khoản Google Drive để bắt đầu sao chép
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
                 <Button
                   size="sm"
                   variant="primary"
                   onClick={() => handleFixAction('login')}
                   disabled={isFixing === 'login'}
-                  className="text-xs gap-1.5"
+                  className="text-xs gap-2 px-4 py-2 font-semibold rounded-xl bg-accent hover:bg-accent-hover text-white shadow-xs"
                 >
                   <LogIn className="h-3.5 w-3.5" />
                   <span>Đăng nhập</span>
@@ -247,7 +253,7 @@ export const PreflightSplash: React.FC<PreflightSplashProps> = ({
                   size="sm"
                   variant="secondary"
                   onClick={onComplete}
-                  className="text-xs gap-1"
+                  className="text-xs gap-1.5 px-3 py-2 rounded-xl"
                 >
                   <span>Bỏ qua</span>
                   <ArrowRight className="h-3 w-3" />

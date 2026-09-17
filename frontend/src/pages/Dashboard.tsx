@@ -20,9 +20,11 @@ import {
   Layers,
   ArrowRight,
   Copy,
+  AlertTriangle,
 } from "lucide-react"
 import { SystemStatus, JobSummary } from "@/lib/types"
 import { formatBytes } from "@/lib/utils"
+import { useI18n } from "@/hooks/useI18n"
 
 export interface DashboardProps {
   status: SystemStatus | null
@@ -37,6 +39,7 @@ export interface DashboardProps {
   onCancelJob?: (id: string) => void
   onOpenWizard?: () => void
   onOpenQuickClone?: () => void
+  onNavigateToSettings?: () => void
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -52,8 +55,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onCancelJob,
   onOpenWizard,
   onOpenQuickClone,
+  onNavigateToSettings,
 }) => {
+  const { t } = useI18n()
   const isAccountConnected = status?.account_status === "connected"
+  const isReconnectRequired = status?.account_status === "reconnect_required"
   const isServiceActive = status?.service_active ?? false
   const isLoading = status === null
   const jobsToDisplay = recentJobs.slice(0, 4)
@@ -61,7 +67,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-6 lg:space-y-8 w-full pb-12">
       {/* ── Banner: Setup Wizard thông minh cho người dùng mới ── */}
-      {!isAccountConnected && (
+      {!isAccountConnected && !isReconnectRequired && (
         <div className="p-5 sm:p-6 rounded-2xl bg-accent/10 border border-accent/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 shadow-xs">
           <div className="flex items-start gap-3.5">
             <div className="p-2.5 rounded-xl bg-accent text-white shadow-sm shrink-0 mt-0.5">
@@ -69,10 +75,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="space-y-1">
               <h3 className="text-base sm:text-lg font-bold text-text-primary">
-                Bắt đầu cấu hình 502Drive trong 3 phút
+                {t('dashboard.wizard_banner_title')}
               </h3>
               <p className="text-xs sm:text-sm text-text-secondary leading-relaxed">
-                Chưa kết nối tài khoản Google Drive. Mở Trình hướng dẫn thiết lập từng bước để điền thông số và load xác nhận tức thì.
+                {t('dashboard.wizard_banner_desc')}
               </p>
             </div>
           </div>
@@ -83,11 +89,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
             className="text-xs gap-1.5 rounded-xl shrink-0 font-semibold shadow-xs"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            <span>Mở Setup Wizard</span>
+            <span>{t('dashboard.wizard_banner_btn')}</span>
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       )}
+
+      {/* ── Banner: Cần kết nối lại Google OAuth ── */}
+      {isReconnectRequired && (
+        <div className="p-5 sm:p-6 rounded-2xl bg-warning/10 border border-warning/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 shadow-xs">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-warning text-white shadow-sm shrink-0 mt-0.5">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base sm:text-lg font-bold text-text-primary">
+                {t('dashboard.gdrive_reconnect')}
+              </h3>
+              <p className="text-xs sm:text-sm text-text-secondary leading-relaxed">
+                {t('dashboard.gdrive_expired')}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={onTriggerLogin}
+            className="text-xs gap-1.5 rounded-xl shrink-0 font-semibold shadow-xs bg-warning hover:bg-warning/90 text-white"
+          >
+            <LogIn className="h-3.5 w-3.5" />
+            <span>{t('dashboard.btn_reconnect_google')}</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
       {/* ── Quick action: Sao chép nhanh (khi tài khoản đã kết nối) ── */}
       {isAccountConnected && onOpenQuickClone && (
         <div className="p-5 sm:p-6 rounded-2xl bg-accent/10 border border-accent/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 shadow-xs">
@@ -97,10 +133,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="space-y-1">
               <h3 className="text-base sm:text-lg font-bold text-text-primary">
-                Sao chép nhanh thư mục Drive
+                {t('dashboard.quick_clone_title')}
               </h3>
               <p className="text-xs sm:text-sm text-text-secondary leading-relaxed">
-                Dán liên kết thư mục Google Drive để gửi yêu cầu sao chép ngay lập tức — daemon sẽ xác nhận và bắt đầu clone trong nền.
+                {t('dashboard.quick_clone_desc')}
               </p>
             </div>
           </div>
@@ -111,11 +147,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             className="text-xs gap-1.5 rounded-xl shrink-0 font-semibold shadow-xs"
           >
             <Copy className="h-3.5 w-3.5" />
-            <span>Sao chép nhanh</span>
+            <span>{t('dashboard.quick_clone_btn')}</span>
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       )}
+
       {/* ── Section: Số liệu tổng quan (Apple 4-Column Adaptive Grid) ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
         {isLoading
@@ -132,24 +169,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
           : (
         <>
         <StatCard
-          label="Tác vụ đang chạy"
+          label={t('dashboard.stat_active_jobs')}
           value={status?.stats?.active_jobs ?? 0}
-          subtext={`/ ${status?.stats?.total_jobs ?? 0} tổng`}
+          subtext={`/ ${status?.stats?.total_jobs ?? 0} ${t('dashboard.stat_total')}`}
           icon={Play}
         />
         <StatCard
-          label="Tệp đã sao chép"
+          label={t('dashboard.stat_cloned_files')}
           value={status?.stats?.total_cloned_files ?? 0}
           icon={Files}
         />
         <StatCard
-          label="Dung lượng đã sao chép"
+          label={t('dashboard.stat_cloned_bytes')}
           value={formatBytes(status?.stats?.total_cloned_bytes ?? 0)}
           icon={HardDrive}
         />
         <StatCard
-          label="Toàn vẹn cơ sở dữ liệu"
-          value={status?.db_integrity === "ok" ? "Bình thường" : "Cần kiểm tra"}
+          label={t('dashboard.stat_db_integrity')}
+          value={status?.db_integrity === "ok" ? t('dashboard.stat_healthy') : t('common.error')}
           icon={Database}
         />
         </>
@@ -160,7 +197,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-            Tài khoản & Kết nối
+            {t('dashboard.accounts_title')}
           </h2>
         </div>
 
@@ -187,20 +224,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-1.5 rounded-lg bg-accent/10 text-accent">
                     <HardDrive className="h-4 w-4" />
                   </div>
-                  <span>Google Drive</span>
+                  <span>{t('dashboard.gdrive_title')}</span>
                 </CardTitle>
-                <Badge variant={isAccountConnected ? "connected" : "disconnected"}>
-                  {isAccountConnected ? "Đã kết nối" : "Chưa kết nối"}
+                <Badge variant={isReconnectRequired ? "warning" : isAccountConnected ? "connected" : "disconnected"}>
+                  {isReconnectRequired
+                    ? t('dashboard.gdrive_reconnect')
+                    : isAccountConnected
+                    ? t('dashboard.gdrive_connected')
+                    : t('topbar.not_connected')}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent className="p-0 space-y-3">
               <div className="p-3 rounded-xl bg-bg-input/60 border border-border/40">
                 <p className="text-xs font-mono text-text-primary truncate font-medium">
-                  {status?.google_account || "Chưa đăng nhập Google"}
+                  {status?.google_account || t('dashboard.gdrive_disconnected')}
                 </p>
                 <p className="text-[0.6875rem] text-text-muted mt-0.5">
-                  {isAccountConnected ? "OAuth token hoạt động ổn định" : "Cần liên kết để sao chép dữ liệu"}
+                  {isReconnectRequired
+                    ? t('dashboard.gdrive_expired')
+                    : isAccountConnected
+                    ? t('dashboard.gdrive_stable')
+                    : t('topbar.not_connected')}
                 </p>
               </div>
 
@@ -213,17 +258,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       onClick={onTriggerLogin}
                       className="flex-1 text-xs rounded-xl"
                     >
-                      Đổi tài khoản
+                      {t('dashboard.btn_switch_account')}
                     </Button>
                     <Button
                       size="sm"
                       variant="danger"
                       onClick={onTriggerRevoke}
                       className="h-8 px-2.5 text-xs gap-1 rounded-xl"
-                      title="Ngắt kết nối tài khoản"
+                      title={t('dashboard.btn_disconnect')}
                     >
                       <LogOut className="h-3.5 w-3.5" />
-                      <span>Ngắt</span>
+                      <span>{t('dashboard.btn_disconnect')}</span>
                     </Button>
                   </>
                 ) : (
@@ -234,7 +279,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     className="w-full text-xs gap-1.5 rounded-xl"
                   >
                     <LogIn className="h-3.5 w-3.5" />
-                    Đăng nhập Google
+                    {isReconnectRequired ? t('dashboard.btn_reconnect_google') : t('dashboard.btn_connect_google')}
                   </Button>
                 )}
               </div>
@@ -249,10 +294,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-1.5 rounded-lg bg-accent/10 text-accent">
                     <Send className="h-4 w-4" />
                   </div>
-                  <span>Telegram Bot</span>
+                  <span>{t('dashboard.tg_title')}</span>
                 </CardTitle>
                 <Badge variant={isServiceActive ? "active" : "paused"} pulse={isServiceActive}>
-                  {isServiceActive ? "Đang chạy" : "Đã dừng"}
+                  {isServiceActive ? t('dashboard.tg_running') : t('dashboard.tg_paused')}
                 </Badge>
               </div>
             </CardHeader>
@@ -262,7 +307,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   @{status?.bot_username || "Drive502_Bot"}
                 </p>
                 <p className="text-[0.6875rem] text-text-muted mt-0.5">
-                  {isServiceActive ? "Long polling đang sẵn sàng nhận lệnh" : "Service chạy nền chưa khởi động"}
+                  {isServiceActive ? t('dashboard.tg_ready') : t('topbar.service_paused')}
                 </p>
               </div>
 
@@ -274,14 +319,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="flex-1 text-xs gap-1.5 rounded-xl"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  Mở Telegram Bot
+                  {t('dashboard.btn_open_bot')}
                 </Button>
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={onRestartService}
                   className="h-8 w-8 p-0 rounded-xl"
-                  title="Khởi động lại service"
+                  title={t('topbar.reload_service')}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                 </Button>
@@ -297,24 +342,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-1.5 rounded-lg bg-accent/10 text-accent">
                     <FolderSync className="h-4 w-4" />
                   </div>
-                  <span>Thư mục đích</span>
+                  <span>{t('dashboard.dest_title')}</span>
                 </CardTitle>
-                <Badge variant="default">Mặc định</Badge>
+                <Badge variant="default">{t('dashboard.dest_default_badge')}</Badge>
               </div>
             </CardHeader>
             <CardContent className="p-0 space-y-3">
               <div className="p-3 rounded-xl bg-bg-input/60 border border-border/40">
                 <p className="text-xs font-medium text-text-primary truncate">
-                  {status?.destination_label || "My Drive / Backup 502"}
+                  {status?.destination_label || t('dashboard.dest_unset')}
                 </p>
                 <p className="text-[0.625rem] font-mono text-text-muted mt-0.5 truncate">
-                  ID: {status?.destination_id || "1aBcDeFgHiJkLmNoPqRsTuVwXyZ01234"}
+                  ID: {status?.destination_id || t('common.not_configured')}
                 </p>
               </div>
 
               <div className="flex items-center justify-between text-xs text-text-secondary pt-1">
-                <span className="text-[0.6875rem] text-text-muted">Vị trí lưu trữ dữ liệu nhân bản từ bot</span>
+                <span className="text-[0.6875rem] text-text-muted">{t('dashboard.dest_desc')}</span>
               </div>
+
+              {onNavigateToSettings && (
+                <div className="pt-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={onNavigateToSettings}
+                    className="w-full text-xs gap-1.5 rounded-xl"
+                  >
+                    <span>{status?.destination_id ? t('settings_page.btn_change_dest') : 'Thiết lập thư mục đích'}</span>
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -327,7 +385,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-accent" />
             <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-              Tiến trình công việc gần đây
+              {t('dashboard.recent_jobs_title')}
             </h2>
           </div>
           <Button
@@ -336,7 +394,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             onClick={onNavigateToJobs}
             className="text-xs text-text-secondary hover:text-text-primary h-7 px-2.5 rounded-lg gap-1"
           >
-            <span>Tất cả tác vụ</span>
+            <span>{t('dashboard.view_all_jobs')}</span>
             <ArrowRight className="h-3 w-3" />
           </Button>
         </div>
@@ -356,9 +414,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="w-11 h-11 rounded-2xl bg-accent/10 text-accent flex items-center justify-center mx-auto shadow-xs">
               <Sparkles className="h-5 w-5 stroke-[1.75]" />
             </div>
-            <p className="text-xs font-semibold text-text-primary">Chưa có tác vụ sao chép nào</p>
+            <p className="text-xs font-semibold text-text-primary">{t('dashboard.no_jobs_title')}</p>
             <p className="text-[0.6875rem] text-text-muted max-w-sm mx-auto leading-relaxed">
-              Gửi liên kết thư mục Google Drive vào bot Telegram hoặc dùng phím tắt ⌘K để tạo lệnh clone nhanh.
+              {t('dashboard.no_jobs_desc')}
             </p>
           </Card>
         ) : (

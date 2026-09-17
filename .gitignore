@@ -29,3 +29,4 @@ dist/
 *.tsbuildinfo
 .local-notes/
 .zcode/
+.ai/

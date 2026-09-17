@@ -50,6 +50,19 @@ pub fn run() {
             commands::doctor::check_remote_update,
             commands::doctor::run_doctor,
             commands::logs::get_recent_logs,
+            commands::admin::set_default_destination,
+            commands::admin::list_authorized_users,
+            commands::admin::add_authorized_user,
+            commands::admin::batch_add_authorized_users,
+            commands::admin::toggle_authorized_user,
+            commands::admin::remove_authorized_user,
+            commands::admin::backup_database,
+            commands::admin::list_backups,
+            commands::admin::restore_backup,
+            commands::admin::delete_backup,
+            commands::admin::vacuum_database,
+            commands::admin::clear_app_logs,
+            commands::admin::apply_remote_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running 502Drive application");

@@ -224,6 +224,26 @@ pub async fn delete_expired_callback_states(db: &Database) -> anyhow::Result<usi
         .await?)
 }
 
+/// Prune processed telegram_updates rows older than the given number of days.
+/// The dedup table only needs recent update_ids — without pruning it grows
+/// unboundedly with every message and callback the bot ever receives.
+pub async fn delete_processed_telegram_updates_older_than(
+    db: &Database,
+    days: u64,
+) -> anyhow::Result<usize> {
+    let cutoff = now_ms() - (days as i64 * 86_400_000);
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            conn.execute(
+                "DELETE FROM telegram_updates
+                 WHERE processed_at_ms IS NOT NULL AND processed_at_ms <= ?1",
+                params![cutoff],
+            )
+        })
+        .await?)
+}
+
 pub async fn get_telegram_session(
     db: &Database,
     user_id: i64,
@@ -740,7 +760,7 @@ pub async fn is_authorized(db: &Database, telegram_user_id: i64) -> anyhow::Resu
         .await?)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorizedUser {
     pub telegram_user_id: i64,
     pub role: String,
@@ -768,6 +788,78 @@ pub async fn authorized_user(
                 },
             )
             .optional()
+        })
+        .await?)
+}
+
+pub async fn list_authorized_users(db: &Database) -> anyhow::Result<Vec<AuthorizedUser>> {
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT telegram_user_id, role, enabled
+                 FROM authorized_users
+                 ORDER BY (role = 'owner') DESC, created_at_ms DESC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(AuthorizedUser {
+                    telegram_user_id: row.get(0)?,
+                    role: row.get(1)?,
+                    enabled: row.get::<_, i64>(2)? == 1,
+                })
+            })?;
+            let mut users = Vec::new();
+            for r in rows {
+                users.push(r?);
+            }
+            Ok::<Vec<AuthorizedUser>, rusqlite::Error>(users)
+        })
+        .await?)
+}
+
+pub async fn upsert_authorized_user(
+    db: &Database,
+    telegram_user_id: i64,
+    role: &str,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    let role_owned = role.to_string();
+    db.conn()
+        .call(move |conn| {
+            let now = now_ms();
+            conn.execute(
+                "INSERT INTO authorized_users
+                    (telegram_user_id, role, enabled, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(telegram_user_id) DO UPDATE SET
+                    role = CASE
+                        WHEN authorized_users.role = 'owner' AND ?2 != 'owner' THEN 'owner'
+                        ELSE ?2
+                    END,
+                    enabled = ?3",
+                params![
+                    telegram_user_id,
+                    role_owned,
+                    if enabled { 1 } else { 0 },
+                    now
+                ],
+            )?;
+            Ok::<(), rusqlite::Error>(())
+        })
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_authorized_user(db: &Database, telegram_user_id: i64) -> anyhow::Result<bool> {
+    Ok(db
+        .conn()
+        .call(move |conn| {
+            let deleted = conn.execute(
+                "DELETE FROM authorized_users
+                 WHERE telegram_user_id = ?1 AND role != 'owner'",
+                params![telegram_user_id],
+            )?;
+            Ok::<bool, rusqlite::Error>(deleted > 0)
         })
         .await?)
 }
@@ -1644,6 +1736,88 @@ pub async fn mark_item_failed(
                      last_error_message = ?2
                  WHERE job_id = ?3 AND source_item_id = ?4",
                 params![error_code, error_message, job_id, source_item_id],
+            )?;
+            Ok::<(), rusqlite::Error>(())
+        })
+        .await?;
+    Ok(())
+}
+
+pub async fn mark_item_failed_with_retry_info(
+    db: &Database,
+    job_id: &str,
+    source_item_id: &str,
+    error_code: &str,
+    error_message: &str,
+    last_error_reason: Option<&str>,
+    retry_class: Option<&str>,
+    next_attempt_at_ms: Option<i64>,
+) -> anyhow::Result<()> {
+    let job_id = job_id.to_string();
+    let source_item_id = source_item_id.to_string();
+    let error_code = error_code.to_string();
+    let error_message = error_message.to_string();
+    let last_error_reason = last_error_reason.map(ToOwned::to_owned);
+    let retry_class = retry_class.map(ToOwned::to_owned);
+    db.conn()
+        .call(move |conn| {
+            conn.execute(
+                "UPDATE job_items
+                 SET status = 'failed',
+                     last_error_code = ?1,
+                     last_error_message = ?2,
+                     last_error_reason = ?3,
+                     retry_class = ?4,
+                     next_attempt_at_ms = ?5,
+                     attempts = attempts + 1
+                 WHERE job_id = ?6 AND source_item_id = ?7",
+                params![
+                    error_code,
+                    error_message,
+                    last_error_reason,
+                    retry_class,
+                    next_attempt_at_ms,
+                    job_id,
+                    source_item_id
+                ],
+            )?;
+            Ok::<(), rusqlite::Error>(())
+        })
+        .await?;
+    Ok(())
+}
+
+/// Atomically records a received Telegram update.
+/// Returns `true` if this update is newly recorded, `false` if it was already seen (duplicate).
+pub async fn record_telegram_update(
+    db: &Database,
+    update_id: i64,
+    payload_json: Option<&str>,
+) -> anyhow::Result<bool> {
+    let payload_json = payload_json.map(ToOwned::to_owned);
+    let inserted = db
+        .conn()
+        .call(move |conn| {
+            let affected = conn.execute(
+                "INSERT OR IGNORE INTO telegram_updates
+                 (update_id, received_at_ms, payload_json)
+                 VALUES (?1, ?2, ?3)",
+                params![update_id, now_ms(), payload_json],
+            )?;
+            Ok::<bool, rusqlite::Error>(affected > 0)
+        })
+        .await?;
+    Ok(inserted)
+}
+
+pub async fn mark_telegram_update_processed(db: &Database, update_id: i64) -> anyhow::Result<()> {
+    db.conn()
+        .call(move |conn| {
+            conn.execute(
+                "UPDATE telegram_updates
+                 SET processed_at_ms = ?1
+                 WHERE update_id = ?2",
+                params![now_ms(), update_id],
             )?;
             Ok::<(), rusqlite::Error>(())
         })

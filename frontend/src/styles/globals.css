@@ -97,17 +97,18 @@ html {
 }
 
 /* ── Smooth Theme Transition ─────────────────────────────────────
-   Applied app-wide for ~320ms while switching (driven by useTheme),
-   then removed so hover/interaction transitions stay untouched. */
-html.theme-transitioning,
-html.theme-transitioning *,
-html.theme-transitioning *::before,
-html.theme-transitioning *::after {
-  transition: background-color 200ms ease-out,
-              border-color 200ms ease-out,
-              color 200ms ease-out,
-              fill 200ms ease-out,
-              box-shadow 200ms ease-out !important;
+   Target only top-level surface containers (not every DOM element with *),
+   preventing massive layout thrashing / paint stutter during theme switch. */
+html.theme-transitioning body,
+html.theme-transitioning header,
+html.theme-transitioning aside,
+html.theme-transitioning main,
+html.theme-transitioning .theme-surface,
+html.theme-transitioning [class*="bg-bg-"],
+html.theme-transitioning [class*="border-border"] {
+  transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+              color 150ms ease-out !important;
   transition-delay: 0s !important;
 }
 
@@ -115,8 +116,6 @@ body,
 header,
 aside,
 main,
-button,
-input,
 .theme-surface {
   transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out;
 }

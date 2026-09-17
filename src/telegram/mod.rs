@@ -13,7 +13,7 @@ use teloxide::types::BotCommand;
 
 use crate::{
     config::AppConfig,
-    state::db::Database,
+    state::{db::Database, repo},
     telegram::i18n::{TextKey as T, UiLanguage},
 };
 
@@ -27,15 +27,37 @@ pub async fn run(config: AppConfig, db: Database) -> anyhow::Result<()> {
         tracing::warn!(error = %err, "failed to resume running job progress updaters");
     }
 
+    // The dedup table only needs recent update_ids; prune old processed rows
+    // once per startup (full retention window lives in the query).
+    match repo::delete_processed_telegram_updates_older_than(&db, 7).await {
+        Ok(removed) if removed > 0 => {
+            tracing::info!(removed, "pruned old processed telegram_updates rows")
+        }
+        Err(err) => tracing::warn!(error = %err, "telegram_updates prune failed"),
+        _ => {}
+    }
+
+    let coordinator = crate::engine::state_coordinator::StateCoordinator::new(db.clone());
+
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint({
             let db = db.clone();
             let config = config.clone();
-            move |bot: Bot, msg: Message| {
+            let coordinator = coordinator.clone();
+            move |bot: Bot, msg: Message, update: Update| {
                 let db = db.clone();
                 let config = config.clone();
+                let coordinator = coordinator.clone();
                 async move {
+                    let update_id = update.id.0 as i64;
+                    if let Ok(is_new) = coordinator.deduplicate_telegram_update(update_id).await {
+                        if !is_new {
+                            tracing::debug!(update_id, "ignoring duplicate telegram update");
+                            return respond(());
+                        }
+                    }
                     handlers::handle_message(bot, msg, config, db).await?;
+                    let _ = coordinator.mark_telegram_update_processed(update_id).await;
                     respond(())
                 }
             }
@@ -43,11 +65,24 @@ pub async fn run(config: AppConfig, db: Database) -> anyhow::Result<()> {
         .branch(Update::filter_callback_query().endpoint({
             let db = db.clone();
             let config = config.clone();
-            move |bot: Bot, query: CallbackQuery| {
+            let coordinator = coordinator.clone();
+            move |bot: Bot, query: CallbackQuery, update: Update| {
                 let db = db.clone();
                 let config = config.clone();
+                let coordinator = coordinator.clone();
                 async move {
+                    let update_id = update.id.0 as i64;
+                    if let Ok(is_new) = coordinator.deduplicate_telegram_update(update_id).await {
+                        if !is_new {
+                            tracing::debug!(
+                                update_id,
+                                "ignoring duplicate telegram callback update"
+                            );
+                            return respond(());
+                        }
+                    }
                     handlers::handle_callback_query(bot, query, config, db).await?;
+                    let _ = coordinator.mark_telegram_update_processed(update_id).await;
                     respond(())
                 }
             }

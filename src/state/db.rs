@@ -45,6 +45,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0011_watch_names_sync_time",
         include_str!("../../migrations/0011_watch_names_sync_time.sql"),
     ),
+    (
+        "0012_retry_state_and_telegram_dedup",
+        include_str!("../../migrations/0012_retry_state_and_telegram_dedup.sql"),
+    ),
 ];
 
 #[derive(Clone)]
@@ -166,6 +170,7 @@ impl Database {
                 conn.pragma_update(None, "journal_mode", "WAL")?;
                 conn.pragma_update(None, "synchronous", "NORMAL")?;
                 conn.pragma_update(None, "busy_timeout", 5000)?;
+                conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
                 Ok::<(), rusqlite::Error>(())
             })
             .await?;
